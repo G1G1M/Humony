@@ -19,13 +19,17 @@
 - 서버/백엔드 없음 — 전 과정 온디바이스 처리가 기본 원칙
 - 외부 유료 API(Klangio 등)는 v1 범위에서 사용하지 않음
 
-## 현재 단계: Phase 2 — 조성 판별 + 화음 생성
+## 현재 단계: Phase 3 — 화음 발성 훈련 UI + 실시간 채점
 
-Phase 1(YIN 피치 검출 프로토타입)은 완료됨 — 상세 내용은 `docs/phase-1-yin-prototype.md` 참고.
+Phase 1(YIN 피치 검출)과 Phase 2(조성 판별 + 화음 생성 + 마이크 파이프라인 연결)는 완료됨 — 상세는 `docs/phase-1-yin-prototype.md`, `docs/CONCEPTS.md` 참고.
 
-Phase 2는 PRD 릴리즈 계획(`docs/prd.md` 6장) 기준 "멜로디 배열을 넣으면 화음 배열이 나오는 순수 함수" 단계다. `KeyDetector`(pitch-class 히스토그램 기반 조성 판별, Temperley 1999 key profile), `ChordGenerator`(diatonic 3도/5도 화음 생성) 구현 완료, `MelodySession`으로 마이크 파이프라인 연결까지 실기기 확인 완료 — Phase 2 종료.
+Phase 3 핵심 로직 구현 완료:
+- `TonePlayer`: 목표음/시작음(A4) 재생. 배음 합성 + envelope으로 음질 개선, 재생 중엔 마이크 무시(피드백 루프 방지)
+- `PitchScorer`: 목표 주파수 대비 사용자 음정을 cent 단위로 채점 (±35 cent 허용오차, 잠정값)
+- 동시 재생+채점 대신 **콜앤리스폰스**(재생 → 정지 → 마이크 재개 → 채점) 방식 채택 — `.playAndRecord` + `.measurement`에서는 AEC가 없어 동시 처리가 어려움
+- `ContentView`를 1.실시간 피치 → 2.조성 판별 → 3.화음 제안 → 4.따라 부르기 채점, 번호 붙은 섹션으로 재구성해 파이프라인 흐름이 화면에 드러나게 함
 
-Phase 3(화음 발성 훈련 UI + 실시간 채점) 착수: `TonePlayer`(AVAudioSourceNode 기반 사인파 재생)로 제안된 화음의 3도 음을 재생해서 귀로 검증하는 기능 구현 완료. AVAudioSession 카테고리를 `.record`에서 `.playAndRecord`로 변경(스피커 출력이 마이크로 다시 들어가는 피드백 가능성 있음 — `docs/CONCEPTS.md` 11절 참고). 다음은 목표음 대비 실시간 채점(편차 표시).
+시뮬레이터 빌드/테스트 통과, 실기기 재확인은 다음 세션 대기 중. 다음은 세션 종료 후 정확도 요약 + 자주 벗어난 화음 유형 리포트(PRD 3.2.3 마지막 AC).
 
 ## 코딩 컨벤션
 
