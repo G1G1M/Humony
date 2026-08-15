@@ -6,6 +6,8 @@ struct ContentView: View {
     @State private var harmonyText = ""
     @State private var isPlayingTone = false
     @State private var tonePlaybackTask: Task<Void, Never>?
+    @State private var isPlayingStartingNote = false
+    @State private var startingNoteTask: Task<Void, Never>?
 
     private let audioCapture = AudioCapture()
     private let melodySession = MelodySession()
@@ -13,6 +15,12 @@ struct ContentView: View {
 
     // 화음의 각 음을 순서대로 들려줄 때 한 음당 재생하는 길이.
     private let noteHoldDuration: Duration = .milliseconds(800)
+
+    // 아직 부른 멜로디가 없으면 조성/화음을 알 수 없으므로, 시작음은 조성과 무관한
+    // 표준 기준음 A4(440Hz) — NoteNameConverter가 쓰는 기준 주파수와 동일 — 로 고정한다.
+    // 무반주로 노래할 때 첫 음을 잡기 위해 짧게 불어주는 "피치 파이프"와 같은 역할.
+    private let startingNoteFrequency = 440.0
+    private let startingNoteDuration: Duration = .seconds(2)
 
     var body: some View {
         VStack(spacing: 16) {
@@ -26,14 +34,17 @@ struct ContentView: View {
             if !harmonyText.isEmpty {
                 Text(harmonyText).font(.subheadline)
             }
+            Button(isPlayingStartingNote ? "시작음 재생 중…" : "시작음 듣기 (A4)", action: playStartingNote)
+                .disabled(isPlayingTone || isPlayingStartingNote)
             Button(isPlayingTone ? "화음 정지" : "화음 듣기 (3도→5도)", action: toggleTonePlayback)
-                .disabled(melodySession.suggestedHarmony == nil && !isPlayingTone)
+                .disabled((melodySession.suggestedHarmony == nil && !isPlayingTone) || isPlayingStartingNote)
             Button("다시 시작", action: resetSession)
         }
         .padding()
         .onAppear(perform: startCapture)
         .onDisappear {
             tonePlaybackTask?.cancel()
+            startingNoteTask?.cancel()
             audioCapture.stop()
             tonePlayer.stop()
         }
@@ -42,9 +53,9 @@ struct ContentView: View {
     private func startCapture() {
         do {
             try audioCapture.start { result in
-                // 화음 재생 중엔 마이크 입력을 완전히 무시한다 — 안 그러면 스피커로 낸 화음 소리가
+                // 화음/시작음 재생 중엔 마이크 입력을 완전히 무시한다 — 안 그러면 스피커로 낸 소리가
                 // 다시 마이크로 들어가서 "새로 부른 음"으로 인식되고, 거기에 또 화음이 붙는 피드백 루프가 생긴다.
-                guard !isPlayingTone else { return }
+                guard !isPlayingTone, !isPlayingStartingNote else { return }
 
                 melodySession.record(result)
 
@@ -115,11 +126,36 @@ struct ContentView: View {
         }
     }
 
+    /// 노래를 시작하기 전 기준음(A4)을 잠깐 들려준다 — 무반주로 노래할 때 첫 음을 잡기 위한 "피치 파이프".
+    /// 화음 재생과 마찬가지로 재생 중엔 마이크를 무시해서 스피커 소리가 되먹임되는 걸 막는다.
+    private func playStartingNote() {
+        guard !isPlayingTone, !isPlayingStartingNote else { return }
+
+        do {
+            try tonePlayer.start()
+            tonePlayer.setFrequency(startingNoteFrequency)
+            isPlayingStartingNote = true
+        } catch {
+            statusText = "재생 실패: \(error.localizedDescription)"
+            return
+        }
+
+        startingNoteTask = Task {
+            try? await Task.sleep(for: startingNoteDuration)
+            guard !Task.isCancelled else { return }
+            tonePlayer.stop()
+            isPlayingStartingNote = false
+        }
+    }
+
     private func resetSession() {
         tonePlaybackTask?.cancel()
         tonePlaybackTask = nil
+        startingNoteTask?.cancel()
+        startingNoteTask = nil
         tonePlayer.stop()
         isPlayingTone = false
+        isPlayingStartingNote = false
         melodySession.reset()
         keyText = ""
         harmonyText = ""
