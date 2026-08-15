@@ -30,9 +30,11 @@ final class AudioCapture {
         resultHandler = onResult
 
         let session = AVAudioSession.sharedInstance()
+        // .playAndRecord: Phase 3부터 TonePlayer로 목표음을 동시에 재생해야 해서 .record에서 변경.
         // .measurement 모드는 AGC(자동 게인 조절)나 시스템 음성 향상 처리를 최소화해서
         // 원본 파형에 가까운 신호를 얻는다 — 피치 검출 정확도에 중요하다.
-        try session.setCategory(.record, mode: .measurement)
+        // .defaultToSpeaker: 목표음이 리시버(귀에 대는 작은 스피커)가 아니라 기기 스피커로 나오게 한다.
+        try session.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker])
         try session.setActive(true)
 
         let inputNode = engine.inputNode

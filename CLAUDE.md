@@ -23,7 +23,9 @@
 
 Phase 1(YIN 피치 검출 프로토타입)은 완료됨 — 상세 내용은 `docs/phase-1-yin-prototype.md` 참고.
 
-Phase 2는 PRD 릴리즈 계획(`docs/prd.md` 6장) 기준 "멜로디 배열을 넣으면 화음 배열이 나오는 순수 함수" 단계다. `KeyDetector`(pitch-class 히스토그램 기반 조성 판별, Temperley 1999 key profile), `ChordGenerator`(diatonic 3도/5도 화음 생성) 구현 완료, `MelodySession`으로 마이크 파이프라인 연결까지 실기기 확인 완료 — Phase 2 종료. 다음은 Phase 3(화음 발성 훈련 UI + 실시간 채점). UI/채점 로직은 아직 범위 밖이었으나 Phase 3부터 범위에 들어옴.
+Phase 2는 PRD 릴리즈 계획(`docs/prd.md` 6장) 기준 "멜로디 배열을 넣으면 화음 배열이 나오는 순수 함수" 단계다. `KeyDetector`(pitch-class 히스토그램 기반 조성 판별, Temperley 1999 key profile), `ChordGenerator`(diatonic 3도/5도 화음 생성) 구현 완료, `MelodySession`으로 마이크 파이프라인 연결까지 실기기 확인 완료 — Phase 2 종료.
+
+Phase 3(화음 발성 훈련 UI + 실시간 채점) 착수: `TonePlayer`(AVAudioSourceNode 기반 사인파 재생)로 제안된 화음의 3도 음을 재생해서 귀로 검증하는 기능 구현 완료. AVAudioSession 카테고리를 `.record`에서 `.playAndRecord`로 변경(스피커 출력이 마이크로 다시 들어가는 피드백 가능성 있음 — `docs/CONCEPTS.md` 11절 참고). 다음은 목표음 대비 실시간 채점(편차 표시).
 
 ## 코딩 컨벤션
 
