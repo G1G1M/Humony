@@ -42,6 +42,10 @@ struct ContentView: View {
     private func startCapture() {
         do {
             try audioCapture.start { result in
+                // 화음 재생 중엔 마이크 입력을 완전히 무시한다 — 안 그러면 스피커로 낸 화음 소리가
+                // 다시 마이크로 들어가서 "새로 부른 음"으로 인식되고, 거기에 또 화음이 붙는 피드백 루프가 생긴다.
+                guard !isPlayingTone else { return }
+
                 melodySession.record(result)
 
                 guard let result else {
@@ -68,8 +72,6 @@ struct ContentView: View {
                 } else {
                     harmonyText = ""
                 }
-                // 목표음 재생 중 주파수 갱신은 재생 루프(playHarmonyNotesInSequence)가 담당한다 —
-                // 여기서 매 프레임 직접 건드리면 재생 루프와 서로 값을 덮어써서 음이 지저분하게 흔들린다.
             }
         } catch {
             statusText = "마이크 시작 실패: \(error.localizedDescription)"
@@ -85,7 +87,9 @@ struct ContentView: View {
             return
         }
 
-        guard melodySession.suggestedHarmony != nil else { return }
+        // 버튼을 누른 시점의 화음으로 고정한다 — 재생 중엔 마이크를 무시하므로 어차피 갱신될 일은 없지만,
+        // "다시 시작을 누르기 전까지는 이 음에 대한 화음만 듣는다"는 의도를 코드로도 명확히 드러낸다.
+        guard let lockedHarmony = melodySession.suggestedHarmony, !lockedHarmony.isEmpty else { return }
 
         do {
             try tonePlayer.start()
@@ -96,17 +100,13 @@ struct ContentView: View {
         }
 
         tonePlaybackTask = Task {
-            await playHarmonyNotesInSequence()
+            await playHarmonyNotesInSequence(lockedHarmony)
         }
     }
 
-    /// 화음의 각 음(3도, 5도)을 하나씩 순서대로 들려주는 걸 정지할 때까지 반복한다.
-    /// 매 바퀴 melodySession.suggestedHarmony를 다시 읽어서, 그사이 멜로디가 바뀌었으면
-    /// 다음 바퀴부터 최신 화음을 재생한다.
-    private func playHarmonyNotesInSequence() async {
+    /// 고정된 화음의 각 음(3도, 5도)을 하나씩 순서대로 들려주는 걸 정지할 때까지 반복한다.
+    private func playHarmonyNotesInSequence(_ harmony: [ChordGenerator.HarmonyNote]) async {
         while !Task.isCancelled {
-            guard let harmony = melodySession.suggestedHarmony, !harmony.isEmpty else { break }
-
             for note in harmony {
                 guard !Task.isCancelled else { return }
                 tonePlayer.setFrequency(note.frequency)
