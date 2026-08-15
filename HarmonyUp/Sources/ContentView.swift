@@ -5,10 +5,14 @@ struct ContentView: View {
     @State private var keyText = ""
     @State private var harmonyText = ""
     @State private var isPlayingTone = false
+    @State private var tonePlaybackTask: Task<Void, Never>?
 
     private let audioCapture = AudioCapture()
     private let melodySession = MelodySession()
     private let tonePlayer = TonePlayer()
+
+    // 화음의 각 음을 순서대로 들려줄 때 한 음당 재생하는 길이.
+    private let noteHoldDuration: Duration = .milliseconds(800)
 
     var body: some View {
         VStack(spacing: 16) {
@@ -22,13 +26,14 @@ struct ContentView: View {
             if !harmonyText.isEmpty {
                 Text(harmonyText).font(.subheadline)
             }
-            Button(isPlayingTone ? "화음 정지" : "화음 듣기 (3도)", action: toggleTonePlayback)
+            Button(isPlayingTone ? "화음 정지" : "화음 듣기 (3도→5도)", action: toggleTonePlayback)
                 .disabled(melodySession.suggestedHarmony == nil && !isPlayingTone)
             Button("다시 시작", action: resetSession)
         }
         .padding()
         .onAppear(perform: startCapture)
         .onDisappear {
+            tonePlaybackTask?.cancel()
             audioCapture.stop()
             tonePlayer.stop()
         }
@@ -60,14 +65,11 @@ struct ContentView: View {
                         .map { NoteNameConverter.convert(frequency: $0.frequency)?.noteName ?? "?" }
                         .joined(separator: ", ")
                     harmonyText = "화음 제안: \(names)"
-
-                    // 재생 중이면 노래가 이어지는 동안에도 목표음이 최신 화음 제안을 계속 따라가게 한다.
-                    if isPlayingTone, let third = harmony.first(where: { $0.interval == .third }) {
-                        tonePlayer.setFrequency(third.frequency)
-                    }
                 } else {
                     harmonyText = ""
                 }
+                // 목표음 재생 중 주파수 갱신은 재생 루프(playHarmonyNotesInSequence)가 담당한다 —
+                // 여기서 매 프레임 직접 건드리면 재생 루프와 서로 값을 덮어써서 음이 지저분하게 흔들린다.
             }
         } catch {
             statusText = "마이크 시작 실패: \(error.localizedDescription)"
@@ -76,24 +78,48 @@ struct ContentView: View {
 
     private func toggleTonePlayback() {
         if isPlayingTone {
+            tonePlaybackTask?.cancel()
+            tonePlaybackTask = nil
             tonePlayer.stop()
             isPlayingTone = false
             return
         }
 
-        guard let harmony = melodySession.suggestedHarmony,
-              let third = harmony.first(where: { $0.interval == .third }) else { return }
+        guard melodySession.suggestedHarmony != nil else { return }
 
         do {
             try tonePlayer.start()
-            tonePlayer.setFrequency(third.frequency)
             isPlayingTone = true
         } catch {
             statusText = "재생 실패: \(error.localizedDescription)"
+            return
+        }
+
+        tonePlaybackTask = Task {
+            await playHarmonyNotesInSequence()
+        }
+    }
+
+    /// 화음의 각 음(3도, 5도)을 하나씩 순서대로 들려주는 걸 정지할 때까지 반복한다.
+    /// 매 바퀴 melodySession.suggestedHarmony를 다시 읽어서, 그사이 멜로디가 바뀌었으면
+    /// 다음 바퀴부터 최신 화음을 재생한다.
+    private func playHarmonyNotesInSequence() async {
+        while !Task.isCancelled {
+            guard let harmony = melodySession.suggestedHarmony, !harmony.isEmpty else { break }
+
+            for note in harmony {
+                guard !Task.isCancelled else { return }
+                tonePlayer.setFrequency(note.frequency)
+                try? await Task.sleep(for: noteHoldDuration)
+            }
         }
     }
 
     private func resetSession() {
+        tonePlaybackTask?.cancel()
+        tonePlaybackTask = nil
+        tonePlayer.stop()
+        isPlayingTone = false
         melodySession.reset()
         keyText = ""
         harmonyText = ""
