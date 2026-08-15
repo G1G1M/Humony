@@ -23,7 +23,7 @@
 
 Phase 1(YIN 피치 검출 프로토타입)은 완료됨 — 상세 내용은 `docs/phase-1-yin-prototype.md` 참고.
 
-Phase 2는 PRD 릴리즈 계획(`docs/prd.md` 6장) 기준 "멜로디 배열을 넣으면 화음 배열이 나오는 순수 함수" 단계다. `KeyDetector`(pitch-class 히스토그램 기반 조성 판별, Temperley 1999 key profile), `ChordGenerator`(diatonic 3도/5도 화음 생성) 구현 완료. UI, 채점 로직은 이 단계 범위가 아니다.
+Phase 2는 PRD 릴리즈 계획(`docs/prd.md` 6장) 기준 "멜로디 배열을 넣으면 화음 배열이 나오는 순수 함수" 단계다. `KeyDetector`(pitch-class 히스토그램 기반 조성 판별, Temperley 1999 key profile), `ChordGenerator`(diatonic 3도/5도 화음 생성) 구현 완료, `MelodySession`으로 마이크 파이프라인 연결까지 실기기 확인 완료 — Phase 2 종료. 다음은 Phase 3(화음 발성 훈련 UI + 실시간 채점). UI/채점 로직은 아직 범위 밖이었으나 Phase 3부터 범위에 들어옴.
 
 ## 코딩 컨벤션
 

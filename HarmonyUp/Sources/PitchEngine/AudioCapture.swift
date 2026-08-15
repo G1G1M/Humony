@@ -10,6 +10,8 @@ final class AudioCapture {
         let noteName: String
         let centsOffset: Double
         let confidence: Double
+        let pitchClass: Int      // KeyDetector 입력용 (옥타브 무관 음이름)
+        let frameDuration: Double  // 이 프레임이 실제로 몇 초 길이였는지 — MelodySession이 조성 판별 가중치로 사용
     }
 
     /// nil이면 이 프레임은 무음/저에너지로 판정되어 걸러졌다는 뜻.
@@ -79,7 +81,9 @@ final class AudioCapture {
             frequency: candidate.frequency,
             noteName: note.noteName,
             centsOffset: note.centsOffset,
-            confidence: candidate.confidence
+            confidence: candidate.confidence,
+            pitchClass: note.pitchClass,
+            frameDuration: Double(samples.count) / sampleRate
         )
     }
 }

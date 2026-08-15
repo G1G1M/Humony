@@ -2,15 +2,25 @@ import SwiftUI
 
 struct ContentView: View {
     @State private var statusText = "마이크 대기 중..."
+    @State private var keyText = ""
+    @State private var harmonyText = ""
+
     private let audioCapture = AudioCapture()
+    private let melodySession = MelodySession()
 
     var body: some View {
         VStack(spacing: 16) {
-            Text("HarmonyUp — Phase 1 프로토타입")
+            Text("HarmonyUp — Phase 1+2 프로토타입")
                 .font(.headline)
             Text(statusText)
                 .font(.system(.title, design: .monospaced))
-                .padding()
+            if !keyText.isEmpty {
+                Text(keyText).font(.subheadline)
+            }
+            if !harmonyText.isEmpty {
+                Text(harmonyText).font(.subheadline)
+            }
+            Button("다시 시작", action: resetSession)
         }
         .padding()
         .onAppear(perform: startCapture)
@@ -20,19 +30,42 @@ struct ContentView: View {
     private func startCapture() {
         do {
             try audioCapture.start { result in
+                melodySession.record(result)
+
                 guard let result else {
                     statusText = "..."
                     return
                 }
+
                 let line = String(
                     format: "%@  %.1fHz  (%+.1f cent, 신뢰도 %.2f)",
                     result.noteName, result.frequency, result.centsOffset, result.confidence
                 )
                 statusText = line
                 print(line) // Phase 1 완료 조건: 감지된 결과를 콘솔에 실시간 출력
+
+                if let key = melodySession.detectedKey {
+                    keyText = String(format: "조성: %@ (확신도 %.2f)", key.name, key.confidence)
+                }
+
+                if let harmony = melodySession.suggestedHarmony {
+                    let names = harmony
+                        .map { NoteNameConverter.convert(frequency: $0.frequency)?.noteName ?? "?" }
+                        .joined(separator: ", ")
+                    harmonyText = "화음 제안: \(names)"
+                } else {
+                    harmonyText = ""
+                }
             }
         } catch {
             statusText = "마이크 시작 실패: \(error.localizedDescription)"
         }
+    }
+
+    private func resetSession() {
+        melodySession.reset()
+        keyText = ""
+        harmonyText = ""
+        statusText = "..."
     }
 }
