@@ -886,3 +886,27 @@ SwiftUI에서 `if` 조건으로 뷰가 나타나거나 사라지는 걸 애니�
 ### 테스트: C장조 아르페지오
 
 "도-미-솔-도"(C4-E4-G4-C5)를 이어붙인 합성 버퍼로 조성 판별부터 화음 생성, `MelodyStep` 변환까지 한 번에 검증했다. 세 음(도/미/솔)이 각각 으뜸음/장3도/완전5도라 Temperley 프로파일에서 가장 높은 가중치를 가진 자리들이라, 짧은 아르페지오만으로도 C장조로 뚜렷하게 판별된다 — 별도 후처리(온음계 스냅 등) 없이도 조성 판별기가 원래 하려던 일을 그대로 잘한다는 걸 확인한 것.
+
+---
+
+## 38. "빠른 녹음" 진입 UI(`QuickRecordView`) — 배치 분석 결과를 실시간 캡처와 같은 방식으로 `MelodySession`에 되먹인다
+
+### 왜 `RecordingAnalyzer.melodySteps(from:)`를 그대로 쓰지 않았는가
+
+37절에서 만든 `RecordingAnalyzer.melodySteps(from:)`는 `MelodyStep` 배열을 바로 만들어주지만, 그것만 화면에 꽂으면 `melodySession`(조성/화음 판단의 실제 출처, `detectedKey`/`lastNote`/`suggestedHarmony`를 갖고 있음)은 여전히 텅 빈 상태로 남는다. 그러면 "내 목소리로 화음"(`pitchRatio(toInterval:)`가 `melodySession.lastNote`/`.suggestedHarmony`를 읽음)이나 채점(`startScoringMelodyStep`이 `melodySession.detectedKey`를 읽음) 같은 기존 기능이 전부 새로 손봐야 하는 대상이 돼버린다.
+
+그래서 대신, 멜로디 모드에서 잘못 잡힌 음을 사용자가 고칠 때 이미 쓰고 있던 패턴(`correctMelodyStep(at:toPitchClass:)` — 합성 `AudioCapture.DetectionResult`를 만들어 `melodySession.correctNote(at:to:)`에 넘기는 것)을 그대로 가져다, `MelodySegmenter`가 잘라낸 음표들을 순서대로 합성 `DetectionResult`로 만들어 `melodySession.record(...)`에 하나씩 먹인다. 이렇게 하면 `melodySession`의 상태가 실시간 캡처 경로와 완전히 같은 방식으로 채워지고, "내 목소리로 화음"/채점 관련 코드는 **단 한 줄도 손대지 않고** 빠른 녹음 결과에 그대로 작동한다.
+
+### 두 단계로 나눈 이유 — 조성은 "다 듣고 나서" 한 번에
+
+`melodySession.record(...)`를 그냥 순서대로 부르기만 하면, 각 스텝의 화면 표시용 화음은 "그 시점까지 누적된 조성 추측"을 기준으로 계산된다(실시간 캡처가 원래 이렇게 동작한다 — 아직 다 안 들은 상태니까 최선의 추측일 뿐). 그런데 빠른 녹음은 애초에 녹음이 다 끝난 뒤에 분석하는 배치 방식이라, 이미 "최종 조성"을 알고 있다. 그래서 1단계(`melodySession.record` 반복)로 `melodySession`의 내부 상태(lastNote 등)만 채우고, 화면에 보여줄 스텝별 화음은 2단계에서 최종 `detectedKey` 하나로 전부 다시 계산한다 — `correctMelodyStep`이 음 하나를 고친 뒤 모든 스텝의 화음을 새 조성으로 다시 계산하는 것과 정확히 같은 이유다(앞부분 스텝의 화음이 뒤늦게 밝혀진 진짜 조성과 어긋나 보이는 걸 막는다).
+
+### 녹음 상태 머신과 마이크 파이프라인 공유
+
+`QuickRecordView`는 상태(대기→녹음 중→분석 중→결과/에러)만 받아서 보여주는 순수 표시 컴포넌트이고, 실제 마이크 제어는 `PracticeView`가 기존 `audioCapture`/`beginCapturingIfNeeded()`를 그대로 재사용한다. 다만 콜백 안에서 `sessionMode == .quickRecord && quickRecordPhase == .recording`일 때만 프레임을 `quickRecordBuffer`에 쌓고 곧장 리턴하도록 분기했다 — 단음/멜로디용 실시간 확정 로직(음 잠금, `recentVoiceBuffer` 롤링 누적)과 완전히 분리하기 위해서다. 녹음이 끝난 뒤 "따라 부르기 채점"으로 마이크가 다시 켜지는 경우(`startScoringMelodyStep`도 내부적으로 `beginCapturingIfNeeded()`를 부른다)엔 `quickRecordPhase`가 더 이상 `.recording`이 아니므로 이 분기를 타지 않고, 클로저 맨 아래의 채점 로직(모든 모드 공용)으로 곧장 흘러간다 — 마이크 시작 경로 하나를 세 모드가 그대로 나눠 쓰는 셈이다.
+
+녹음 30초 상한은 프레임 콜백 안에서 `quickRecordBuffer`가 쌓일 때마다 직접 검사해서, 다 차면 자동으로 `stopQuickRecording()`을 부르는 방식으로 구현했다 — 별도 타이머 없이 "이미 매 프레임 불리는 콜백"에 검사 한 줄만 추가한 것.
+
+### 분석은 여전히 무거운 계산 — `Task`로 메인 스레드 비우기
+
+`RecordingAnalyzer.analyze`는 내부적으로 녹음 전체를 2048샘플 윈도우로(75% 겹치게) 훑으며 YIN을 반복 호출한다 — `recordAndHarmonizeVoice`가 WSOLA 피치시프트를 `Task`로 감싸 메인 스레드를 막지 않았던 것(25절)과 같은 이유로, "녹음 그만"을 누른 직후의 분석도 `Task { }`로 감쌌다. 시뮬레이터 기준 짧은 녹음(수 초)은 체감상 즉시 끝나지만, 30초에 가까운 녹음은 윈도우 수가 그만큼 늘어나므로 계속 백그라운드로 미루는 게 안전하다.

@@ -10,11 +10,20 @@ struct PracticeView: View {
     @Environment(\.modelContext) private var modelContext
 
     enum SessionMode: String, CaseIterable, Identifiable {
+        case quickRecord = "빠른 녹음"
         case single = "단음"
         case melody = "멜로디"
         var id: String { rawValue }
     }
-    @State private var sessionMode: SessionMode = .single
+    @State private var sessionMode: SessionMode = .quickRecord
+
+    // 빠른 녹음(quickRecord) 전용 상태 — 단음/멜로디처럼 프레임마다 바로 확정하지 않고,
+    // 녹음 전체를 모았다가 멈춘 뒤 한 번에 RecordingAnalyzer로 분석한다.
+    @State private var quickRecordPhase: QuickRecordView.Phase = .idle
+    @State private var quickRecordBuffer: [Float] = []
+    @State private var quickRecordSampleRate: Double = 44100
+    // WSOLA 피치시프트 비용(다중 음 화음 만들 때)과 결과 악보의 가로 스크롤 UX를 고려한 상한.
+    private let quickRecordMaxDuration: Double = 30.0
 
     // 예전엔 화면이 뜨자마자 자동으로 마이크를 켰는데, 사용자가 원하는 타이밍에
     // 직접 "측정 시작"을 눌러야 캡처가 시작되도록 바꿨다 — 준비되기 전에 소리가 잡히는 걸 방지.
@@ -182,6 +191,16 @@ struct PracticeView: View {
                     HarmonyCard("실시간 피치", systemImage: "waveform") {
                         if micPermissionDenied {
                             micPermissionDeniedContent
+                        } else if sessionMode == .quickRecord {
+                            QuickRecordView(
+                                phase: quickRecordPhase,
+                                elapsed: Double(quickRecordBuffer.count) / quickRecordSampleRate,
+                                maxDuration: quickRecordMaxDuration,
+                                waveformSamples: quickRecordBuffer,
+                                onStart: startQuickRecording,
+                                onStop: stopQuickRecording,
+                                onReset: resetSession
+                            )
                         } else {
                             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
                                 Button(action: toggleCapture) {
@@ -230,7 +249,7 @@ struct PracticeView: View {
                                 Text(keyText)
                                     .font(Theme.Typography.subheadline)
 
-                                if sessionMode == .melody {
+                                if sessionMode == .melody || sessionMode == .quickRecord {
                                     if melodySteps.isEmpty {
                                         Text("아직 잡은 음 없음")
                                             .foregroundStyle(.secondary)
@@ -432,6 +451,8 @@ struct PracticeView: View {
             return "🎯 채점 중 — 목표음을 따라 부르는 동안엔 새 멜로디 음을 잡지 않습니다"
         }
         switch sessionMode {
+        case .quickRecord:
+            return "" // 이 텍스트는 quickRecord 모드의 캡처 카드(QuickRecordView)에서는 아예 쓰이지 않는다
         case .single:
             return hasCapturedNote ? "🔒 음 고정됨 — 다시 시작을 눌러야 새로 잡습니다" : "음을 안정적으로 내면 자동으로 잡습니다"
         case .melody:
@@ -544,17 +565,35 @@ struct PracticeView: View {
                 // 다시 마이크로 들어가서 "새로 부른 음"으로 인식되고, 거기에 또 화음이 붙는 피드백 루프가 생긴다.
                 guard !isPlaybackBusy else { return }
 
+                // 빠른 녹음 중엔 이 프레임을 quickRecordBuffer에 쌓기만 하고 아래(단음/멜로디용)
+                // 실시간 확정 로직은 전혀 타지 않는다 — 빠른 녹음은 "다 부른 뒤에 한 번에" 분석하는
+                // 별도 배치 경로라서 실시간 확정 로직과 섞이면 안 된다. 녹음이 끝난 뒤 "따라 부르기
+                // 채점"으로 마이크가 다시 켜질 때는 quickRecordPhase가 더 이상 .recording이 아니므로
+                // 이 분기를 건너뛰고 곧장 맨 아래 채점 로직으로 간다.
+                if sessionMode == .quickRecord && quickRecordPhase == .recording {
+                    quickRecordBuffer.append(contentsOf: rawSamples)
+                    quickRecordSampleRate = rawSampleRate
+                    if Double(quickRecordBuffer.count) / rawSampleRate >= quickRecordMaxDuration {
+                        stopQuickRecording()
+                    }
+                    return
+                }
+
                 // "내 목소리로 화음 만들기"용 롤링 버퍼 — result(피치 검출 성공 여부)와 무관하게
                 // 매 프레임 원본을 그대로 담는다. 예전엔 result가 있을 때만(=VAD+YIN이 성공한
                 // 프레임만) 담아서, 음과 음 사이 숨소리/발음 전환 같은 짧은 무음 구간이 통째로
                 // 빠져 여러 음이 이어붙을 때 뚝뚝 끊기듯 들리고, 아주 짧거나 조용한 음은 그
                 // 프레임 전체가 걸러져 화음에서 통째로 빠지는 문제(예: 6음인데 5음만 들림)가
                 // 있었다. 원본을 그대로 이어붙이면 실제 부른 타이밍/이음매가 그대로 보존된다.
-                recentVoiceBuffer.append(contentsOf: rawSamples)
-                recentVoiceSampleRate = rawSampleRate
-                let maxSamples = Int(recentVoiceBufferMaxDuration * rawSampleRate)
-                if recentVoiceBuffer.count > maxSamples {
-                    recentVoiceBuffer.removeFirst(recentVoiceBuffer.count - maxSamples)
+                // quickRecord 모드에서는(분석 결과가 이미 recentVoiceBuffer를 전체 녹음으로 채워둔
+                // 상태라) 여기서 롤링 버퍼로 덮어쓰지 않는다.
+                if sessionMode != .quickRecord {
+                    recentVoiceBuffer.append(contentsOf: rawSamples)
+                    recentVoiceSampleRate = rawSampleRate
+                    let maxSamples = Int(recentVoiceBufferMaxDuration * rawSampleRate)
+                    if recentVoiceBuffer.count > maxSamples {
+                        recentVoiceBuffer.removeFirst(recentVoiceBuffer.count - maxSamples)
+                    }
                 }
 
                 guard let result else {
@@ -577,7 +616,11 @@ struct PracticeView: View {
                 // 채점 중(activeScoringInterval != nil)에도 멜로디 모드에서 캡처를 멈춘다 —
                 // 안 그러면 목표음을 따라 부르는 소리 자체가 "새 멜로디 음"으로 잡혀서 조성/화음이
                 // 계속 바뀌는 문제가 있었다.
-                let shouldEvaluateCapture = activeScoringInterval == nil
+                // quickRecord 모드에서 채점 화면으로 재진입했을 때는(마이크가 다시 켜지지만) 이
+                // 실시간 음 확정 로직(단음/멜로디 전용)을 건너뛴다 — melodySession/melodySteps는
+                // 이미 RecordingAnalyzer 결과로 채워져 있고, 지금 마이크가 켜진 목적은 아래 채점뿐이다.
+                let shouldEvaluateCapture = sessionMode != .quickRecord
+                    && activeScoringInterval == nil
                     && (sessionMode == .melody || !hasCapturedNote)
 
                 if shouldEvaluateCapture {
@@ -636,6 +679,91 @@ struct PracticeView: View {
         } catch {
             statusText = "마이크 시작 실패: \(error.localizedDescription)"
         }
+    }
+
+    /// "녹음 시작" 버튼 — 단음/멜로디의 "측정 시작"과 달리 켜자마자 확정 로직을 돌리지 않고,
+    /// 사용자가 "녹음 그만"을 누를 때까지 quickRecordBuffer에 원본을 그대로 모으기만 한다.
+    /// 마이크 자체는 beginCapturingIfNeeded()가 켜는 같은 audioCapture를 그대로 재사용한다 —
+    /// 그 안의 클로저가 sessionMode/quickRecordPhase를 보고 알아서 이 모드용 분기를 탄다.
+    private func startQuickRecording() {
+        quickRecordBuffer = []
+        quickRecordPhase = .recording
+        beginCapturingIfNeeded()
+    }
+
+    /// "녹음 그만" 버튼(또는 30초 상한 도달 시 자동 호출) — 마이크를 멈추고, 지금까지 모은 녹음
+    /// 전체를 RecordingAnalyzer로 한 번에 분석한다. YIN을 윈도우마다 돌리는 무거운 계산이라
+    /// (recordAndHarmonizeVoice와 같은 이유로) Task로 감싸서 메인 스레드가 멈추지 않게 한다.
+    private func stopQuickRecording() {
+        guard quickRecordPhase == .recording else { return }
+        audioCapture.stop()
+        isCapturing = false
+        quickRecordPhase = .analyzing
+
+        let samples = quickRecordBuffer
+        let rate = quickRecordSampleRate
+        Task {
+            let analyzed = RecordingAnalyzer.analyze(recordingSamples: samples, sampleRate: rate)
+            applyQuickRecordResult(analyzed)
+        }
+    }
+
+    /// RecordingAnalyzer의 배치 분석 결과를, 기존 단음/멜로디 UI가 그대로 소비할 수 있는 상태로 반영한다.
+    private func applyQuickRecordResult(_ analyzed: RecordingAnalyzer.AnalyzedRecording) {
+        guard !analyzed.notes.isEmpty else {
+            quickRecordPhase = .error("노래가 인식되지 않았어요 — 더 또렷하게 불러서 다시 녹음해주세요")
+            return
+        }
+
+        melodySession.reset()
+
+        // 1단계: 세그멘테이션된 음을 순서대로 melodySession에 그대로 먹인다 — correctMelodyStep(at:toPitchClass:)가
+        // 수정 하나를 반영할 때 쓰는 것과 같은 합성 DetectionResult 패턴이다. 이렇게 하면 melodySession의
+        // detectedKey/lastNote/suggestedHarmony가 실시간 캡처 경로와 완전히 같은 방식으로 채워져서, 이후
+        // "내 목소리로 화음"/채점 로직(pitchRatio, toggleScoring 등)을 전혀 손대지 않고 그대로 재사용할 수 있다.
+        for note in analyzed.notes {
+            let frequency = NoteNameConverter.frequency(forMIDINote: note.midiNote)
+            guard let converted = NoteNameConverter.convert(frequency: frequency) else { continue }
+            melodySession.record(AudioCapture.DetectionResult(
+                frequency: frequency,
+                noteName: converted.noteName,
+                centsOffset: 0,
+                confidence: note.averageConfidence,
+                pitchClass: converted.pitchClass,
+                frameDuration: note.duration,
+                samples: [],
+                sampleRate: analyzed.sampleRate
+            ))
+        }
+
+        guard let key = melodySession.detectedKey else {
+            quickRecordPhase = .error("조성을 판별하지 못했어요 — 조금 더 길게 불러서 다시 녹음해주세요")
+            return
+        }
+        keyText = String(format: "조성: %@ (확신도 %.2f)", key.name, key.confidence)
+
+        // 2단계: 화면에 보여줄 스텝별 화음은 correctMelodyStep이 수정 후 하는 것과 같은 이유로,
+        // 녹음 전체를 다 보고 확정한 "최종" 조성 기준으로 한 번에 다시 계산한다 — 실시간 캡처처럼
+        // "그때까지 들은 것만으로 추측한 조성"을 스텝마다 다르게 쓰면, 이미 다 끝난 녹음을 배치로
+        // 분석하는 이 경로에서는 앞부분 스텝의 화음이 뒤늦게 밝혀진 진짜 조성과 어긋나 보일 수 있다.
+        melodySteps = analyzed.notes.map { note in
+            let frequency = NoteNameConverter.frequency(forMIDINote: note.midiNote)
+            let noteName = NoteNameConverter.convert(frequency: frequency)?.noteName ?? "?"
+            let harmonyNames = ChordGenerator.generateHarmony(melodyFrequency: frequency, key: key).map { harmony in
+                harmony
+                    .map { NoteNameConverter.convert(frequency: $0.frequency)?.noteName ?? "?" }
+                    .joined(separator: ", ")
+            }
+            return MelodyStep(noteName: noteName, midiNote: note.midiNote, harmonyNames: harmonyNames, onsetTime: note.onsetTime, duration: note.duration)
+        }
+
+        // "내 목소리로 화음"/채점 카드가 그대로 재사용하는 recentVoiceBuffer를 녹음 전체로 채운다 —
+        // 이후 3도/5도/전체 화음 버튼을 누르면(mode != .single이라 트리밍 없이) 이 전체 녹음이 피치시프트된다.
+        recentVoiceBuffer = analyzed.voiceSamples
+        recentVoiceSampleRate = analyzed.sampleRate
+
+        hasCapturedNote = true
+        quickRecordPhase = .result(noteCount: analyzed.notes.count)
     }
 
     private func toggleTonePlayback() {
@@ -1037,5 +1165,7 @@ struct PracticeView: View {
         keyText = ""
         harmonyText = ""
         statusText = "..."
+        quickRecordPhase = .idle
+        quickRecordBuffer = []
     }
 }

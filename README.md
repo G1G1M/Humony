@@ -39,7 +39,10 @@
 - [x] **녹음 파형 시각화**: `WaveformView` 추가 — 측정 중일 때 실시간 피치 카드에 마이크 입력을 세로 막대 파형으로 표시(구간별 피크 다운샘플링 + 화면 내 최댓값 기준 정규화). 캡처 카드/목소리 화음 카드의 정보 그룹 간격 정리(설명을 버튼 위로 이동 등). 레퍼런스 이미지(음성 녹음 앱들) 참고, 기존 보라색 계열 틴트 유지
 - [x] **버튼 아이콘 다듬기**: 측정 시작/중지, 화음 듣기/정지, 채점/중지, 다시 시작 등 상태를 표현하는 버튼에 SF Symbol 아이콘 추가(상태 전환 시 아이콘도 함께 바뀜 — 예: `mic.fill`↔`stop.fill`). 짧은 라벨 버튼(3도/5도 등)은 의미 있는 아이콘이 없어 제외. UI/UX 리디자인 1차 마무리
 - [x] **카드 등장 애니메이션 + 자동 스크롤**: 화면을 단계별로 나누는 대신, 카드가 조건부로 나타날 때 `.transition`(페이드+위에서 이동)으로 애니메이션 처리하고 `ScrollViewReader`로 새로 나타난 카드까지 자동 스크롤
-- [ ] **"빠른 녹음 → 악보 → 연습" 전체 로드맵 진행 중 (Phase 2/9)**: Phase 1 — `MelodySegmenter` 추가(녹음 전체를 배치로 분석해 음표로 잘라내는 신규 컴포넌트, 유닛테스트 7개). Phase 2 — `RecordingAnalyzer` 추가(`MelodySegmenter` 출력을 기존 `KeyDetector`/`ChordGenerator`에 연결하고, 그 결과를 기존 `MelodyStep` 배열로 변환 — 다음 단계부터 기존 멜로디 모드 UI를 거의 그대로 재사용 가능). 유닛테스트 3개 추가. 둘 다 UI 없는 순수 로직 단계라 실기기 확인은 다음 단계(빠른 녹음 UI)에서 진행
+- [x] **"빠른 녹음 → 악보 → 연습" 로드맵 Phase 1 — `MelodySegmenter`**: 녹음 전체를 배치로 분석해 음표(음높이+시작시간+길이)로 잘라내는 신규 컴포넌트(윈도우 분석→디바운스→런랭스 인코딩). 유닛테스트 7개
+- [x] **로드맵 Phase 2 — `RecordingAnalyzer`**: `MelodySegmenter` 출력을 기존 `KeyDetector`/`ChordGenerator`에 연결하고, 그 결과를 기존 `MelodyStep` 배열로 변환. 유닛테스트 3개
+- [x] **로드맵 Phase 3 — "빠른 녹음" 모드 UI(`QuickRecordView`)**: 대기→녹음 중→분석 중→결과 상태머신 + 녹음 전체 파형 표시(최대 30초). "녹음 그만"을 누르면 `RecordingAnalyzer`로 배치 분석하고, 그 결과를 `correctMelodyStep`과 같은 합성 `DetectionResult` 패턴으로 `melodySession`에 되먹여서 — 기존 조성+화음 카드/`MelodyStepRow` 목록/"내 목소리로 화음"/따라 부르기 채점을 전혀 손대지 않고 그대로 재사용. `SessionMode`에 `.quickRecord` 추가(기본 모드로 설정, 단음/멜로디는 유지). 시뮬레이터 빌드+테스트 확인, 실기기 확인은 기기 연결 후 진행 예정
+- [ ] **로드맵 Phase 4~9**: 다중 트랙 동시 재생(성부별 뮤트), 악보 렌더링(`StaffGeometry`/`SheetMusicView`), 성부 표시/재생 공유 토글, 카라오케 재생헤드 동기화, 연습 탭 최종 통합, 다듬기
 
 ## 구성 요소 (`HarmonyUp/Sources/PitchEngine/`)
 
@@ -61,6 +64,8 @@
 | `VoiceClipPlayer` | 임의의 오디오 버퍼([Float])를 한 번 재생 |
 | `AudioGain` | 재생 전 샘플 자체를 스케일업하는 피크 정규화 + 여러 트랙 믹싱 |
 | `VoiceSegmentTrimmer` | 롤링 버퍼에서 목표음과 가까운 최근의 안정된 구간만 잘라내기 |
+| `MelodySegmenter` | 녹음 전체를 배치로 분석해 음표(음높이+시작시간+길이) 목록으로 잘라내기 |
+| `RecordingAnalyzer` | `MelodySegmenter` 출력을 `KeyDetector`/`ChordGenerator`에 연결해 기존 `MelodyStep` 배열로 변환 |
 
 ## 개발
 
