@@ -83,10 +83,10 @@ struct ContentView: View {
                 flowSection(step: 4, title: "따라 부르기 채점") {
                     VStack(alignment: .leading, spacing: 12) {
                         if scoringTarget == nil {
-                            Text("채점 대기 중 — 화음을 들은 뒤 채점을 시작하세요")
+                            Text("채점 대기 중 — 아래에서 3도/5도 중 채점할 음을 골라 시작하세요")
                                 .foregroundStyle(.secondary)
                         } else {
-                            Text("목표음: \(scoringTargetNoteName)")
+                            Text("목표음: \(scoringTargetNoteName) (\(scoringTarget?.interval == .third ? "3도" : "5도"))")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
 
@@ -105,9 +105,18 @@ struct ContentView: View {
                             }
                         }
 
-                        Button(scoringTarget == nil ? "채점 시작 (3도 기준)" : "채점 중지", action: toggleScoring)
-                            .buttonStyle(.bordered)
-                            .disabled(melodySession.suggestedHarmony == nil && scoringTarget == nil)
+                        HStack {
+                            Button(
+                                scoringTarget?.interval == .third ? "3도 채점 중지" : "3도 채점",
+                                action: { toggleScoring(interval: .third) }
+                            )
+                            Button(
+                                scoringTarget?.interval == .fifth ? "5도 채점 중지" : "5도 채점",
+                                action: { toggleScoring(interval: .fifth) }
+                            )
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(melodySession.suggestedHarmony == nil)
                     }
                 }
 
@@ -262,20 +271,22 @@ struct ContentView: View {
         }
     }
 
-    /// 화음 3도 음을 채점 목표로 고정한다 — "다시 시작"을 누르기 전까지 같은 목표로 계속 채점한다.
-    private func toggleScoring() {
-        if scoringTarget != nil {
-            scoringTarget = nil
+    /// 화음의 3도 또는 5도 음을 채점 목표로 고정한다. 같은 걸 다시 누르면 중지되고,
+    /// 채점 중에 다른 쪽을 누르면 멈추지 않고 그쪽 목표로 바로 전환된다 — 3도/5도를
+    /// 번갈아 연습할 때 매번 멈췄다 다시 시작할 필요가 없게.
+    private func toggleScoring(interval: ChordGenerator.Interval) {
+        if let scoringTarget, scoringTarget.interval == interval {
+            self.scoringTarget = nil
             scoringTargetNoteName = ""
             currentScore = nil
             return
         }
 
         guard let harmony = melodySession.suggestedHarmony,
-              let third = harmony.first(where: { $0.interval == .third }) else { return }
-        scoringTarget = third
-        scoringTargetNoteName = NoteNameConverter.convert(frequency: third.frequency)?.noteName ?? "?"
-        pitchSmoother.reset() // 이전 채점에서 쓰던 값이 새 채점에 섞여 들어가지 않도록
+              let target = harmony.first(where: { $0.interval == interval }) else { return }
+        scoringTarget = target
+        scoringTargetNoteName = NoteNameConverter.convert(frequency: target.frequency)?.noteName ?? "?"
+        pitchSmoother.reset() // 이전 채점(또는 다른 음)에서 쓰던 값이 새 채점에 섞여 들어가지 않도록
     }
 
     private func resetSession() {
