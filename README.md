@@ -41,7 +41,8 @@
 - [x] **카드 등장 애니메이션 + 자동 스크롤**: 화면을 단계별로 나누는 대신, 카드가 조건부로 나타날 때 `.transition`(페이드+위에서 이동)으로 애니메이션 처리하고 `ScrollViewReader`로 새로 나타난 카드까지 자동 스크롤
 - [x] **"빠른 녹음 → 악보 → 연습" 로드맵 Phase 1 — `MelodySegmenter`**: 녹음 전체를 배치로 분석해 음표(음높이+시작시간+길이)로 잘라내는 신규 컴포넌트(윈도우 분석→디바운스→런랭스 인코딩). 유닛테스트 7개
 - [x] **로드맵 Phase 2 — `RecordingAnalyzer`**: `MelodySegmenter` 출력을 기존 `KeyDetector`/`ChordGenerator`에 연결하고, 그 결과를 기존 `MelodyStep` 배열로 변환. 유닛테스트 3개
-- [x] **로드맵 Phase 3 — "빠른 녹음" 모드 UI(`QuickRecordView`)**: 대기→녹음 중→분석 중→결과 상태머신 + 녹음 전체 파형 표시(최대 30초). "녹음 그만"을 누르면 `RecordingAnalyzer`로 배치 분석하고, 그 결과를 `correctMelodyStep`과 같은 합성 `DetectionResult` 패턴으로 `melodySession`에 되먹여서 — 기존 조성+화음 카드/`MelodyStepRow` 목록/"내 목소리로 화음"/따라 부르기 채점을 전혀 손대지 않고 그대로 재사용. `SessionMode`에 `.quickRecord` 추가(기본 모드로 설정, 단음/멜로디는 유지). 시뮬레이터 빌드+테스트 확인, 실기기 확인은 기기 연결 후 진행 예정
+- [x] **로드맵 Phase 3 — "빠른 녹음" 모드 UI(`QuickRecordView`)**: 대기→녹음 중→분석 중→결과 상태머신 + 녹음 전체 파형 표시(최대 30초). "녹음 그만"을 누르면 `RecordingAnalyzer`로 배치 분석하고, 그 결과를 `correctMelodyStep`과 같은 합성 `DetectionResult` 패턴으로 `melodySession`에 되먹여서 — 기존 조성+화음 카드/`MelodyStepRow` 목록/"내 목소리로 화음"/따라 부르기 채점을 전혀 손대지 않고 그대로 재사용. `SessionMode`에 `.quickRecord` 추가(기본 모드로 설정, 단음/멜로디는 유지). 실기기(Ian) 설치+실행 확인 완료
+- [x] **빠른 녹음 화면 비주얼 리디자인**: 음성 녹음 앱 레퍼런스를 참고해, 대기/녹음 중 상태를 `HarmonyCard` 없이 화면 주인공이 되는 히어로 레이아웃으로 재구성 — 큰 원형 마이크 버튼(`Theme.tint` 채움+헤일로 링)+큰 소개 문구(`Theme.Typography.largeTitleBold` 신규 토큰)+안내 캡션만 남기고, 녹음 중엔 파형 카드+경과시간+정지/취소 버튼. 분석 중/결과/에러 상태는 `QuickRecordView`가 스스로 카드형 컨테이너를 그려서 붕 뜨지 않게 함. 화면 하단 전역 "다시 시작" 버튼은 빠른 녹음 모드에서 상태별 버튼과 중복돼 숨김. 시뮬레이터 라이트/다크 모드 스크린샷 확인, 유닛테스트 79개 통과
 - [ ] **로드맵 Phase 4~9**: 다중 트랙 동시 재생(성부별 뮤트), 악보 렌더링(`StaffGeometry`/`SheetMusicView`), 성부 표시/재생 공유 토글, 카라오케 재생헤드 동기화, 연습 탭 최종 통합, 다듬기
 
 ## 구성 요소 (`HarmonyUp/Sources/PitchEngine/`)

@@ -45,6 +45,9 @@ extension Theme {
     /// 쓰는 값)는 자릿수가 흔들리지 않아야 해서 예외적으로 시스템 모노스페이스 폰트를 그대로
     /// 쓴다 — 그 외 나머지 텍스트는 전부 여기서 정의한 Pretendard 폰트를 쓴다.
     enum Typography {
+        // "빠른 녹음" 대기 화면처럼 화면 하나를 텍스트 한 줄이 주도하는 히어로 순간 전용 —
+        // 카드 제목(title3Bold)보다 한 단계 더 큰, 유일한 largeTitle 크기 토큰.
+        static let largeTitleBold = font(.largeTitle, weight: .bold)
         static let title3Bold = font(.title3, weight: .bold)
         static let headline = font(.headline, weight: .semibold)
         static let subheadline = font(.subheadline, weight: .regular)

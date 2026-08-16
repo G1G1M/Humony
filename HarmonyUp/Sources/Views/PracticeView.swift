@@ -185,60 +185,73 @@ struct PracticeView: View {
                         .pickerStyle(.segmented)
                         .onChange(of: sessionMode) { _, _ in resetSession() } // 모드가 바뀌면 상태가 섞이지 않게 항상 리셋
 
-                    // 캡처: 항상 보이는 유일한 카드 — 여기서부터 흐름이 시작된다.
-                    // 정보를 한 덩어리로 몰아넣지 않고 세 그룹(측정 버튼 -> 파형+판독값 ->
-                    // 시작음 컨트롤)으로 나누고, 그룹 사이엔 카드 안 다른 요소보다 넓은 간격을 준다.
-                    HarmonyCard("실시간 피치", systemImage: "waveform") {
-                        if micPermissionDenied {
-                            micPermissionDeniedContent
-                        } else if sessionMode == .quickRecord {
-                            QuickRecordView(
-                                phase: quickRecordPhase,
-                                elapsed: Double(quickRecordBuffer.count) / quickRecordSampleRate,
-                                maxDuration: quickRecordMaxDuration,
-                                waveformSamples: quickRecordBuffer,
-                                onStart: startQuickRecording,
-                                onStop: stopQuickRecording,
-                                onReset: resetSession
-                            )
-                        } else {
-                            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                                Button(action: toggleCapture) {
-                                    Label(isCapturing ? "측정 중지" : "측정 시작", systemImage: isCapturing ? "stop.fill" : "mic.fill")
-                                }
-                                .buttonStyle(.borderedProminent)
+                    // 캡처 영역 — 여기서부터 흐름이 시작된다. 빠른 녹음은 이제 연습 탭의 기본
+                    // 진입점이라 카드 크롬(제목바/테두리) 없이 화면의 주인공이 되는 히어로 레이아웃을
+                    // 쓴다(QuickRecordView가 스스로 대기/녹음 중 상태를 꾸민다). 단음/멜로디는 기존
+                    // HarmonyCard 구조를 그대로 유지 — 리스크를 빠른 녹음 하나로 좁힌다.
+                    if sessionMode == .quickRecord {
+                        Group {
+                            if micPermissionDenied {
+                                micPermissionDeniedContent
+                            } else {
+                                QuickRecordView(
+                                    phase: quickRecordPhase,
+                                    elapsed: Double(quickRecordBuffer.count) / quickRecordSampleRate,
+                                    maxDuration: quickRecordMaxDuration,
+                                    waveformSamples: quickRecordBuffer,
+                                    onStart: startQuickRecording,
+                                    onStop: stopQuickRecording,
+                                    onCancel: cancelQuickRecording,
+                                    onReset: resetSession
+                                )
+                            }
+                        }
+                        .id("captureCard")
+                    } else {
+                        // 정보를 한 덩어리로 몰아넣지 않고 세 그룹(측정 버튼 -> 파형+판독값 ->
+                        // 시작음 컨트롤)으로 나누고, 그룹 사이엔 카드 안 다른 요소보다 넓은 간격을 준다.
+                        HarmonyCard("실시간 피치", systemImage: "waveform") {
+                            if micPermissionDenied {
+                                micPermissionDeniedContent
+                            } else {
+                                VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                                    Button(action: toggleCapture) {
+                                        Label(isCapturing ? "측정 중지" : "측정 시작", systemImage: isCapturing ? "stop.fill" : "mic.fill")
+                                    }
+                                    .buttonStyle(.borderedProminent)
 
-                                if isCapturing {
-                                    // 지금 마이크가 실제로 소리를 듣고 있다는 걸 텍스트보다 훨씬
-                                    // 직관적으로 보여준다 — "녹음 중"이라는 상태 자체를 시각화.
-                                    VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                                        WaveformView(samples: recentVoiceBuffer)
-                                            .frame(height: 88)
-                                            .padding(.horizontal, Theme.Spacing.sm)
-                                            .frame(maxWidth: .infinity)
-                                            .background(
-                                                Theme.tint.opacity(0.08),
-                                                in: RoundedRectangle(cornerRadius: Theme.cardCornerRadius - 4, style: .continuous)
-                                            )
+                                    if isCapturing {
+                                        // 지금 마이크가 실제로 소리를 듣고 있다는 걸 텍스트보다 훨씬
+                                        // 직관적으로 보여준다 — "녹음 중"이라는 상태 자체를 시각화.
+                                        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                                            WaveformView(samples: recentVoiceBuffer)
+                                                .frame(height: 88)
+                                                .padding(.horizontal, Theme.Spacing.sm)
+                                                .frame(maxWidth: .infinity)
+                                                .background(
+                                                    Theme.tint.opacity(0.08),
+                                                    in: RoundedRectangle(cornerRadius: Theme.cardCornerRadius - 4, style: .continuous)
+                                                )
 
+                                            Text(statusText)
+                                                .font(.system(.title2, design: .monospaced))
+                                        }
+                                    } else {
                                         Text(statusText)
                                             .font(.system(.title2, design: .monospaced))
                                     }
-                                } else {
-                                    Text(statusText)
-                                        .font(.system(.title2, design: .monospaced))
+
+                                    Text(isCapturing ? singleNoteStatusHint : "측정 시작을 눌러야 마이크가 켜집니다")
+                                        .font(Theme.Typography.caption)
+                                        .foregroundStyle(.secondary)
+
+                                    // 노래를 시작하기 전 여기서 바로 기준음을 듣고 첫 음을 잡을 수 있게.
+                                    startingNoteControls
                                 }
-
-                                Text(isCapturing ? singleNoteStatusHint : "측정 시작을 눌러야 마이크가 켜집니다")
-                                    .font(Theme.Typography.caption)
-                                    .foregroundStyle(.secondary)
-
-                                // 노래를 시작하기 전 여기서 바로 기준음을 듣고 첫 음을 잡을 수 있게.
-                                startingNoteControls
                             }
                         }
+                        .id("captureCard")
                     }
-                    .id("captureCard")
 
                     // 조성+화음: 첫 음이 잡히기 전엔 아예 렌더링하지 않는다(점진적 공개) —
                     // "아직 판별되지 않음" 같은 빈 상태를 계속 보여주는 대신, 관련 데이터가
@@ -353,11 +366,17 @@ struct PracticeView: View {
                         .transition(.opacity.combined(with: .move(edge: .top)))
                     }
 
-                        Button(role: .destructive, action: resetSession) {
-                            Label("다시 시작", systemImage: "arrow.counterclockwise")
+                        // 빠른 녹음 모드는 이 전역 버튼을 따로 안 보여준다 — 대기/녹음 중엔 리셋할
+                        // 게 없고(대기는 애초에 빈 상태, 녹음 중엔 QuickRecordView 자체의 취소 버튼이
+                        // 있음), 결과/에러 상태에선 QuickRecordView의 "다시 녹음" 버튼이 이미 같은
+                        // resetSession()을 호출하므로 중복이 된다.
+                        if sessionMode != .quickRecord {
+                            Button(role: .destructive, action: resetSession) {
+                                Label("다시 시작", systemImage: "arrow.counterclockwise")
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .frame(maxWidth: .infinity)
                     }
                     .padding()
                     // 카드가 새로 생기거나 사라질 때 위 .transition이 실제로 애니메이션되게 한다 —
@@ -706,6 +725,16 @@ struct PracticeView: View {
             let analyzed = RecordingAnalyzer.analyze(recordingSamples: samples, sampleRate: rate)
             applyQuickRecordResult(analyzed)
         }
+    }
+
+    /// "취소"(X) 버튼 — 참고 디자인의 Discard와 같은 역할. "녹음 그만"과 달리 분석을 아예
+    /// 돌리지 않고 지금까지 모은 소리를 그냥 버린 뒤 대기 상태로 되돌아간다.
+    private func cancelQuickRecording() {
+        guard quickRecordPhase == .recording else { return }
+        audioCapture.stop()
+        isCapturing = false
+        quickRecordBuffer = []
+        quickRecordPhase = .idle
     }
 
     /// RecordingAnalyzer의 배치 분석 결과를, 기존 단음/멜로디 UI가 그대로 소비할 수 있는 상태로 반영한다.
