@@ -231,6 +231,9 @@ struct ContentView: View {
                                 Button("내 목소리로 5도") {
                                     recordAndHarmonizeVoice(interval: .fifth)
                                 }
+                                Button("내 목소리로 전체 화음") {
+                                    recordAndHarmonizeFullChordWithVoice()
+                                }
                             }
                             .buttonStyle(.bordered)
                             // 예전엔 조건 여러 개를 한꺼번에 disabled에 걸어놔서, 어떤 조건 때문에
@@ -661,9 +664,58 @@ struct ContentView: View {
 
         Task {
             let shifted = PitchShifter.shift(samples: recorded, pitchRatio: ratio, sampleRate: rate)
+            // 마이크로 녹음한 원본은 보통 피크가 한참 낮게 들어와서(합성음보다 훨씬 작게 들림),
+            // 재생 전에 거의 꽉 차는 수준(0.95)까지 디지털 게인을 올려서 체감 음량을 키운다.
+            let normalized = AudioGain.normalize(shifted)
             do {
-                try voiceClipPlayer.play(samples: shifted, sampleRate: rate)
+                try voiceClipPlayer.play(samples: normalized, sampleRate: rate)
                 statusText = "내 목소리로 만든 화음을 재생합니다"
+            } catch {
+                statusText = "재생 실패: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// "내 목소리로 3도"/"5도"는 한 음씩만 들려주는데, 이건 원음(그대로) + 3도로 옮긴 목소리 +
+    /// 5도로 옮긴 목소리를 한꺼번에 섞어서 진짜 3화음처럼 들려준다.
+    private func recordAndHarmonizeFullChordWithVoice() {
+        guard isCapturing else {
+            statusText = "먼저 측정을 시작하세요"
+            return
+        }
+        guard !isPlaybackBusy else {
+            statusText = "다른 소리가 재생 중이에요 — 끝난 뒤 다시 눌러주세요"
+            return
+        }
+        guard melodySession.suggestedHarmony != nil else {
+            statusText = "아직 화음이 없어요 — 먼저 음을 안정적으로 불러주세요"
+            return
+        }
+        guard let thirdRatio = pitchRatio(toInterval: .third),
+              let fifthRatio = pitchRatio(toInterval: .fifth) else {
+            statusText = "목표음을 계산하지 못했어요"
+            return
+        }
+        guard !recentVoiceBuffer.isEmpty else {
+            statusText = "아직 잡힌 목소리가 없어요 — 먼저 노래를 불러주세요"
+            return
+        }
+
+        let recorded = recentVoiceBuffer
+        let rate = recentVoiceSampleRate
+        statusText = "전체 화음 만드는 중…"
+
+        Task {
+            // 원음(비율 1.0, 시프트 없이 그대로) + 3도 + 5도로 각각 옮긴 목소리를 만든다.
+            let third = PitchShifter.shift(samples: recorded, pitchRatio: thirdRatio, sampleRate: rate)
+            let fifth = PitchShifter.shift(samples: recorded, pitchRatio: fifthRatio, sampleRate: rate)
+            // 세 트랙을 섞으면 각자보다 커지므로, mixAndNormalize가 합친 뒤 다시 피크 기준으로
+            // 정규화해서 서로 다른 음 개수(1개 vs 3개)에 상관없이 항상 비슷한 체감 음량이 되게 한다.
+            let mixed = AudioGain.mixAndNormalize([recorded, third, fifth])
+
+            do {
+                try voiceClipPlayer.play(samples: mixed, sampleRate: rate)
+                statusText = "내 목소리로 만든 전체 화음을 재생합니다"
             } catch {
                 statusText = "재생 실패: \(error.localizedDescription)"
             }
