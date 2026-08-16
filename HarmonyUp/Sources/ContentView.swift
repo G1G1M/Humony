@@ -120,8 +120,12 @@ struct ContentView: View {
         }
     }
 
-    // 재생 중(화음/시작음/멜로디 라인)엔 마이크를 완전히 무시한다 — 스피커 소리가 되먹임되는 피드백 루프 방지.
-    private var isPlaybackBusy: Bool { isPlayingTone || isPlayingStartingNote || playingMelodyLineInterval != nil }
+    // 재생 중(화음/시작음/멜로디 라인/내 목소리 화음)엔 마이크를 완전히 무시한다 — 스피커 소리가
+    // 되먹임되는 피드백 루프 방지. isPlayingVoiceClip이 빠져 있던 게 26절 버그의 원인이었다.
+    private var isPlaybackBusy: Bool {
+        isPlayingTone || isPlayingStartingNote || playingMelodyLineInterval != nil || isPlayingVoiceClip
+    }
+    @State private var isPlayingVoiceClip = false
 
     var body: some View {
         ScrollView {
@@ -314,6 +318,7 @@ struct ContentView: View {
             audioCapture.stop()
             tonePlayer.stop()
             voiceClipPlayer.stop()
+            isPlayingVoiceClip = false
         }
     }
 
@@ -691,9 +696,16 @@ struct ContentView: View {
             // 재생 전에 거의 꽉 차는 수준(0.95)까지 디지털 게인을 올려서 체감 음량을 키운다.
             let normalized = AudioGain.normalize(shifted)
             do {
-                try voiceClipPlayer.play(samples: normalized, sampleRate: rate)
+                // 재생 중엔 마이크를 무시해야 한다(다른 재생 함수들과 동일한 콜앤리스폰스 규칙) —
+                // 안 그러면 스피커로 나온 화음을 마이크가 다시 듣고 "새 멜로디 음"으로 착각해서
+                // 조성/화음 판단이 오염된다(26절). 재생이 실제로 끝난 뒤에만 다시 켠다.
+                isPlayingVoiceClip = true
+                try voiceClipPlayer.play(samples: normalized, sampleRate: rate) {
+                    isPlayingVoiceClip = false
+                }
                 statusText = "내 목소리로 만든 화음을 재생합니다"
             } catch {
+                isPlayingVoiceClip = false
                 statusText = "재생 실패: \(error.localizedDescription)"
             }
         }
@@ -749,9 +761,13 @@ struct ContentView: View {
             let mixed = AudioGain.mixAndNormalize([stableSegment, third, fifth])
 
             do {
-                try voiceClipPlayer.play(samples: mixed, sampleRate: rate)
+                isPlayingVoiceClip = true
+                try voiceClipPlayer.play(samples: mixed, sampleRate: rate) {
+                    isPlayingVoiceClip = false
+                }
                 statusText = "내 목소리로 만든 전체 화음을 재생합니다"
             } catch {
+                isPlayingVoiceClip = false
                 statusText = "재생 실패: \(error.localizedDescription)"
             }
         }
@@ -911,6 +927,7 @@ struct ContentView: View {
         isPlayingTone = false
         isPlayingStartingNote = false
         playingMelodyLineInterval = nil
+        isPlayingVoiceClip = false
         recentVoiceBuffer = []
         activeScoringInterval = nil
         lockedScoringTargets = [:]

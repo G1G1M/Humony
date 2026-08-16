@@ -626,3 +626,36 @@ recentVoiceBuffer.append(contentsOf: result.samples)  // 검출 성공한 프레
 ### 이 변경이 22절(VoiceSegmentTrimmer)에 미친 영향
 
 `VoiceSegmentTrimmer`(22절)는 원래 "버퍼 끝부분이 항상 검출 성공한 프레임"이라는 전제로, 끝에서부터 목표음과 다른 게 나오면 바로 멈추도록 짜여 있었다. 그런데 이제 버퍼 끝에 노래를 마친 뒤의 **진짜 무음 꼬리**가 섞여 있을 수 있다(예전엔 그 무음 프레임 자체가 버퍼에 안 들어갔지만, 지금은 들어간다). 이 무음 꼬리 때문에 트리머가 곧바로 멈춰서 "안정 구간을 못 찾음" 폴백으로 빠지면 안 되므로, `VoiceActivityDetector.isVoiceActive`로 "아직 진짜 소리에 도달하기 전의 무음"과 "한 번 소리 구간에 들어선 뒤 다시 나온 무음(=진짜 음 경계)"을 구분해서, 전자는 건너뛰고 후자에서만 멈추도록 보완했다.
+
+---
+
+## 25. "화음 만드는데 왜 이렇게 오래 걸리냐" — 디버그 빌드 최적화 + vDSP 벡터화
+
+### 원인 두 가지가 겹쳤다
+
+1. **Xcode Debug 빌드는 기본적으로 최적화가 꺼져 있다**(`SWIFT_OPTIMIZATION_LEVEL = -Onone`). 21절에서 "제스처 게이트 타임아웃" 버그를 고칠 때 이미 한 번 마주쳤던 문제와 같은 원인인데, 그때는 "메인 스레드를 막지 않기"(`Task {}`)로 우회했을 뿐, 연산 자체가 느린 근본 원인은 그대로 남아 있었다.
+2. **23절에서 멜로디 모드의 롤링 버퍼 상한을 1.5초 -> 30초로 늘렸다.** WSOLA(`PitchShifter.timeStretch`)의 연산량은 입력 길이에 비례해서 늘어나는데(그레인 개수 자체가 길이에 비례), 버퍼가 길어진 만큼 연산량도 그대로 늘었다. 게다가 "전체 화음"은 같은 버퍼를 3도/5도 두 번 시프트하므로 부담이 두 배다.
+
+### 해결 1 — Debug 빌드에서도 최적화 컴파일 켜기
+
+`project.yml`의 앱 타겟에 `settings.configs.Debug.SWIFT_OPTIMIZATION_LEVEL: "-O"`를 추가했다. Debug 설정 이름은 그대로 유지하면서(어서션 등은 남아있음) 컴파일 최적화만 Release 수준으로 올리는 방식이다 — 실기기 성능 확인이 이 프로젝트의 핵심 작업 방식이라 디버깅 편의(정확한 줄 단위 스테핑)보다 실제 체감 속도가 더 중요하다고 판단했다. (수정 후 시뮬레이터 유닛테스트 실행 시간이 약 1.5초 -> 0.06초로 줄어든 것으로 최적화가 실제로 적용됐음을 확인했다.)
+
+### 해결 2 — WSOLA의 가장 무거운 루프를 Accelerate(vDSP)로 벡터화
+
+`bestMatchingOffset`은 탐색 반경 안의 모든 후보 위치마다 길이 `compareLength`짜리 내적(dot product)을 계산한다 — 이게 WSOLA 전체 연산량의 대부분을 차지한다. 원래는 순수 Swift `for` 루프(`score += samples[a+i] * samples[b+i]`)로 짜여 있었는데, 이걸 `vDSP_dotpr`(Accelerate 프레임워크의 벡터화된 내적 함수)로 바꿨다. `vDSP_dotpr`는 이미 최적화된 바이너리로 컴파일돼 있어서, **호출하는 쪽 코드의 컴파일 최적화 수준과 무관하게** 하드웨어 SIMD(여러 개의 곱셈/덧셈을 한 명령으로 처리) 명령을 활용한다 — 그래서 위 1번 최적화와 별개로도 효과가 있고, 둘을 합치면 더 크게 빨라진다. `YINPitchDetector`가 이미 자기상관 계산에 Accelerate를 쓰고 있었는데(신호처리 코드에서 내적/자기상관처럼 규칙적인 반복 연산은 Accelerate로 벡터화하는 게 관례라는 걸 다시 확인한 셈), 같은 패턴을 `PitchShifter`에도 적용한 것이다.
+
+---
+
+## 26. "화음이 다 안 들려" 진짜 원인 — 목소리 화음 재생만 콜앤리스폰스 규칙에서 빠져 있었다
+
+### 이 프로젝트의 오래된 규칙 하나를 목소리 화음 재생만 깜빡했다
+
+Phase 3 초반부터 이 프로젝트는 "재생 중엔 마이크를 완전히 무시한다"는 규칙을 지켜왔다(`isPlaybackBusy`) — 스피커로 낸 소리가 마이크로 되먹임돼서 "새로 부른 음"으로 잘못 인식되는 피드백 루프를 막기 위해서다. `TonePlayer`(목표음/시작음), 멜로디 라인 재생은 전부 이 규칙을 따르는데, **"내 목소리로 화음 만들기"(`VoiceClipPlayer`)만 여기서 빠져 있었다.** `isPlaybackBusy`가 `isPlayingTone`, `isPlayingStartingNote`, `playingMelodyLineInterval`만 보고 목소리 화음 재생 상태는 아예 추적하지 않고 있었던 것이다.
+
+그 결과: 목소리 화음을 재생하는 몇 초 동안에도 마이크는 계속 켜진 채로 남아있었고(멜로디 모드는 채점 중이 아니면 캡처 가드가 없으므로 `shouldEvaluateCapture`가 항상 참), 스피커로 나온 화음(3도/5도 목소리)을 마이크가 다시 듣고 **엉뚱한 pitch class를 가진 "새 멜로디 음"으로 착각**해서 `melodySession`에 계속 추가했다. 이건 조성 판별용 히스토그램과 `lastNote`/`suggestedHarmony`를 실시간으로 오염시킨다 — 그래서 재생을 할수록(특히 멜로디가 길어서 "전체 화음"을 오래 재생할수록) 다음 계산에 쓰이는 상태가 점점 더 부정확해지고, 사용자가 "특히 마지막 전체 화음할 때 음이 빠진다"고 느낀 것과 맞아떨어진다 — 누적 오염이 뒤로 갈수록 커지기 때문이다.
+
+### 해결: 재생 완료 시점을 정확히 알고, isPlaybackBusy에 포함시키기
+
+`VoiceClipPlayer.play(samples:sampleRate:)`는 원래 `player.scheduleBuffer(buffer, completionHandler: nil)`로 재생을 예약만 하고 "언제 끝나는지"는 아무도 몰랐다. `completionCallbackType: .dataPlayedBack`을 지정한 `onFinished` 콜백을 추가해서, **버퍼가 큐에 들어간 시점이 아니라 실제로 스피커까지 소리가 다 나간 시점**에 정확히 알림을 받도록 고쳤다(콜백은 오디오 스레드에서 오므로 메인 큐로 넘겨서 호출).
+
+`ContentView`에는 `isPlayingVoiceClip` 상태를 추가해서 `isPlaybackBusy`에 포함시켰다 — 재생 시작 직전에 `true`, `onFinished`에서 `false`로. 이제 목소리 화음을 재생하는 동안에도 다른 재생과 똑같이 마이크가 완전히 무시되고, 재생이 실제로 끝난 뒤에야 다시 켜진다.

@@ -1,3 +1,4 @@
+import Accelerate
 import Foundation
 
 /// 녹음된 오디오의 재생 속도(길이)는 그대로 유지하면서 피치만 바꾼다.
@@ -127,14 +128,19 @@ enum PitchShifter {
         var bestOffset = lowerBound
         var bestScore = -Float.greatestFiniteMagnitude
 
-        for candidate in lowerBound...upperBound {
-            var score: Float = 0
-            for i in 0..<compareLength {
-                score += samples[referenceStart + i] * samples[candidate + i]
-            }
-            if score > bestScore {
-                bestScore = score
-                bestOffset = candidate
+        // 이 내적(dot product) 계산이 WSOLA에서 가장 무거운 부분이다 — 그레인마다
+        // (탐색 반경 x compareLength)번 곱셈+덧셈을 반복한다. Swift for-loop 대신
+        // Accelerate(vDSP_dotpr)로 벡터화하면, 컴파일 최적화 수준과 무관하게(디버그
+        // 빌드에서도) 하드웨어 SIMD 명령으로 훨씬 빠르게 계산된다.
+        samples.withUnsafeBufferPointer { buffer in
+            let base = buffer.baseAddress!
+            for candidate in lowerBound...upperBound {
+                var score: Float = 0
+                vDSP_dotpr(base + referenceStart, 1, base + candidate, 1, &score, vDSP_Length(compareLength))
+                if score > bestScore {
+                    bestScore = score
+                    bestOffset = candidate
+                }
             }
         }
         return bestOffset

@@ -8,7 +8,11 @@ final class VoiceClipPlayer {
     private let player = AVAudioPlayerNode()
     private var isConfigured = false
 
-    func play(samples: [Float], sampleRate: Double) throws {
+    /// - Parameter onFinished: 재생이 실제로 스피커까지 다 끝난 뒤 메인 스레드에서 호출된다.
+    ///   호출한 쪽이 "지금 화음이 재생 중이다"라는 상태를 정확히 켜고 끌 수 있게 해준다 —
+    ///   이게 없으면(예전 버전) 재생이 언제 끝나는지 알 방법이 없어서, 재생 중에도 마이크가
+    ///   계속 켜진 채로 남아있는 문제가 있었다(자세한 이유는 `docs/CONCEPTS.md` 26절 참고).
+    func play(samples: [Float], sampleRate: Double, onFinished: (() -> Void)? = nil) throws {
         guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1) else { return }
 
         if !isConfigured {
@@ -36,7 +40,14 @@ final class VoiceClipPlayer {
             try engine.start()
         }
 
-        player.scheduleBuffer(buffer, completionHandler: nil)
+        // completionCallbackType을 .dataPlayedBack으로 지정해야 "버퍼를 재생 큐에 넘겼다"가
+        // 아니라 "실제로 스피커에서 소리가 다 나갔다" 시점에 콜백이 온다. 콜백 자체는 오디오
+        // 스레드에서 오므로, SwiftUI 상태를 건드리려면 메인 큐로 넘겨야 한다.
+        player.scheduleBuffer(buffer, at: nil, options: [], completionCallbackType: .dataPlayedBack) { _ in
+            DispatchQueue.main.async {
+                onFinished?()
+            }
+        }
         player.play()
     }
 

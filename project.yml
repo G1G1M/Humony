@@ -15,6 +15,12 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.kimjiwon.HarmonyUp
         DEVELOPMENT_TEAM: C5P7V9S6NT
         CODE_SIGN_STYLE: Automatic
+      configs:
+        # 기본 Debug 빌드(-Onone)는 WSOLA처럼 그레인마다 상관관계를 계산하는 무거운
+        # 신호처리 루프가 실기기에서도 눈에 띄게 느려진다(디버깅용 최적화 해제가 원인).
+        # 이 프로젝트는 실기기 성능 확인이 항상 필요하니, Debug에서도 최적화 컴파일을 켠다.
+        Debug:
+          SWIFT_OPTIMIZATION_LEVEL: "-O"
     info:
       path: HarmonyUp/Sources/Info.plist
       properties:
