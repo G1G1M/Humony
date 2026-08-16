@@ -3,7 +3,7 @@ import Foundation
 /// 판별된 조성(KeyDetector.DetectedKey)을 기준으로, 멜로디 음의 diatonic(온음계) 3도/5도 화음을 생성한다.
 enum ChordGenerator {
 
-    enum Interval: Equatable {
+    enum Interval: Hashable {
         case third
         case fifth
 

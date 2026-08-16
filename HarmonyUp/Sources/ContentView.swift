@@ -32,10 +32,14 @@ struct ContentView: View {
     @State private var tonePlaybackTask: Task<Void, Never>?
     @State private var isPlayingStartingNote = false
     @State private var startingNoteTask: Task<Void, Never>?
-    @State private var scoringTarget: ChordGenerator.HarmonyNote?
-    @State private var scoringTargetNoteName = ""
-    @State private var currentScore: PitchScorer.Score?
-    @State private var scoreSamples: [PitchScorer.Score] = []
+    // 3도/5도를 각각 독립적으로 채점한다 — 하나 채점하다 다른 쪽으로 넘어가도
+    // 이전 것의 최근 결과(latestScores)는 화면에 그대로 남아있는다. 실제로 마이크가
+    // 매 순간 채점하는 대상은 하나(activeScoringInterval)뿐이지만, 그 결과와 사람이 부르는
+    // 동안 쌓인 샘플은 interval별로 따로 보관해서 서로 덮어쓰지 않게 한다.
+    @State private var activeScoringInterval: ChordGenerator.Interval?
+    @State private var lockedScoringTargets: [ChordGenerator.Interval: ChordGenerator.HarmonyNote] = [:]
+    @State private var latestScores: [ChordGenerator.Interval: PitchScorer.Score] = [:]
+    @State private var scoreSampleBuffers: [ChordGenerator.Interval: [PitchScorer.Score]] = [:]
 
     // 지금은(향후 곡 전체를 듣고 여러 화음을 뽑는 것과 달리) 단음 모드다 —
     // 한 번 음을 안정적으로 잡으면 그 음으로 조성/화음을 고정하고, 이후에 들어오는
@@ -164,43 +168,13 @@ struct ContentView: View {
                 }
 
                 // 4. 목표음을 따라 불러서 채점 — 네 번째 단계(PitchScorer)
+                // 3도/5도를 각각 독립된 패널로 보여준다 — 하나 채점하고 다른 쪽으로 넘어가도
+                // 이전 결과가 화면에서 사라지지 않는다.
                 flowSection(step: 4, title: "따라 부르기 채점") {
-                    VStack(alignment: .leading, spacing: 12) {
-                        if scoringTarget == nil {
-                            Text("채점 대기 중 — 아래에서 3도/5도 중 채점할 음을 골라 시작하세요")
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Text("목표음: \(scoringTargetNoteName) (\(scoringTarget?.interval == .third ? "3도" : "5도"))")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-
-                            // 튜너 앱처럼 바늘이 좌우로 움직이는 시각적 피드백 —
-                            // "몇 cent 벗어남"이라는 숫자보다 낮은지/높은지/거의 맞는지가 한눈에 들어온다.
-                            PitchMeterView(
-                                centsOffset: currentScore?.centsOffset,
-                                isOnPitch: currentScore?.isOnPitch ?? false,
-                                toleranceCents: PitchScorer.onPitchToleranceCents
-                            )
-
-                            if let score = currentScore {
-                                Text(String(format: "%+.0f cent  %@", score.centsOffset, score.isOnPitch ? "✅ 정확" : "벗어남"))
-                                    .font(.system(.body, design: .monospaced))
-                                    .foregroundStyle(score.isOnPitch ? .green : .secondary)
-                            }
-                        }
-
-                        HStack {
-                            Button(
-                                scoringTarget?.interval == .third ? "3도 채점 중지" : "3도 채점",
-                                action: { toggleScoring(interval: .third) }
-                            )
-                            Button(
-                                scoringTarget?.interval == .fifth ? "5도 채점 중지" : "5도 채점",
-                                action: { toggleScoring(interval: .fifth) }
-                            )
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(melodySession.suggestedHarmony == nil)
+                    VStack(alignment: .leading, spacing: 16) {
+                        scoringPanel(for: .third)
+                        Divider()
+                        scoringPanel(for: .fifth)
                     }
                 }
 
@@ -253,7 +227,7 @@ struct ContentView: View {
     }
 
     private var singleNoteStatusHint: String {
-        if scoringTarget != nil {
+        if activeScoringInterval != nil {
             return "🎯 채점 중 — 목표음을 따라 부르는 동안엔 새 멜로디 음을 잡지 않습니다"
         }
         switch sessionMode {
@@ -279,6 +253,48 @@ struct ContentView: View {
               let fifthAverage = averageOnPitchRatio(fifthAttempts),
               abs(thirdAverage - fifthAverage) > 0.1 else { return nil }
         return thirdAverage < fifthAverage ? "3도 화음에서 더 자주 벗어나는 편이에요" : "5도 화음에서 더 자주 벗어나는 편이에요"
+    }
+
+    /// 3도 또는 5도 하나에 대한 채점 패널 — 목표음, 바늘 미터, 시작/중지 버튼을 묶어서 보여준다.
+    /// 두 패널이 서로 독립적이라 latestScores[interval]만 각자 참조하고, 다른 쪽 상태에 영향받지 않는다.
+    @ViewBuilder
+    private func scoringPanel(for interval: ChordGenerator.Interval) -> some View {
+        let label = interval == .third ? "3도" : "5도"
+        let isActive = activeScoringInterval == interval
+        let target = lockedScoringTargets[interval]
+        let score = latestScores[interval]
+
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(label).font(.subheadline.bold())
+                if let target {
+                    Text(NoteNameConverter.convert(frequency: target.frequency)?.noteName ?? "?")
+                        .font(.system(.subheadline, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button(isActive ? "중지" : "채점", action: { toggleScoring(interval: interval) })
+                    .buttonStyle(.bordered)
+                    .disabled(!isActive && melodySession.suggestedHarmony == nil)
+            }
+
+            if score == nil && target == nil {
+                Text("아직 채점 안 함")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                PitchMeterView(
+                    centsOffset: score?.centsOffset,
+                    isOnPitch: score?.isOnPitch ?? false,
+                    toleranceCents: PitchScorer.onPitchToleranceCents
+                )
+                if let score {
+                    Text(String(format: "%+.0f cent  %@", score.centsOffset, score.isOnPitch ? "✅ 정확" : "벗어남"))
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(score.isOnPitch ? .green : .secondary)
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -314,11 +330,27 @@ struct ContentView: View {
     /// 버튼을 여러 번 눌러도 문제없다.
     private func toggleCapture() {
         if isCapturing {
+            // 측정 자체를 끄면 채점도 더 이상 진행할 수 없으므로, 진행 중이던 채점이 있다면
+            // 먼저 기록으로 저장하고 정리한다 — 안 그러면 "3도 채점"이 켜진 채로 마이크만 꺼져서
+            // 다음에 뭘 눌러도 반응이 없는 것처럼 보이는 상태가 된다.
+            if let active = activeScoringInterval {
+                finalizeCurrentAttempt(interval: active)
+                activeScoringInterval = nil
+            }
             audioCapture.stop()
             isCapturing = false
             statusText = "측정 중지됨"
             return
         }
+
+        beginCapturingIfNeeded()
+    }
+
+    /// 측정이 꺼져 있으면 켠다. 이미 켜져 있으면 아무 것도 하지 않는다(중복 start 방지).
+    /// "채점하기" 버튼도 이걸 호출해서, 사용자가 미리 "측정 시작"을 눌러두지 않았어도
+    /// 채점 버튼 하나로 바로 측정+채점이 시작되게 한다.
+    private func beginCapturingIfNeeded() {
+        guard !isCapturing else { return }
 
         do {
             try audioCapture.start { result in
@@ -343,10 +375,10 @@ struct ContentView: View {
                 // 단음 모드에서는 이미 한 음을 확정했으면 더 이상 새 음을 잡지 않는다 —
                 // 안 그러면 숨소리/다음 음절/잡음이 들어올 때마다 계속 바뀐다.
                 // 멜로디 모드에서는 이 가드가 없다 — 음이 바뀔 때마다 계속 새로 잡아야 하니까.
-                // 단, 채점 중(scoringTarget != nil)에는 멜로디 모드에서도 캡처를 멈춘다 —
+                // 단, 채점 중(activeScoringInterval != nil)에는 멜로디 모드에서도 캡처를 멈춘다 —
                 // 안 그러면 목표음을 따라 부르는 것 자체가 "새 멜로디 음"으로 잡혀서 조성/화음이
                 // 계속 바뀌고, suggestedHarmony가 갑자기 nil이 돼서 채점이 먹통이 되는 문제가 있었다.
-                let shouldEvaluateCapture = scoringTarget == nil && (sessionMode == .melody || !hasCapturedNote)
+                let shouldEvaluateCapture = activeScoringInterval == nil && (sessionMode == .melody || !hasCapturedNote)
 
                 if shouldEvaluateCapture {
                     // 같은 pitch class가 몇 프레임 연속 유지돼야 "진짜 이 음을 내고 있다"고 보고 확정한다.
@@ -387,14 +419,15 @@ struct ContentView: View {
                     }
                 }
 
-                if let target = scoringTarget {
+                if let interval = activeScoringInterval, let target = lockedScoringTargets[interval] {
                     // 원본 프레임 주파수를 그대로 채점하면 비브라토/발성 흔들림 때문에 바늘이
                     // 지저분하게 튄다 — 스무딩을 거친 값으로 채점해서 "지금 대충 맞는지"가 잘 보이게 한다.
                     let smoothedFrequency = pitchSmoother.smooth(frequency: result.frequency)
                     let score = PitchScorer.score(sungFrequency: smoothedFrequency, targetFrequency: target.frequency)
-                    currentScore = score
+                    latestScores[interval] = score
                     if let score {
-                        scoreSamples.append(score) // 이번 시도가 끝나면 PracticeSummary로 압축해서 저장한다
+                        // 이번 시도가 끝나면 PracticeSummary로 압축해서 저장한다.
+                        scoreSampleBuffers[interval, default: []].append(score)
                     }
                 }
             }
@@ -467,41 +500,45 @@ struct ContentView: View {
 
     /// 화음의 3도 또는 5도 음을 채점 목표로 고정한다. 같은 걸 다시 누르면 중지되고,
     /// 채점 중에 다른 쪽을 누르면 멈추지 않고 그쪽 목표로 바로 전환된다 — 3도/5도를
-    /// 번갈아 연습할 때 매번 멈췄다 다시 시작할 필요가 없게.
+    /// 번갈아 연습할 때 매번 멈췄다 다시 시작할 필요가 없게. 각자의 최근 결과(latestScores)는
+    /// 전환하거나 중지해도 지워지지 않고 화면에 남아있는다 — 지워지는 건 "지금 채점 중"인지 여부뿐.
     private func toggleScoring(interval: ChordGenerator.Interval) {
-        let isStoppingSameInterval = scoringTarget?.interval == interval
-
-        // 지금까지 채점 중이던 시도(꺼지든, 다른 음으로 바뀌든)가 있으면 기록으로 남긴다.
-        if scoringTarget != nil {
-            finalizeCurrentAttempt()
+        if activeScoringInterval == interval {
+            finalizeCurrentAttempt(interval: interval)
+            activeScoringInterval = nil
+            return
         }
 
-        if isStoppingSameInterval {
-            scoringTarget = nil
-            scoringTargetNoteName = ""
-            currentScore = nil
-            return
+        // 다른 쪽을 채점하고 있었다면 그 시도부터 기록으로 남긴다.
+        if let previous = activeScoringInterval {
+            finalizeCurrentAttempt(interval: previous)
         }
 
         guard let harmony = melodySession.suggestedHarmony,
               let target = harmony.first(where: { $0.interval == interval }) else { return }
-        scoringTarget = target
-        scoringTargetNoteName = NoteNameConverter.convert(frequency: target.frequency)?.noteName ?? "?"
+
+        lockedScoringTargets[interval] = target
+        activeScoringInterval = interval
         pitchSmoother.reset() // 이전 채점(또는 다른 음)에서 쓰던 값이 새 채점에 섞여 들어가지 않도록
+
+        // "채점하기"를 눌렀는데 마이크가 꺼져 있으면 자동으로 켜준다 — 측정 시작을 따로
+        // 누르지 않아도 채점 버튼 하나로 바로 측정+채점이 시작되게.
+        beginCapturingIfNeeded()
     }
 
     /// 지금까지 쌓인 채점 샘플들을 하나의 요약(PracticeSummary.Aggregate)으로 압축해서
-    /// SwiftData에 저장하고, 다음 시도를 위해 샘플 버퍼를 비운다.
-    private func finalizeCurrentAttempt() {
-        defer { scoreSamples = [] }
+    /// SwiftData에 저장하고, 다음 시도를 위해 그 interval의 샘플 버퍼만 비운다.
+    private func finalizeCurrentAttempt(interval: ChordGenerator.Interval) {
+        defer { scoreSampleBuffers[interval] = [] }
 
-        guard let target = scoringTarget,
-              let aggregate = PracticeSummary.aggregate(scores: scoreSamples) else { return }
+        guard let target = lockedScoringTargets[interval],
+              let samples = scoreSampleBuffers[interval],
+              let aggregate = PracticeSummary.aggregate(scores: samples) else { return }
 
         let attempt = PracticeAttempt(
             date: Date(),
-            intervalRawValue: target.interval == .third ? "third" : "fifth",
-            targetNoteName: scoringTargetNoteName,
+            intervalRawValue: interval == .third ? "third" : "fifth",
+            targetNoteName: NoteNameConverter.convert(frequency: target.frequency)?.noteName ?? "?",
             sampleCount: aggregate.sampleCount,
             onPitchRatio: aggregate.onPitchRatio,
             averageAbsCentsOffset: aggregate.averageAbsCentsOffset
@@ -555,8 +592,8 @@ struct ContentView: View {
     }
 
     private func resetSession() {
-        if scoringTarget != nil {
-            finalizeCurrentAttempt() // 리셋 직전까지의 채점 시도도 버리지 않고 기록으로 남긴다
+        if let active = activeScoringInterval {
+            finalizeCurrentAttempt(interval: active) // 리셋 직전까지의 채점 시도도 버리지 않고 기록으로 남긴다
         }
 
         tonePlaybackTask?.cancel()
@@ -566,9 +603,10 @@ struct ContentView: View {
         tonePlayer.stop()
         isPlayingTone = false
         isPlayingStartingNote = false
-        scoringTarget = nil
-        scoringTargetNoteName = ""
-        currentScore = nil
+        activeScoringInterval = nil
+        lockedScoringTargets = [:]
+        latestScores = [:]
+        scoreSampleBuffers = [:]
         pitchSmoother.reset()
         melodySession.reset()
         hasCapturedNote = false
