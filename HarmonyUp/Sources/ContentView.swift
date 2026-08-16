@@ -137,10 +137,21 @@ struct ContentView: View {
                                             Text("→ \(step.harmonyNames ?? "온음계 밖")")
                                                 .font(.system(.caption, design: .monospaced))
                                                 .foregroundStyle(.secondary)
+
+                                            // 예전엔 채점이 항상 "마지막으로 잡은 음"만 대상으로 해서
+                                            // 멜로디가 여러 개 쌓여도 마지막 스텝만 채점할 수 있었다.
+                                            // 이 스텝의 화음을 그 자리에서 바로 채점 대상으로 고를 수 있게 한다.
+                                            if step.harmonyNames != nil {
+                                                Spacer()
+                                                Button("3도") { startScoringMelodyStep(at: index, interval: .third) }
+                                                Button("5도") { startScoringMelodyStep(at: index, interval: .fifth) }
+                                            }
                                         }
+                                        .font(.caption2)
+                                        .buttonStyle(.bordered)
                                     }
                                 }
-                                Text("음을 눌러서 잘못 잡힌 음을 고칠 수 있어요")
+                                Text("음을 눌러서 고치거나, 3도/5도로 그 스텝을 바로 채점할 수 있어요")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }
@@ -523,6 +534,26 @@ struct ContentView: View {
 
         // "채점하기"를 눌렀는데 마이크가 꺼져 있으면 자동으로 켜준다 — 측정 시작을 따로
         // 누르지 않아도 채점 버튼 하나로 바로 측정+채점이 시작되게.
+        beginCapturingIfNeeded()
+    }
+
+    /// 멜로디 모드에서 특정 스텝(마지막 음이 아니어도 됨)을 골라 그 자리에서 바로 채점을 시작한다.
+    /// toggleScoring(interval:)은 항상 melodySession.suggestedHarmony(마지막 음 기준)만 봤어서
+    /// 멜로디가 여러 개 쌓여도 마지막 스텝만 채점할 수 있었다 — 이건 그 제약을 없앤 버전이다.
+    private func startScoringMelodyStep(at index: Int, interval: ChordGenerator.Interval) {
+        guard melodySteps.indices.contains(index), let key = melodySession.detectedKey else { return }
+
+        let frequency = NoteNameConverter.frequency(forMIDINote: melodySteps[index].midiNote)
+        guard let harmony = ChordGenerator.generateHarmony(melodyFrequency: frequency, key: key),
+              let target = harmony.first(where: { $0.interval == interval }) else { return }
+
+        if let previous = activeScoringInterval {
+            finalizeCurrentAttempt(interval: previous)
+        }
+
+        lockedScoringTargets[interval] = target
+        activeScoringInterval = interval
+        pitchSmoother.reset()
         beginCapturingIfNeeded()
     }
 
