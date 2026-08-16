@@ -194,18 +194,20 @@ struct PracticeView: View {
                                         .font(Theme.Typography.caption2)
                                         .foregroundStyle(.secondary)
 
-                                    // 도-미-솔을 부르면 그 3도(또는 5도) 라인을 처음부터 끝까지
-                                    // 이어서 들려준다 — 녹음한 멜로디 전체를 화음으로 들어보는 것.
-                                    // ViewThatFits: 글자 크기를 크게 키우면 두 버튼이 한 줄에
+                                    // 도-미-솔을 부르면 그 성부(베이스/3도/5도) 라인을 처음부터
+                                    // 끝까지 이어서 들려준다 — 녹음한 멜로디 전체를 화음으로 들어보는 것.
+                                    // ViewThatFits: 글자 크기를 크게 키우면 버튼들이 한 줄에
                                     // 안 들어가서 자동으로 세로 배치로 바뀐다.
                                     ViewThatFits {
                                         HStack {
-                                            thirdLineButton
-                                            fifthLineButton
+                                            lineButton(for: .bass)
+                                            lineButton(for: .third)
+                                            lineButton(for: .fifth)
                                         }
                                         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                                            thirdLineButton
-                                            fifthLineButton
+                                            lineButton(for: .bass)
+                                            lineButton(for: .third)
+                                            lineButton(for: .fifth)
                                         }
                                     }
                                     .buttonStyle(.bordered)
@@ -214,7 +216,7 @@ struct PracticeView: View {
                                     startingNoteControls
 
                                     Button(action: toggleTonePlayback) {
-                                        Label(isPlayingTone ? "화음 정지" : "화음 듣기 (3도→5도)", systemImage: isPlayingTone ? "stop.fill" : "play.fill")
+                                        Label(isPlayingTone ? "화음 정지" : "화음 듣기 (베이스→3도→5도)", systemImage: isPlayingTone ? "stop.fill" : "play.fill")
                                     }
                                     .buttonStyle(.bordered)
                                     .disabled((melodySession.suggestedHarmony == nil && !isPlayingTone) || isPlayingStartingNote)
@@ -336,24 +338,14 @@ struct PracticeView: View {
         }
     }
 
-    private var thirdLineButton: some View {
-        Button {
-            toggleMelodyLinePlayback(interval: .third)
+    private func lineButton(for interval: ChordGenerator.Interval) -> some View {
+        let isPlaying = playingMelodyLineInterval == interval
+        return Button {
+            toggleMelodyLinePlayback(interval: interval)
         } label: {
             Label(
-                playingMelodyLineInterval == .third ? "3도 라인 정지" : "전체 3도 듣기",
-                systemImage: playingMelodyLineInterval == .third ? "stop.fill" : "play.fill"
-            )
-        }
-    }
-
-    private var fifthLineButton: some View {
-        Button {
-            toggleMelodyLinePlayback(interval: .fifth)
-        } label: {
-            Label(
-                playingMelodyLineInterval == .fifth ? "5도 라인 정지" : "전체 5도 듣기",
-                systemImage: playingMelodyLineInterval == .fifth ? "stop.fill" : "play.fill"
+                isPlaying ? "\(interval.koreanLabel) 라인 정지" : "전체 \(interval.koreanLabel) 듣기",
+                systemImage: isPlaying ? "stop.fill" : "play.fill"
             )
         }
     }
