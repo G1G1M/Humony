@@ -23,7 +23,7 @@ struct HistoryView: View {
 
                                 if let message = weakerIntervalMessage {
                                     Text(message)
-                                        .font(.caption)
+                                        .font(Theme.Typography.caption)
                                         .foregroundStyle(.orange)
                                 }
                             }
@@ -59,9 +59,9 @@ struct HistoryView: View {
                 .font(.system(size: 40))
                 .foregroundStyle(.secondary)
             Text("아직 기록 없음")
-                .font(.headline)
+                .font(Theme.Typography.headline)
             Text("연습 탭에서 채점을 마치면 여기에 기록이 쌓여요")
-                .font(.caption)
+                .font(Theme.Typography.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }
@@ -89,12 +89,12 @@ struct HistoryView: View {
     @ViewBuilder
     private func intervalSummary(label: String, list: [PracticeAttempt]) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(label).font(Theme.Typography.caption).foregroundStyle(.secondary)
             if let average = averageOnPitchRatio(list) {
                 Text(String(format: "%.0f%% (%d회)", average * 100, list.count))
                     .font(.system(.body, design: .monospaced))
             } else {
-                Text("기록 없음").font(.caption).foregroundStyle(.secondary)
+                Text("기록 없음").font(Theme.Typography.caption).foregroundStyle(.secondary)
             }
         }
     }

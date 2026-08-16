@@ -58,7 +58,7 @@ struct PitchMeterView: View {
                 Spacer()
                 Text("♯ 높음")
             }
-            .font(.caption2)
+            .font(Theme.Typography.caption2)
             .foregroundStyle(.secondary)
         }
     }

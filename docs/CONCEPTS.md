@@ -721,3 +721,29 @@ iOS Human Interface Guidelines는 "하나의 틴트 컬러가 인터랙션 요�
 ### iOS 시뮬레이터에서 실제로 탭을 눌러 확인하는 법
 
 `xcrun simctl`에는 화면을 탭하는 명령이 따로 없다(스크린샷/실행/설치 정도만 지원). 대신 macOS Accessibility API를 통해 `osascript`(AppleScript)로 Simulator 앱 창의 특정 좌표를 클릭할 수 있다 — 시뮬레이터 창의 위치/크기(`System Events`로 조회)와 스크린샷의 실제 픽셀 크기 비율을 이용해서, 화면 속 탭바 버튼의 좌표를 창 좌표로 환산해 클릭했다. 실제로 "기록" 탭으로 전환되는 것까지 스크린샷으로 확인했다 — 코드만 읽고 "아마 될 것"이라고 넘기지 않고, 실제 탭 전환 동작을 시뮬레이터에서 직접 재현해본 것.
+
+---
+
+## 30. 폰트를 Pretendard로 통일하기 — iOS에 커스텀 폰트를 넣는 법
+
+### 왜 폰트 파일이 필요한가
+
+iOS 기본 시스템 폰트는 San Francisco(SF)인데, 한글은 SF가 아니라 애플이 자동으로 매칭해주는 "SD 산돌고딕Neo"로 렌더링된다. "Pretendard로 통일해달라"는 건 이 기본 한글 폰트를 다른 폰트로 바꿔달라는 것이다 — iOS에서 시스템 폰트가 아닌 폰트를 쓰려면, **폰트 파일(.otf/.ttf) 자체를 앱 번들 안에 넣고 등록**해야 한다. 이미 컴퓨터에 설치된 폰트를 쓰는 macOS 개발과 달리, iOS 앱은 "이 폰트가 기기에 있을 것"이라고 가정할 수 없다.
+
+### Pretendard를 받아온 방법
+
+[Pretendard](https://github.com/orioncactus/pretendard)는 SIL Open Font License(OFL) 1.1로 배포되는 오픈소스 폰트라 앱에 자유롭게 포함할 수 있다. GitHub 릴리즈에는 굵기별 정적 파일과 가변 폰트(variable font)가 다 들어있는 47MB짜리 zip이 있는데, 여기서 실제로 쓸 4개 굵기(Regular/Medium/SemiBold/Bold)의 `.otf`만 뽑아서 `HarmonyUp/Sources/Resources/Fonts/`에 넣었다(전체 6MB) — 가변 폰트는 SwiftUI에서 굵기 축(weight axis)을 다루려면 별도 처리가 필요해서, 지금 필요한 굵기만 정적 파일로 받는 게 더 간단했다. 라이선스 조건(OFL은 재배포 시 라이선스 텍스트 동봉을 요구)에 맞춰 `LICENSE.txt`도 같이 넣었다.
+
+### 폰트를 실제로 코드에서 쓰기까지 — 세 가지가 다 맞아야 한다
+
+1. **폰트 파일이 앱 번들에 들어있어야 한다** — XcodeGen은 `sources:` 경로 아래 있는 파일을 확장자로 분류해서, 코드가 아닌 파일(`.otf` 등)은 자동으로 "Copy Bundle Resources" 빌드 단계에 넣어준다. 별도 설정 없이 폴더에 넣기만 하면 됐다(`.pbxproj`에 `Pretendard-Regular.otf in Resources` 같은 항목이 생기는 걸로 확인).
+2. **`Info.plist`에 `UIAppFonts` 키로 파일명을 등록해야 한다** — 이게 없으면 폰트 파일이 번들 안에 있어도 iOS가 시스템에 "설치"하지 않아서 `Font.custom(...)`이 조용히 시스템 폰트로 폴백한다(에러가 나지 않아서 원인 찾기가 까다롭다). 여기서 삽질을 한 번 했다 — `Info.plist`를 직접 열어서 키를 추가했는데, `xcodegen generate`를 다시 돌리자 그 변경이 통째로 사라졌다. 이유는 `project.yml`의 `info.properties`가 매번 `Info.plist`를 **재생성**하기 때문 — 그 파일은 손으로 고치는 파일이 아니라 XcodeGen이 매번 새로 쓰는 산출물이었다. 그래서 `UIAppFonts`도 `project.yml`의 `info.properties` 쪽에 넣도록 고쳤다. (`project.yml`에서 관리하는 값과 `Info.plist` 파일을 둘 다 손으로 만지면 이렇게 예상 못 한 순간에 덮어써질 수 있다는 걸 다시 확인한 사례.)
+3. **정확한 PostScript 이름으로 불러와야 한다** — `Font.custom("이름", size:)`의 "이름"은 파일명이 아니라 폰트 내부에 저장된 PostScript 이름이다. 이 이름은 폰트 파일의 `name` 테이블(폰트 포맷 안에 있는 메타데이터 영역)에 들어있는데, `fc-scan`이나 `fontTools` 같은 도구가 없어도 그 테이블은 공개된 이진 포맷이라 직접 파싱할 수 있다 — 파이썬 표준 라이브러리(`struct`)만으로 짧은 스크립트를 짜서 4개 파일의 PostScript 이름(`Pretendard-Regular`, `-Medium`, `-SemiBold`, `-Bold`)을 직접 확인했다.
+
+### Dynamic Type을 유지하면서 커스텀 폰트 쓰기
+
+iOS HIG는 "하드코딩된 포인트 크기 대신 시스템 텍스트 스타일을 써서, 사용자가 설정에서 글자 크기를 키우면 텍스트도 같이 커지게 하라"고 명시한다(Dynamic Type). 커스텀 폰트를 쓰면 이 자동 크기 조절이 사라질 것 같지만, SwiftUI의 `Font.custom(_:size:relativeTo:)`는 `relativeTo:`에 넘긴 시스템 텍스트 스타일(`.body`, `.title3` 등)을 기준으로 커스텀 폰트도 같이 스케일되게 해준다. `Theme.Typography`에 이 함수를 감싼 이름 있는 상수(`title3Bold`, `headline`, `body` 등)를 만들어서, 코드에서는 `.font(.title3.bold())` 대신 `.font(Theme.Typography.title3Bold)`처럼 쓰게 했다 — 겉보기엔 시스템 폰트를 쓰던 것과 똑같은 자리에 그대로 대입하는 것뿐이지만, 실제로는 Pretendard로 렌더링되면서 Dynamic Type도 그대로 작동한다.
+
+### 예외 — 실시간 숫자는 그대로 시스템 모노스페이스
+
+Hz/cent/시간처럼 자주 갱신되는 숫자 표시(`.font(.system(..., design: .monospaced))`로 쓰던 곳)는 Pretendard로 바꾸지 않고 그대로 뒀다. 모노스페이스를 쓴 원래 이유가 "자릿수가 바뀔 때 폭이 흔들리지 않게" 하기 위해서였는데(이전 절 참고), Pretendard는 가변폭 폰트라 이 속성이 없다 — 폰트를 통일하는 김에 이 예외까지 없애버리면 오히려 이전에 고쳤던 문제가 되살아난다. "폰트 통일"이라는 요청을 글자 그대로 전부 적용하는 대신, 그 요청의 목적(가독성/일관된 인상)과 배치되지 않는 선에서 기존에 의도적으로 넣어둔 예외는 남겨뒀다.

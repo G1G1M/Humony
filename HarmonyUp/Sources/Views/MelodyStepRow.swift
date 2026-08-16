@@ -42,7 +42,7 @@ struct MelodyStepRow: View {
                 Button("5도", action: onScoreFifth)
             }
         }
-        .font(.caption2)
+        .font(Theme.Typography.caption2)
         .buttonStyle(.bordered)
     }
 }

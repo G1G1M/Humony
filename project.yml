@@ -26,6 +26,13 @@ targets:
       properties:
         UILaunchScreen: {}
         NSMicrophoneUsageDescription: "멜로디를 녹음해서 화음을 분석하기 위해 마이크가 필요합니다."
+        # 커스텀 폰트(Pretendard)를 쓰려면 iOS에 번들 폰트 파일을 등록해야 한다 —
+        # HarmonyUp/Sources/Resources/Fonts에 넣은 4개 굵기 파일명과 정확히 일치해야 함.
+        UIAppFonts:
+          - Pretendard-Regular.otf
+          - Pretendard-Medium.otf
+          - Pretendard-SemiBold.otf
+          - Pretendard-Bold.otf
     dependencies: []
 
   HarmonyUpTests:

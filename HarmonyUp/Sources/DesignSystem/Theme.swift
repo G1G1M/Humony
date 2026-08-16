@@ -40,6 +40,55 @@ enum Theme {
     static let cardCornerRadius: CGFloat = 16
 }
 
+extension Theme {
+    /// Pretendard로 통일한 타이포그래피. 실시간 숫자 표시(Hz/cent/시간 등 `design: .monospaced`로
+    /// 쓰는 값)는 자릿수가 흔들리지 않아야 해서 예외적으로 시스템 모노스페이스 폰트를 그대로
+    /// 쓴다 — 그 외 나머지 텍스트는 전부 여기서 정의한 Pretendard 폰트를 쓴다.
+    enum Typography {
+        static let title3Bold = font(.title3, weight: .bold)
+        static let headline = font(.headline, weight: .semibold)
+        static let subheadline = font(.subheadline, weight: .regular)
+        static let subheadlineBold = font(.subheadline, weight: .bold)
+        static let body = font(.body, weight: .regular)
+        static let caption = font(.caption, weight: .regular)
+        static let caption2 = font(.caption2, weight: .regular)
+
+        /// `relativeTo:`로 시스템 텍스트 스타일에 상대적으로 스케일되게 해서, 커스텀 폰트를 써도
+        /// 사용자가 설정에서 글자 크기(Dynamic Type)를 키우면 이 폰트도 같이 커지게 한다.
+        static func font(_ style: Font.TextStyle, weight: Font.Weight) -> Font {
+            .custom(fontName(for: weight), size: basePointSize(for: style), relativeTo: style)
+        }
+
+        private static func fontName(for weight: Font.Weight) -> String {
+            switch weight {
+            case .bold, .heavy, .black: return "Pretendard-Bold"
+            case .semibold: return "Pretendard-SemiBold"
+            case .medium: return "Pretendard-Medium"
+            default: return "Pretendard-Regular"
+            }
+        }
+
+        // Apple HIG가 각 텍스트 스타일에 쓰는 기본 포인트 크기(라이트 사이즈 카테고리 기준)를
+        // 그대로 따른다 — relativeTo:가 여기서부터 Dynamic Type 배율을 적용한다.
+        private static func basePointSize(for style: Font.TextStyle) -> CGFloat {
+            switch style {
+            case .largeTitle: return 34
+            case .title: return 28
+            case .title2: return 22
+            case .title3: return 20
+            case .headline: return 17
+            case .subheadline: return 15
+            case .body: return 17
+            case .callout: return 16
+            case .footnote: return 13
+            case .caption: return 12
+            case .caption2: return 11
+            @unknown default: return 17
+            }
+        }
+    }
+}
+
 extension Color {
     /// 라이트/다크에서 각각 다른 색을 쓰는 커스텀 색을 만든다. 시스템 시맨틱 색이 없는
     /// 브랜드 컬러(위 `tint`, `voiceAccent`)에만 이 방식을 쓰고, 나머지는 시스템 시맨틱 색을 쓴다.
@@ -78,7 +127,7 @@ struct HarmonyCard<Content: View>: View {
                 }
                 Text(title)
             }
-            .font(.title3.bold())
+            .font(Theme.Typography.title3Bold)
 
             content
         }

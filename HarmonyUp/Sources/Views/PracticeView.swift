@@ -144,7 +144,7 @@ struct PracticeView: View {
                             Text(statusText)
                                 .font(.system(.title2, design: .monospaced))
                             Text(isCapturing ? singleNoteStatusHint : "측정 시작을 눌러야 마이크가 켜집니다")
-                                .font(.caption)
+                                .font(Theme.Typography.caption)
                                 .foregroundStyle(.secondary)
 
                             // 노래를 시작하기 전 여기서 바로 기준음을 듣고 첫 음을 잡을 수 있게.
@@ -159,7 +159,7 @@ struct PracticeView: View {
                         HarmonyCard("조성과 화음", systemImage: "music.note.list") {
                             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                                 Text(keyText)
-                                    .font(.subheadline)
+                                    .font(Theme.Typography.subheadline)
 
                                 if sessionMode == .melody {
                                     if melodySteps.isEmpty {
@@ -177,7 +177,7 @@ struct PracticeView: View {
                                             }
                                         }
                                         Text("음을 눌러서 고치거나, 3도/5도로 그 스텝을 바로 채점할 수 있어요")
-                                            .font(.caption2)
+                                            .font(Theme.Typography.caption2)
                                             .foregroundStyle(.secondary)
 
                                         // 도-미-솔을 부르면 그 3도(또는 5도) 라인을 처음부터 끝까지
@@ -232,7 +232,7 @@ struct PracticeView: View {
 
                                 Text(String(format: "방금까지 부른 음을 그대로 3도/5도로 옮겨서 들려줘요 (확보된 목소리: %.1f초)",
                                             Double(recentVoiceBuffer.count) / recentVoiceSampleRate))
-                                    .font(.caption2)
+                                    .font(Theme.Typography.caption2)
                                     .foregroundStyle(.secondary)
                             }
                         }
@@ -293,7 +293,7 @@ struct PracticeView: View {
 
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(label).font(.subheadline.bold())
+                Text(label).font(Theme.Typography.subheadlineBold)
                 if let target {
                     Text(NoteNameConverter.convert(frequency: target.frequency)?.noteName ?? "?")
                         .font(.system(.subheadline, design: .monospaced))
@@ -307,7 +307,7 @@ struct PracticeView: View {
 
             if score == nil && target == nil {
                 Text("아직 채점 안 함")
-                    .font(.caption)
+                    .font(Theme.Typography.caption)
                     .foregroundStyle(.secondary)
             } else {
                 PitchMeterView(
