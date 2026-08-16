@@ -444,10 +444,23 @@ struct ContentView: View {
         guard !isCapturing else { return }
 
         do {
-            try audioCapture.start { result in
+            try audioCapture.start { result, rawSamples, rawSampleRate in
                 // 화음/시작음 재생 중엔 마이크 입력을 완전히 무시한다 — 안 그러면 스피커로 낸 소리가
                 // 다시 마이크로 들어가서 "새로 부른 음"으로 인식되고, 거기에 또 화음이 붙는 피드백 루프가 생긴다.
                 guard !isPlaybackBusy else { return }
+
+                // "내 목소리로 화음 만들기"용 롤링 버퍼 — result(피치 검출 성공 여부)와 무관하게
+                // 매 프레임 원본을 그대로 담는다. 예전엔 result가 있을 때만(=VAD+YIN이 성공한
+                // 프레임만) 담아서, 음과 음 사이 숨소리/발음 전환 같은 짧은 무음 구간이 통째로
+                // 빠져 여러 음이 이어붙을 때 뚝뚝 끊기듯 들리고, 아주 짧거나 조용한 음은 그
+                // 프레임 전체가 걸러져 화음에서 통째로 빠지는 문제(예: 6음인데 5음만 들림)가
+                // 있었다. 원본을 그대로 이어붙이면 실제 부른 타이밍/이음매가 그대로 보존된다.
+                recentVoiceBuffer.append(contentsOf: rawSamples)
+                recentVoiceSampleRate = rawSampleRate
+                let maxSamples = Int(recentVoiceBufferMaxDuration * rawSampleRate)
+                if recentVoiceBuffer.count > maxSamples {
+                    recentVoiceBuffer.removeFirst(recentVoiceBuffer.count - maxSamples)
+                }
 
                 guard let result else {
                     pendingPitchClass = nil
@@ -462,17 +475,6 @@ struct ContentView: View {
                 )
                 statusText = line
                 print(line) // Phase 1 완료 조건: 감지된 결과를 콘솔에 실시간 출력
-
-                // "내 목소리로 화음 만들기"용 롤링 버퍼 — 항상(VAD를 통과한 프레임마다) 최근
-                // recentVoiceBufferMaxDuration초만큼만 유지한다. 버튼을 누르는 시점이 아니라
-                // 방금까지 부른 소리를 계속 담아두는 방식이라, 버튼을 눌렀을 때 이미 조용해진
-                // 상태라도(막 노래를 마친 직후) 방금 부른 음을 그대로 쓸 수 있다.
-                recentVoiceBuffer.append(contentsOf: result.samples)
-                recentVoiceSampleRate = result.sampleRate
-                let maxSamples = Int(recentVoiceBufferMaxDuration * result.sampleRate)
-                if recentVoiceBuffer.count > maxSamples {
-                    recentVoiceBuffer.removeFirst(recentVoiceBuffer.count - maxSamples)
-                }
 
                 // 단음 모드에서는 이미 한 음을 확정했으면 더 이상 새 음을 잡지 않는다 —
                 // 안 그러면 숨소리/다음 음절/잡음이 들어올 때마다 계속 바뀐다.

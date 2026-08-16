@@ -78,4 +78,25 @@ final class VoiceSegmentTrimmerTests: XCTestCase {
 
         XCTAssertEqual(trimmed, buffer)
     }
+
+    // 롤링 버퍼가 이제(24절) 원본을 그대로 담기 때문에, 노래를 마친 뒤 버튼을 누르기 전까지의
+    // 짧은 무음이 버퍼 맨 끝에 섞여 있을 수 있다. 이 무음 꼬리 때문에 매칭이 곧바로 중단되면
+    // 안 되고, 무음을 건너뛰어 그 앞의 목표음 구간을 찾아내야 한다.
+    func testTrimSkipsTrailingSilenceAfterTargetNote() throws {
+        let previousNote = sineWave(frequency: 220.0, duration: 0.6)
+        let targetNote = sineWave(frequency: 440.0, duration: 0.8)
+        let trailingSilence: [Float] = Array(repeating: 0, count: Int(sampleRate * 0.2))
+        let buffer = previousNote + targetNote + trailingSilence
+
+        let trimmed = VoiceSegmentTrimmer.trimToStableSegment(
+            samples: buffer, sampleRate: sampleRate, targetFrequency: 440.0
+        )
+
+        XCTAssertLessThan(trimmed.count, buffer.count)
+        // 남은 길이는 대략 목표음(0.8초) + 무음 꼬리(0.2초) 정도여야 한다.
+        XCTAssertEqual(Double(trimmed.count) / sampleRate, 1.0, accuracy: 0.15)
+
+        let frequency = try XCTUnwrap(detectedFrequency(Array(trimmed.prefix(4096))))
+        XCTAssertEqual(frequency, 440.0, accuracy: 5)
+    }
 }

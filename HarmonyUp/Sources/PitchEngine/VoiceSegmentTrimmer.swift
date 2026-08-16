@@ -33,10 +33,22 @@ enum VoiceSegmentTrimmer {
         windowStarts.reverse() // 과거 -> 최근 순으로 정렬
 
         // 가장 최근 윈도우부터 거슬러 올라가면서, 목표음과 가까운 동안만 "포함 시작 지점"을 앞으로 당긴다.
+        // 버퍼는 이제(24절) VAD/피치 검출 성공 여부와 무관하게 원본을 그대로 담기 때문에,
+        // 맨 끝에 노래를 마친 뒤의 짧은 무음 꼬리가 섞여 있을 수 있다 — 아직 "진짜 소리"에
+        // 도달하기 전(reachedVoicedRegion == false)의 무음은 그냥 건너뛰고, 한 번 소리 구간에
+        // 들어선 뒤에 다시 무음이 나오면 그건 음과 음 사이의 진짜 경계이므로 거기서 멈춘다.
         var earliestKeptIndex: Int?
+        var reachedVoicedRegion = false
         for index in windowStarts.indices.reversed() {
             let windowStart = windowStarts[index]
             let window = Array(samples[windowStart..<(windowStart + windowSize)])
+
+            guard VoiceActivityDetector.isVoiceActive(samples: window) else {
+                if reachedVoicedRegion { break }
+                continue
+            }
+            reachedVoicedRegion = true
+
             guard let candidate = YINPitchDetector.detectPitch(samples: window, sampleRate: sampleRate).first else {
                 break
             }

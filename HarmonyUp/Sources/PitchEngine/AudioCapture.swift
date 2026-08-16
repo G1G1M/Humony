@@ -16,8 +16,12 @@ final class AudioCapture {
         let sampleRate: Double
     }
 
-    /// nil이면 이 프레임은 무음/저에너지로 판정되어 걸러졌다는 뜻.
-    typealias ResultHandler = (DetectionResult?) -> Void
+    /// result가 nil이면 이 프레임은 무음/저에너지로 판정되어 피치 검출에서는 걸러졌다는 뜻 —
+    /// 그래도 rawSamples/rawSampleRate는 항상 그 프레임의 원본 파형을 그대로 담아 넘긴다.
+    /// (음정 판단·채점용 로직은 `result`만 보고, "내 목소리를 그대로 녹음해서 화음 만들기"처럼
+    /// 끊김 없는 원본 오디오가 필요한 기능은 `rawSamples`를 써야 한다 — 자세한 이유는
+    /// `docs/CONCEPTS.md` 24절 참고.)
+    typealias ResultHandler = (_ result: DetectionResult?, _ rawSamples: [Float], _ rawSampleRate: Double) -> Void
 
     private let engine = AVAudioEngine()
 
@@ -66,7 +70,7 @@ final class AudioCapture {
         let result = computeResult(samples: samples, sampleRate: sampleRate)
 
         DispatchQueue.main.async { [weak self] in
-            self?.resultHandler?(result)
+            self?.resultHandler?(result, samples, sampleRate)
         }
     }
 
