@@ -6,5 +6,6 @@ struct HarmonyUpApp: App {
         WindowGroup {
             ContentView()
         }
+        .modelContainer(for: PracticeAttempt.self)
     }
 }

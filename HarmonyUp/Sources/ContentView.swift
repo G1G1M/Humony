@@ -1,6 +1,10 @@
 import SwiftUI
+import SwiftData
 
 struct ContentView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Query(sort: \PracticeAttempt.date, order: .reverse) private var attempts: [PracticeAttempt]
+
     @State private var statusText = "마이크 대기 중..."
     @State private var keyText = ""
     @State private var harmonyText = ""
@@ -11,6 +15,7 @@ struct ContentView: View {
     @State private var scoringTarget: ChordGenerator.HarmonyNote?
     @State private var scoringTargetNoteName = ""
     @State private var currentScore: PitchScorer.Score?
+    @State private var scoreSamples: [PitchScorer.Score] = []
 
     // 지금은(향후 곡 전체를 듣고 여러 화음을 뽑는 것과 달리) 단음 모드다 —
     // 한 번 음을 안정적으로 잡으면 그 음으로 조성/화음을 고정하고, 이후에 들어오는
@@ -120,6 +125,40 @@ struct ContentView: View {
                     }
                 }
 
+                // 5. 지금까지 저장된 채점 시도들의 요약 — PRD 3.2.3 "정확도 요약 + 자주 벗어난 화음 유형"
+                flowSection(step: 5, title: "세션 기록") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        if attempts.isEmpty {
+                            Text("아직 기록 없음 — 채점을 중지하거나 다른 음으로 바꾸면 이번 시도가 저장됩니다")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            HStack(spacing: 24) {
+                                intervalSummary(label: "3도", list: thirdAttempts)
+                                intervalSummary(label: "5도", list: fifthAttempts)
+                            }
+
+                            if let message = weakerIntervalMessage {
+                                Text(message)
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                            }
+
+                            Divider()
+
+                            ForEach(attempts.prefix(5), id: \.persistentModelID) { attempt in
+                                HStack {
+                                    Text("\(attempt.targetNoteName) (\(attempt.intervalRawValue == "third" ? "3도" : "5도"))")
+                                    Spacer()
+                                    Text(String(format: "%.0f%% 정확", attempt.onPitchRatio * 100))
+                                    Text(String(format: "평균 ±%.0fcent", attempt.averageAbsCentsOffset))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .font(.system(.caption, design: .monospaced))
+                            }
+                        }
+                    }
+                }
+
                 Button("다시 시작", role: .destructive, action: resetSession)
                     .buttonStyle(.borderedProminent)
                     .frame(maxWidth: .infinity)
@@ -132,6 +171,36 @@ struct ContentView: View {
             startingNoteTask?.cancel()
             audioCapture.stop()
             tonePlayer.stop()
+        }
+    }
+
+    private var thirdAttempts: [PracticeAttempt] { attempts.filter { $0.intervalRawValue == "third" } }
+    private var fifthAttempts: [PracticeAttempt] { attempts.filter { $0.intervalRawValue == "fifth" } }
+
+    private func averageOnPitchRatio(_ list: [PracticeAttempt]) -> Double? {
+        guard !list.isEmpty else { return nil }
+        return list.map(\.onPitchRatio).reduce(0, +) / Double(list.count)
+    }
+
+    /// 3도/5도 평균 정확도 차이가 뚜렷하면(10%p 이상) 어느 쪽에서 더 자주 벗어나는지 알려준다 —
+    /// PRD 페르소나 시나리오의 "5도 화음에서 정확도가 낮음을 확인" 같은 걸 구현한 것.
+    private var weakerIntervalMessage: String? {
+        guard let thirdAverage = averageOnPitchRatio(thirdAttempts),
+              let fifthAverage = averageOnPitchRatio(fifthAttempts),
+              abs(thirdAverage - fifthAverage) > 0.1 else { return nil }
+        return thirdAverage < fifthAverage ? "3도 화음에서 더 자주 벗어나는 편이에요" : "5도 화음에서 더 자주 벗어나는 편이에요"
+    }
+
+    @ViewBuilder
+    private func intervalSummary(label: String, list: [PracticeAttempt]) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+            if let average = averageOnPitchRatio(list) {
+                Text(String(format: "%.0f%% (%d회)", average * 100, list.count))
+                    .font(.system(.body, design: .monospaced))
+            } else {
+                Text("기록 없음").font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -204,7 +273,11 @@ struct ContentView: View {
                     // 원본 프레임 주파수를 그대로 채점하면 비브라토/발성 흔들림 때문에 바늘이
                     // 지저분하게 튄다 — 스무딩을 거친 값으로 채점해서 "지금 대충 맞는지"가 잘 보이게 한다.
                     let smoothedFrequency = pitchSmoother.smooth(frequency: result.frequency)
-                    currentScore = PitchScorer.score(sungFrequency: smoothedFrequency, targetFrequency: target.frequency)
+                    let score = PitchScorer.score(sungFrequency: smoothedFrequency, targetFrequency: target.frequency)
+                    currentScore = score
+                    if let score {
+                        scoreSamples.append(score) // 이번 시도가 끝나면 PracticeSummary로 압축해서 저장한다
+                    }
                 }
             }
         } catch {
@@ -275,8 +348,15 @@ struct ContentView: View {
     /// 채점 중에 다른 쪽을 누르면 멈추지 않고 그쪽 목표로 바로 전환된다 — 3도/5도를
     /// 번갈아 연습할 때 매번 멈췄다 다시 시작할 필요가 없게.
     private func toggleScoring(interval: ChordGenerator.Interval) {
-        if let scoringTarget, scoringTarget.interval == interval {
-            self.scoringTarget = nil
+        let isStoppingSameInterval = scoringTarget?.interval == interval
+
+        // 지금까지 채점 중이던 시도(꺼지든, 다른 음으로 바뀌든)가 있으면 기록으로 남긴다.
+        if scoringTarget != nil {
+            finalizeCurrentAttempt()
+        }
+
+        if isStoppingSameInterval {
+            scoringTarget = nil
             scoringTargetNoteName = ""
             currentScore = nil
             return
@@ -289,7 +369,30 @@ struct ContentView: View {
         pitchSmoother.reset() // 이전 채점(또는 다른 음)에서 쓰던 값이 새 채점에 섞여 들어가지 않도록
     }
 
+    /// 지금까지 쌓인 채점 샘플들을 하나의 요약(PracticeSummary.Aggregate)으로 압축해서
+    /// SwiftData에 저장하고, 다음 시도를 위해 샘플 버퍼를 비운다.
+    private func finalizeCurrentAttempt() {
+        defer { scoreSamples = [] }
+
+        guard let target = scoringTarget,
+              let aggregate = PracticeSummary.aggregate(scores: scoreSamples) else { return }
+
+        let attempt = PracticeAttempt(
+            date: Date(),
+            intervalRawValue: target.interval == .third ? "third" : "fifth",
+            targetNoteName: scoringTargetNoteName,
+            sampleCount: aggregate.sampleCount,
+            onPitchRatio: aggregate.onPitchRatio,
+            averageAbsCentsOffset: aggregate.averageAbsCentsOffset
+        )
+        modelContext.insert(attempt)
+    }
+
     private func resetSession() {
+        if scoringTarget != nil {
+            finalizeCurrentAttempt() // 리셋 직전까지의 채점 시도도 버리지 않고 기록으로 남긴다
+        }
+
         tonePlaybackTask?.cancel()
         tonePlaybackTask = nil
         startingNoteTask?.cancel()

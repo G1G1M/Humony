@@ -19,17 +19,20 @@
 - 서버/백엔드 없음 — 전 과정 온디바이스 처리가 기본 원칙
 - 외부 유료 API(Klangio 등)는 v1 범위에서 사용하지 않음
 
-## 현재 단계: Phase 3 — 화음 발성 훈련 UI + 실시간 채점
+## 현재 단계: Phase 3 완료 — 다음 단계 논의 필요
 
-Phase 1(YIN 피치 검출)과 Phase 2(조성 판별 + 화음 생성 + 마이크 파이프라인 연결)는 완료됨 — 상세는 `docs/phase-1-yin-prototype.md`, `docs/CONCEPTS.md` 참고.
+Phase 1(YIN 피치 검출), Phase 2(조성 판별 + 화음 생성 + 마이크 파이프라인 연결), Phase 3(화음 발성 훈련 UI + 실시간 채점)까지 전부 완료됨 — 상세는 `docs/phase-1-yin-prototype.md`, `docs/CONCEPTS.md` 참고.
 
-Phase 3 핵심 로직 구현 완료:
-- `TonePlayer`: 목표음/시작음(A4) 재생. 배음 합성 + envelope으로 음질 개선, 재생 중엔 마이크 무시(피드백 루프 방지)
-- `PitchScorer`: 목표 주파수 대비 사용자 음정을 cent 단위로 채점 (±35 cent 허용오차, 잠정값)
-- 동시 재생+채점 대신 **콜앤리스폰스**(재생 → 정지 → 마이크 재개 → 채점) 방식 채택 — `.playAndRecord` + `.measurement`에서는 AEC가 없어 동시 처리가 어려움
-- `ContentView`를 1.실시간 피치 → 2.조성 판별 → 3.화음 제안 → 4.따라 부르기 채점, 번호 붙은 섹션으로 재구성해 파이프라인 흐름이 화면에 드러나게 함
+Phase 3 최종 구성:
+- `TonePlayer`: 목표음/시작음(A4) 재생. 배음 합성 + envelope, 재생 중엔 마이크 무시(피드백 루프 방지)
+- `PitchScorer` + `PitchSmoother`: cent 단위 채점(±35cent 허용오차) + EMA 스무딩으로 비브라토 완화
+- **단음 캡처 모드**: 같은 pitch class가 3프레임(~140ms) 연속 유지돼야 확정, 확정 후 조성/화음 고정(다른 소리에 안 휩쓸림) — 곡 전체를 듣고 여러 화음을 뽑는 건 이후 단계의 별도 스코프
+- 3도/5도 각각 채점 가능(`toggleScoring(interval:)`)
+- 동시 재생+채점 대신 **콜앤리스폰스**(재생 → 정지 → 마이크 재개 → 채점) 방식 — `.playAndRecord`+`.measurement`는 AEC가 없어 동시 처리가 어려움
+- `PracticeSummary` + `PracticeAttempt`(SwiftData): 채점 시도를 요약 통계로 압축해 저장, 3도/5도 평균 정확도 비교로 "자주 벗어난 화음 유형" 안내
+- `ContentView`를 1.실시간 피치 → 2.조성 판별 → 3.화음 제안 → 4.채점 → 5.세션 기록, 번호 섹션으로 구성
 
-시뮬레이터 빌드/테스트 통과, 실기기 재확인은 다음 세션 대기 중. 다음은 세션 종료 후 정확도 요약 + 자주 벗어난 화음 유형 리포트(PRD 3.2.3 마지막 AC).
+실기기 확인 완료. 다음 단계(곡 전체 입력, Phase 4 v2 항목 등)는 사용자와 논의 후 결정.
 
 ## 코딩 컨벤션
 
