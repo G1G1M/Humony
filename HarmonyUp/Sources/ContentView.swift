@@ -314,6 +314,7 @@ struct ContentView: View {
             }
             .padding()
         }
+        .tint(Theme.tint) // 앱 전역 유일한 인터랙션 틴트(Theme.swift) — 버튼/피커 등에 일괄 적용
         .onDisappear {
             tonePlaybackTask?.cancel()
             startingNoteTask?.cancel()

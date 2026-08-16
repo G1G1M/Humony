@@ -11,3 +11,6 @@ HarmonyUp.xcodeproj/
 
 # macOS
 .DS_Store
+
+# 로컬 개발 도구 설정(Impeccable 디자인 스킬이 설치한 Codex 훅 등) — 앱 코드 아님
+.codex/

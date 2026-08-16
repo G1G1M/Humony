@@ -30,7 +30,8 @@
 - [x] **음이 끊기고 일부가 통째로 빠지던 근본 원인 수정**: 롤링 버퍼가 피치 검출 성공한 프레임만 담고 있어서, 음 사이 숨소리 구간이 잘려 이어붙듯 들리고 짧거나 조용한 음은 통째로 누락됐음(6음 중 5음만 들림). `AudioCapture` 콜백에 raw 샘플을 항상 함께 넘기도록 바꿔서, 검출 성공 여부와 무관하게 실제 마이크 파형이 원래 타이밍 그대로 버퍼에 쌓이게 수정
 - [x] **화음 만드는 속도 개선**: Debug 빌드가 기본적으로 최적화 없이(`-Onone`) 컴파일되던 게 WSOLA 연산을 느리게 만든 주 원인 → Debug 설정에서도 `SWIFT_OPTIMIZATION_LEVEL: -O`로 컴파일하도록 변경 + `PitchShifter`의 가장 무거운 내적 계산을 Accelerate(`vDSP_dotpr`)로 벡터화
 - [x] **목소리 화음 재생 중 마이크 미차단 버그 수정**: `VoiceClipPlayer` 재생만 콜앤리스폰스 규칙(`isPlaybackBusy`)에서 빠져 있어서, 재생 중 스피커 소리가 마이크로 되먹임돼 멜로디/조성 판단이 오염되던 근본 원인 발견·수정. 재생 완료 시점을 정확히 추적(`completionCallbackType: .dataPlayedBack`)해서 `isPlayingVoiceClip` 상태로 반영
-- [x] **출력 음질 다듬기**: WSOLA 오버랩을 75%→87.5%로 올려 그레인 경계의 지지직거림 완화(vDSP 최적화로 확보한 여유를 재투자, 연산량 거의 그대로), 재생 시작/끝 클릭음 제거용 페이드 인/아웃(`AudioGain.applyFadeInOut`) 추가. 실기기 설치·실행 완료, 청취 확인 대기
+- [x] **출력 음질 다듬기**: WSOLA 오버랩을 75%→87.5%로 올려 그레인 경계의 지지직거림 완화(vDSP 최적화로 확보한 여유를 재투자, 연산량 거의 그대로), 재생 시작/끝 클릭음 제거용 페이드 인/아웃(`AudioGain.applyFadeInOut`) 추가
+- [ ] **UI/UX 리디자인 진행 중 (Phase 1/8)**: 디자인 시스템 기반(`Theme.swift` — 단일 인터랙션 틴트, 시스템 시맨틱 컬러 우선, `HarmonyCard` 공용 카드 컨테이너) 추가, `PitchMeterView` 색상 연결. 시뮬레이터 라이트/다크 스크린샷 확인 완료. 남은 단계: 루트 탭 골격 → 캡처/조성+화음/목소리 화음/채점 카드 분리 → 기록 탭 → 다크모드·Dynamic Type 다듬기
 
 ## 구성 요소 (`HarmonyUp/Sources/PitchEngine/`)
 

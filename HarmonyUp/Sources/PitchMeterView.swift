@@ -27,7 +27,7 @@ struct PitchMeterView: View {
 
                     // 허용오차(정확 판정) 구간을 중앙에 음영으로 표시
                     RoundedRectangle(cornerRadius: 5)
-                        .fill(Color.green.opacity(0.22))
+                        .fill(Theme.pitchGood.opacity(0.22))
                         .frame(width: toleranceWidth)
                         .position(x: midX, y: h / 2)
 
@@ -42,7 +42,7 @@ struct PitchMeterView: View {
                         let x = midX + CGFloat(clamped / displayRangeCents) * (w / 2)
 
                         Circle()
-                            .fill(isOnPitch ? Color.green : Color.red)
+                            .fill(isOnPitch ? Theme.pitchGood : Theme.pitchBad)
                             .frame(width: 20, height: 20)
                             .position(x: x, y: h / 2)
                             .animation(.easeOut(duration: 0.12), value: cents)
