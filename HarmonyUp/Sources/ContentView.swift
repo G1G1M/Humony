@@ -253,6 +253,9 @@ struct ContentView: View {
     }
 
     private var singleNoteStatusHint: String {
+        if scoringTarget != nil {
+            return "🎯 채점 중 — 목표음을 따라 부르는 동안엔 새 멜로디 음을 잡지 않습니다"
+        }
         switch sessionMode {
         case .single:
             return hasCapturedNote ? "🔒 음 고정됨 — 다시 시작을 눌러야 새로 잡습니다" : "음을 안정적으로 내면 자동으로 잡습니다"
@@ -340,8 +343,10 @@ struct ContentView: View {
                 // 단음 모드에서는 이미 한 음을 확정했으면 더 이상 새 음을 잡지 않는다 —
                 // 안 그러면 숨소리/다음 음절/잡음이 들어올 때마다 계속 바뀐다.
                 // 멜로디 모드에서는 이 가드가 없다 — 음이 바뀔 때마다 계속 새로 잡아야 하니까.
-                // (아래 채점 로직은 이 블록 밖에서 계속 돌아간다 — 확정된 목표음을 따라 부르는 걸 들어야 하니까)
-                let shouldEvaluateCapture = sessionMode == .melody || !hasCapturedNote
+                // 단, 채점 중(scoringTarget != nil)에는 멜로디 모드에서도 캡처를 멈춘다 —
+                // 안 그러면 목표음을 따라 부르는 것 자체가 "새 멜로디 음"으로 잡혀서 조성/화음이
+                // 계속 바뀌고, suggestedHarmony가 갑자기 nil이 돼서 채점이 먹통이 되는 문제가 있었다.
+                let shouldEvaluateCapture = scoringTarget == nil && (sessionMode == .melody || !hasCapturedNote)
 
                 if shouldEvaluateCapture {
                     // 같은 pitch class가 몇 프레임 연속 유지돼야 "진짜 이 음을 내고 있다"고 보고 확정한다.
