@@ -20,6 +20,10 @@ struct ContentView: View {
     }
     @State private var sessionMode: SessionMode = .single
 
+    // 예전엔 화면이 뜨자마자 자동으로 마이크를 켰는데, 사용자가 원하는 타이밍에
+    // 직접 "측정 시작"을 눌러야 캡처가 시작되도록 바꿨다 — 준비되기 전에 소리가 잡히는 걸 방지.
+    @State private var isCapturing = false
+
     @State private var statusText = "마이크 대기 중..."
     @State private var keyText = ""
     @State private var harmonyText = ""
@@ -85,10 +89,13 @@ struct ContentView: View {
 
                 // 1. 지금 마이크가 뭘 듣고 있는지 — 파이프라인의 첫 단계(YIN)
                 flowSection(step: 1, title: "실시간 피치") {
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Button(isCapturing ? "측정 중지" : "측정 시작", action: toggleCapture)
+                            .buttonStyle(.borderedProminent)
+
                         Text(statusText)
                             .font(.system(.title2, design: .monospaced))
-                        Text(singleNoteStatusHint)
+                        Text(isCapturing ? singleNoteStatusHint : "측정 시작을 눌러야 마이크가 켜집니다")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -224,7 +231,6 @@ struct ContentView: View {
             }
             .padding()
         }
-        .onAppear(perform: startCapture)
         .onDisappear {
             tonePlaybackTask?.cancel()
             startingNoteTask?.cancel()
@@ -287,7 +293,17 @@ struct ContentView: View {
         .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
     }
 
-    private func startCapture() {
+    /// "측정 시작/중지" 버튼에 연결된다. AudioCapture는 stop() 이후 다시 start()해도
+    /// 안전하게 재사용 가능하도록 만들어져 있어서(탭을 새로 걸고 엔진을 다시 돌림),
+    /// 버튼을 여러 번 눌러도 문제없다.
+    private func toggleCapture() {
+        if isCapturing {
+            audioCapture.stop()
+            isCapturing = false
+            statusText = "측정 중지됨"
+            return
+        }
+
         do {
             try audioCapture.start { result in
                 // 화음/시작음 재생 중엔 마이크 입력을 완전히 무시한다 — 안 그러면 스피커로 낸 소리가
@@ -363,6 +379,8 @@ struct ContentView: View {
                     }
                 }
             }
+            isCapturing = true
+            statusText = "..."
         } catch {
             statusText = "마이크 시작 실패: \(error.localizedDescription)"
         }
