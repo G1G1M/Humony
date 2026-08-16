@@ -36,11 +36,15 @@ struct ContentView: View {
     // 화음의 각 음을 순서대로 들려줄 때 한 음당 재생하는 길이.
     private let noteHoldDuration: Duration = .milliseconds(800)
 
-    // 아직 부른 멜로디가 없으면 조성/화음을 알 수 없으므로, 시작음은 조성과 무관한
-    // 표준 기준음 A4(440Hz) — NoteNameConverter가 쓰는 기준 주파수와 동일 — 로 고정한다.
-    // 무반주로 노래할 때 첫 음을 잡기 위해 짧게 불어주는 "피치 파이프"와 같은 역할.
-    private let startingNoteFrequency = 440.0
+    // 시작음(무반주로 노래할 때 첫 음을 잡기 위해 짧게 불어주는 "피치 파이프")의 MIDI 노트 번호.
+    // 곡마다 부르기 편한 음이 다르므로 A4(440Hz, MIDI 69)를 기본값으로 하되 직접 고를 수 있게 한다.
+    @State private var startingNoteMIDI = 69
+    private let startingNoteRange = 48...84 // C3~C6, 일반적인 발성 범위를 넉넉히 커버
     private let startingNoteDuration: Duration = .seconds(2)
+
+    private var startingNoteName: String {
+        NoteNameConverter.convert(frequency: NoteNameConverter.frequency(forMIDINote: startingNoteMIDI))?.noteName ?? "?"
+    }
 
     // 재생 중(화음/시작음)엔 마이크를 완전히 무시한다 — 스피커 소리가 되먹임되는 피드백 루프 방지.
     private var isPlaybackBusy: Bool { isPlayingTone || isPlayingStartingNote }
@@ -75,7 +79,15 @@ struct ContentView: View {
                             .foregroundStyle(harmonyText.isEmpty ? .secondary : .primary)
 
                         HStack {
-                            Button(isPlayingStartingNote ? "재생 중…" : "시작음 듣기 (A4)", action: playStartingNote)
+                            Stepper(value: $startingNoteMIDI, in: startingNoteRange) {
+                                Text("첫 음: \(startingNoteName)")
+                                    .font(.system(.body, design: .monospaced))
+                            }
+                            .disabled(isPlaybackBusy)
+                        }
+
+                        HStack {
+                            Button(isPlayingStartingNote ? "재생 중…" : "시작음 듣기", action: playStartingNote)
                                 .disabled(isPlaybackBusy)
                             Button(isPlayingTone ? "화음 정지" : "화음 듣기 (3도→5도)", action: toggleTonePlayback)
                                 .disabled((melodySession.suggestedHarmony == nil && !isPlayingTone) || isPlayingStartingNote)
@@ -322,14 +334,15 @@ struct ContentView: View {
         }
     }
 
-    /// 노래를 시작하기 전 기준음(A4)을 잠깐 들려준다 — 무반주로 노래할 때 첫 음을 잡기 위한 "피치 파이프".
-    /// 화음 재생과 마찬가지로 재생 중엔 마이크를 무시해서 스피커 소리가 되먹임되는 걸 막는다.
+    /// 노래를 시작하기 전 사용자가 고른 기준음을 잠깐 들려준다 — 무반주로 노래할 때
+    /// 첫 음을 잡기 위한 "피치 파이프". 화음 재생과 마찬가지로 재생 중엔 마이크를 무시해서
+    /// 스피커 소리가 되먹임되는 걸 막는다.
     private func playStartingNote() {
         guard !isPlaybackBusy else { return }
 
         do {
             try tonePlayer.start()
-            tonePlayer.setFrequency(startingNoteFrequency)
+            tonePlayer.setFrequency(NoteNameConverter.frequency(forMIDINote: startingNoteMIDI))
             isPlayingStartingNote = true
         } catch {
             statusText = "재생 실패: \(error.localizedDescription)"
