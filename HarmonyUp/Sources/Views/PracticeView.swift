@@ -245,12 +245,14 @@ struct PracticeView: View {
                                             voiceButton(for: .third)
                                             voiceButton(for: .fifth)
                                             voiceFullChordButton
+                                            voiceChoirOnlyButton
                                         }
                                         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                                             voiceButton(for: .bass)
                                             voiceButton(for: .third)
                                             voiceButton(for: .fifth)
                                             voiceFullChordButton
+                                            voiceChoirOnlyButton
                                         }
                                     }
                                     .buttonStyle(.bordered)
@@ -334,9 +336,19 @@ struct PracticeView: View {
 
     private var voiceFullChordButton: some View {
         Button {
-            recordAndHarmonizeFullChordWithVoice()
+            recordAndHarmonizeFullChordWithVoice(includeMelody: true)
         } label: {
             Label("내 목소리로 전체 화음", systemImage: "waveform")
+        }
+    }
+
+    // "화음이 골고루 안 들린다"는 피드백에 대응 — 리드 멜로디를 빼고 생성된 3성부(베이스/3도/5도)만
+    // 들려줘서, 화음 성부 자체가 잘 만들어졌는지(리드 멜로디에 묻히지 않고) 바로 확인할 수 있게 한다.
+    private var voiceChoirOnlyButton: some View {
+        Button {
+            recordAndHarmonizeFullChordWithVoice(includeMelody: false)
+        } label: {
+            Label("화음만 듣기 (멜로디 제외)", systemImage: "waveform")
         }
     }
 
@@ -708,9 +720,11 @@ struct PracticeView: View {
         }
     }
 
-    /// "내 목소리로 베이스"/"3도"/"5도"는 한 음씩만 들려주는데, 이건 원음(리드 멜로디, 그대로) +
-    /// 베이스 + 3도 + 5도로 옮긴 목소리를 한꺼번에 섞어서 아카펠라 4성부처럼 들려준다.
-    private func recordAndHarmonizeFullChordWithVoice() {
+    /// "내 목소리로 베이스"/"3도"/"5도"는 한 음씩만 들려주는데, 이건 베이스+3도+5도로 옮긴
+    /// 목소리를(그리고 `includeMelody`가 true면 원음/리드 멜로디까지) 한꺼번에 섞어서
+    /// 아카펠라처럼 들려준다. `includeMelody: false`로 부르면 생성된 3성부만 남아서, 리드
+    /// 멜로디에 묻히지 않고 화음 성부 자체가 잘 만들어졌는지 그대로 확인할 수 있다.
+    private func recordAndHarmonizeFullChordWithVoice(includeMelody: Bool) {
         guard !isPlaybackBusy else {
             statusText = "다른 소리가 재생 중이에요 — 끝난 뒤 다시 눌러주세요"
             return
@@ -733,18 +747,19 @@ struct PracticeView: View {
         let recorded = recentVoiceBuffer
         let rate = recentVoiceSampleRate
         let rootFrequency = melodySession.lastNote?.frequency
-        statusText = "전체 화음 만드는 중…"
+        statusText = includeMelody ? "전체 화음 만드는 중…" : "화음만 만드는 중…"
 
         Task {
-            // 원음(비율 1.0, 시프트 없이 그대로, 리드 멜로디) + 베이스(한 옥타브 아래, 비율 < 1) +
-            // 3도 + 5도로 각각 옮긴 목소리를 만든다. PitchShifter.shift는 비율이 1보다 작아도
-            // (음을 낮출 때도) 그대로 동작하는 양방향 WSOLA라 베이스만 따로 다른 처리가 필요 없다.
+            // 베이스(한 옥타브 아래, 비율 < 1) + 3도 + 5도로 각각 옮긴 목소리를 만든다.
+            // PitchShifter.shift는 비율이 1보다 작아도(음을 낮출 때도) 그대로 동작하는
+            // 양방향이라 베이스만 따로 다른 처리가 필요 없다.
             let bass = PitchShifter.shift(samples: recorded, pitchRatio: bassRatio, sampleRate: rate, expectedFrequency: rootFrequency)
             let third = PitchShifter.shift(samples: recorded, pitchRatio: thirdRatio, sampleRate: rate, expectedFrequency: rootFrequency)
             let fifth = PitchShifter.shift(samples: recorded, pitchRatio: fifthRatio, sampleRate: rate, expectedFrequency: rootFrequency)
-            // 네 트랙을 섞으면 각자보다 커지므로, mixAndNormalize가 합친 뒤 다시 피크 기준으로
-            // 정규화해서 서로 다른 음 개수에 상관없이 항상 비슷한 체감 음량이 되게 한다.
-            let mixed = AudioGain.mixAndNormalize([recorded, bass, third, fifth])
+            let tracks = includeMelody ? [recorded, bass, third, fifth] : [bass, third, fifth]
+            // 트랙들을 섞으면 각자보다 커지므로, mixAndNormalize가 합친 뒤 다시 피크 기준으로
+            // 정규화해서 트랙 개수에 상관없이 항상 비슷한 체감 음량이 되게 한다.
+            let mixed = AudioGain.mixAndNormalize(tracks)
             let cleaned = AudioGain.applyFadeInOut(mixed, fadeSampleCount: Int(rate * voiceClipFadeDuration))
 
             do {
@@ -752,7 +767,7 @@ struct PracticeView: View {
                 try voiceClipPlayer.play(samples: cleaned, sampleRate: rate) {
                     isPlayingVoiceClip = false
                 }
-                statusText = "내 목소리로 만든 전체 화음을 재생합니다"
+                statusText = includeMelody ? "내 목소리로 만든 전체 화음을 재생합니다" : "멜로디를 뺀 화음만 재생합니다"
             } catch {
                 isPlayingVoiceClip = false
                 statusText = "재생 실패: \(error.localizedDescription)"

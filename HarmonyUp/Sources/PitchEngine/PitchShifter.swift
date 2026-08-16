@@ -1,214 +1,173 @@
-import Accelerate
 import Foundation
 
 /// 녹음된 오디오의 재생 속도(길이)는 그대로 유지하면서 피치만 바꾼다.
-/// "내 목소리로 화음 만들기" 기능의 핵심 — 사용자가 부른 음을 녹음해서 3도/5도 위로
+/// "내 목소리로 화음 만들기" 기능의 핵심 — 사용자가 부른 음을 녹음해서 베이스/3도/5도로
 /// 피치를 옮기면, 합성음이 아니라 자기 목소리 톤으로 화음을 들을 수 있다.
+///
+/// **왜 리샘플링을 안 쓰는가(v2, 46절)**: 예전 구현은 "WSOLA로 시간축을 늘인 뒤 리샘플링"
+/// 2단계 방식이었다. 리샘플링은 파형 전체를 일괄적으로 늘이거나 줄이는 연산이라, 기본주파수
+/// (피치)뿐 아니라 포먼트(성도 공명 특성 — 목소리를 "그 사람 목소리"로 들리게 하는 스펙트럼
+/// 형태)까지 같은 비율로 바뀌어버린다("다람쥐 소리"/"느린 테이프" 효과) — 실제로 사용자가
+/// "화음이 기계음 같다"고 느낀 원인이었다. 이 버전은 리샘플링 단계 자체를 없애고, 피치
+/// 동기(pitch-synchronous) 방식으로 다시 만들었다 — 로컬 피치 주기를 추정해서, 원본에서
+/// 그 주기 근처의 파형 조각(그레인)을 "모양은 그대로 둔 채" 더 자주 또는 더 뜸하게 재생만
+/// 다르게 해서 피치를 바꾼다. 그레인 파형 자체를 늘이거나 줄이지 않으므로 포먼트가 보존된다.
 enum PitchShifter {
 
     /// - Parameters:
     ///   - samples: 원본 오디오(모노, [-1, 1] 범위)
     ///   - pitchRatio: 목표 주파수 / 원래 주파수. 1보다 크면 높은 음(예: 장3도 위 = 2^(4/12)).
     ///   - expectedFrequency: 원본 음성의 대략적인 기본 주파수(Hz)를 알고 있다면 넘긴다.
-    ///     WSOLA의 그레인 탐색 반경을 피치 주기 이하로 제한해서 "주기 하나를 잘못 골라
-    ///     미세하게 음이 흔들리는" 현상(아래 `bestMatchingOffset` 설명 참고)을 줄인다.
-    ///     모르면 nil — 기존 동작(탐색 반경 = hop)으로 동작한다.
-    /// - Returns: 길이는 원본과 거의 같고, 피치만 pitchRatio배 된 오디오.
+    ///     로컬 피치를 못 찾는 구간(무음, 잡음)의 대체값(fallback)으로 쓴다. 모르면 nil —
+    ///     그런 구간은 200Hz 근처의 임의 기본값으로 대체된다(피치 검출 실패한 구간이라
+    ///     정확한 값이 아니어도 결과에 큰 영향은 없다).
+    /// - Returns: 길이는 원본과 같고, 피치만 pitchRatio배 된 오디오.
     static func shift(samples: [Float], pitchRatio: Double, sampleRate: Double, expectedFrequency: Double? = nil) -> [Float] {
         guard !samples.isEmpty, pitchRatio > 0 else { return samples }
-
-        // 1단계: 길이를 pitchRatio배로 늘이거나 줄인다(피치는 그대로 유지, WSOLA).
-        // 2단계: 그 결과를 pitchRatio배 빠르기로 리샘플링한다 — 리샘플링은 피치와 길이를
-        // 동시에 pitchRatio배 하기 때문에, 1단계에서 미리 늘려둔 길이가 다시 원래 길이로
-        // 돌아오면서 피치만 pitchRatio배로 바뀐 결과가 나온다.
-        let stretched = timeStretch(samples: samples, factor: pitchRatio, sampleRate: sampleRate, expectedFrequency: expectedFrequency)
-        return resample(samples: stretched, rate: pitchRatio)
+        let periods = estimateLocalPeriods(samples: samples, sampleRate: sampleRate, fallbackFrequency: expectedFrequency)
+        return pitchSynchronousResynthesize(samples: samples, periods: periods, pitchRatio: pitchRatio)
     }
 
-    // MARK: - 1단계: WSOLA(Waveform-Similarity Overlap-Add) 시간축 늘이기/줄이기
+    // MARK: - 1단계: 로컬 피치 주기 추정
 
-    // 그레인(조각) 하나의 길이. 너무 작으면 음색이 뭉개지고, 너무 크면 겹치는 자연스러움이 떨어진다 —
-    // 44.1kHz 기준 약 23ms로, 사람 목소리의 한 피치 주기(수 ms)보다 충분히 길다.
-    private static let grainSize = 1024
+    // 로컬 F0 추정용 분석 윈도우 — MelodySegmenter와 같은 이유(AudioCapture가 이미 80Hz까지
+    // 검증해둔 크기)로 2048을 그대로 쓰되, 홉은 훨씬 촘촘하게(1/8) 잡아서 피치가 빠르게
+    // 움직이는 구간(글라이드, 비브라토)도 잘 따라가게 한다.
+    private static let analysisWindowSize = 2048
+    private static let analysisHop = 256
 
-    // 그레인을 87.5% 겹치게(hop = grainSize/8) 이어붙인다 — 겹침이 클수록 그레인 사이 이음매가
-    // 부드러워지고 "지지직"거리는 느낌이 줄어든다. 예전엔 75%(hopDivisor=4)였는데, 탐색 반경이
-    // (25절 이후) 피치 주기에 맞춰 hop과 별개로 제한돼 있어서 겹침을 늘려도 그레인당 탐색
-    // 비용은 거의 그대로고, 대신 그레인 개수만 늘어난 만큼 창(window) 처리 비용만 조금 늘어난다 —
-    // vDSP 벡터화(25절) 이후로는 이 정도 여유가 있다고 판단해 오버랩을 올렸다.
-    private static let hopDivisor = 8
+    /// 버퍼의 각 샘플 위치마다 "그 지점의 로컬 피치 주기(샘플 수)"를 추정한다 — 결과 배열은
+    /// `samples`와 길이가 같다. 무음이거나 피치를 못 찾은 구간은 마지막으로 유효했던 주기를
+    /// 그대로 이어쓴다(hold) — 매번 fallback으로 되돌리면 그 경계에서 주기가 뚝 끊겨
+    /// 그레인 배치가 들쭉날쭉해진다.
+    static func estimateLocalPeriods(samples: [Float], sampleRate: Double, fallbackFrequency: Double?) -> [Double] {
+        let fallbackPeriod = sampleRate / (fallbackFrequency.map { $0 > 0 ? $0 : 200.0 } ?? 200.0)
+        var periods = [Double](repeating: fallbackPeriod, count: samples.count)
+        guard samples.count >= analysisWindowSize else { return periods }
 
-    // internal(private 아님)로 열어둔 이유: 유닛테스트에서 1단계(시간축 변형)와 2단계(리샘플링)를
-    // 각각 따로 검증해서 버그가 어느 단계에 있는지 격리하기 위함.
-    static func timeStretch(samples: [Float], factor: Double, sampleRate: Double? = nil, expectedFrequency: Double? = nil) -> [Float] {
-        let hop = grainSize / hopDivisor
-        // factor(=pitchRatio)가 1보다 크면(음을 높이려는 경우) 입력을 더 천천히(작은 보폭으로)
-        // 읽어서, 출력이 원본보다 길어지게 만든다 — 그래야 2단계 리샘플링 후 원래 길이로 돌아온다.
-        let inputHop = Double(hop) / factor
+        var lastPeriod = fallbackPeriod
+        var start = 0
+        while start + analysisWindowSize <= samples.count {
+            let end = start + analysisWindowSize
+            let window = Array(samples[start..<end])
+            if VoiceActivityDetector.isVoiceActive(samples: window),
+               let candidate = YINPitchDetector.detectPitch(samples: window, sampleRate: sampleRate).first,
+               candidate.frequency > 0 {
+                lastPeriod = sampleRate / candidate.frequency
+            }
+            for i in start..<min(end, periods.count) { periods[i] = lastPeriod }
+            start += analysisHop
+        }
+        // 마지막 분석 윈도우 이후(analysisWindowSize보다 짧게 남은 꼬리)는 마지막 값으로 채운다.
+        if start < periods.count {
+            for i in start..<periods.count { periods[i] = lastPeriod }
+        }
+        return periods
+    }
 
-        // 탐색 반경이 피치 한 주기보다 넓으면, 사람 목소리처럼 준주기적인 신호에서 이웃한 주기끼리
-        // 파형 모양이 거의 똑같아서 상관관계가 "한 주기 앞/뒤"를 잘못 고르는 경우가 생긴다. 매 그레인마다
-        // 이게 왔다갔다하면 결과물의 피치가 미세하게 흔들리는 것처럼 들린다("음이 왔다갔다한다"). 원본의
-        // 대략적인 기본 주파수를 알고 있으면, 탐색 반경을 반 주기 이하로 좁혀서 이 오탐 가능성을 줄인다.
-        let searchRadius: Int
-        if let sampleRate, let expectedFrequency, expectedFrequency > 0 {
-            let periodInSamples = sampleRate / expectedFrequency
-            searchRadius = max(16, min(hop, Int(periodInSamples / 2)))
-        } else {
-            searchRadius = hop
+    // MARK: - 2단계: 피치 동기 재합성(리샘플링 없음)
+
+    // 그레인 길이가 너무 짧으면(추정 주기가 비정상적으로 작으면) 음색이 뭉개지고, 너무 길면
+    // (무음 구간의 기본값 등) 계산이 불필요하게 무거워진다 — 합리적인 범위로 clamp한다.
+    private static let minHalfGrainLength = 16
+    private static let maxHalfGrainLength = 2048
+
+    /// 읽는 위치(`readPos`, 원본을 훑는 속도)와 쓰는 위치(`writePos`, 출력에 그레인을 배치하는
+    /// 속도)를 서로 다른 속도로 따로 전진시킨다 — 이 "따로 감"이 피치를 바꾸는 핵심이다.
+    /// 그레인 내용은 `readPos` 근방에서 그대로(리샘플링 없이) 뽑아서, `writePos` 위치에
+    /// 옮겨 붙인다. `readPos`는 매번 원래 로컬 주기만큼, `writePos`는 그 주기를 pitchRatio로
+    /// 나눈 값(더 짧거나 더 긴 간격)만큼 전진하므로, 두 위치는 갈수록 벌어진다 — 그 결과
+    /// 출력에서 그레인이 재배치되는 간격 자체가 원본 주기와 달라져서(더 촘촘하면 높은 음,
+    /// 더 성글면 낮은 음) 피치가 바뀐다. 그레인 파형 자체는 원본에서 그대로 잘라온 것이라
+    /// 포먼트(스펙트럼 모양)는 바뀌지 않는다.
+    ///
+    /// (처음엔 읽는 위치와 쓰는 위치를 같은 값으로 뒀었는데, 그러면 겹치는 그레인들이 전부
+    /// 원본의 "같은" 샘플 값을 서로 다른 가중치로만 더하는 셈이 되어 — 같은 값의 가중평균은
+    /// 그 값 그대로이므로 — 피치가 전혀 안 바뀌는 문제가 있었다. 그레인이 뽑힌 위치와
+    /// 옮겨 붙는 위치가 실제로 달라야 한다.)
+    ///
+    /// 부작용: pitchRatio가 1에서 멀수록(특히 1보다 작을 때, 예: 베이스=0.5) `readPos`가
+    /// `writePos`보다 느리게/빠르게 움직여서 원본의 일부만 쓰이고 나머지는 못 쓰는 경우가
+    /// 생길 수 있다 — 시간축을 그대로 유지한 채(리샘플링 없이) 피치만 바꾸는 모든 방식이
+    /// 공유하는 근본적인 한계다(짧은 목소리 클립에서는 대체로 눈에 띄지 않는다).
+    static func pitchSynchronousResynthesize(samples: [Float], periods: [Double], pitchRatio: Double) -> [Float] {
+        guard !samples.isEmpty else { return samples }
+
+        var output = [Float](repeating: 0, count: samples.count)
+        var weight = [Float](repeating: 0, count: samples.count)
+        let lastIndex = samples.count - 1
+
+        var readPos = 0.0
+        var writePos = 0.0
+        while writePos < Double(samples.count) {
+            let readCenter = min(max(Int(readPos.rounded()), 0), lastIndex)
+            let localPeriod = periods[readCenter]
+            let step = localPeriod / pitchRatio
+
+            // 그레인 반경은 "원본 로컬 주기"의 절반(전체 그레인 ≈ 주기 1개) — 실제 목소리에
+            // 가까운(배음이 풍부한) 신호로 검증한 값이다. 그레인을 이보다 넓게(주기 1~2개)
+            // 잡으면, 그레인 하나 안에 원본 파형의 주기가 여러 번 들어가버려서 — 겹쳐 더한
+            // 그레인들의 "재생 간격(step)"보다 그레인 자체가 담고 있는 원래 주파수 성분이
+            // 더 강하게 남아, 특히 피치를 크게 낮출 때(예: 베이스, step이 주기의 2배) 원래
+            // 주파수가 그대로 다시 검출되는 문제가 실측(유닛테스트)으로 확인됐다. 그레인을
+            // 주기 1개 폭(반경 0.5배)으로 좁히면 이 문제는 해결되지만, 대신 그레인 길이가
+            // step보다 짧아지는 경우(피치를 크게 낮출 때) 그레인 사이에 커버 안 되는(무음)
+            // 짧은 틈이 생길 수 있다 — 그건 아래 weight==0 구간을 선형 보간으로 메워서 처리한다.
+            let halfLength = min(maxHalfGrainLength, max(minHalfGrainLength, Int(localPeriod * 0.5)))
+            let grainLength = halfLength * 2
+            let readStart = readCenter - halfLength
+            let writeCenter = Int(writePos.rounded())
+            let writeStart = writeCenter - halfLength
+            let window = hannWindow(size: grainLength)
+
+            for i in 0..<grainLength {
+                let sourceIndex = readStart + i
+                let outIndex = writeStart + i
+                guard sourceIndex >= 0, sourceIndex <= lastIndex, outIndex >= 0, outIndex < output.count else { continue }
+                let w = window[i]
+                output[outIndex] += samples[sourceIndex] * w
+                weight[outIndex] += w
+            }
+
+            readPos += localPeriod
+            writePos += step
         }
 
-        let outputLength = max(grainSize, Int(Double(samples.count) * factor))
-        var output = [Float](repeating: 0, count: outputLength + grainSize)
-        var weight = [Float](repeating: 0, count: outputLength + grainSize)
-        let window = hannWindow(size: grainSize)
-
-        var outPos = 0.0
-        var idealInPos = 0.0
-        var previousActualStart: Int?
-
-        while Int(outPos) < outputLength {
-            let idealTarget = Int(idealInPos)
-            let inStart: Int
-
-            if let previous = previousActualStart {
-                // "그냥 hop만큼 이어서 읽었다면 나왔을 파형"(참조 구간)과 가장 비슷한 파형을
-                // 원하는 위치(idealTarget) 근처에서 찾는다 — 영교차점 하나만 보는 것과 달리,
-                // 파형 전체의 모양을 비교하기 때문에 순음처럼 여러 주기가 거의 똑같이 생긴
-                // 신호에서도 "아무 주기나" 고르는 모호함 없이 자연스러운 위상으로 이어붙인다.
-                let referenceStart = previous + hop
-                inStart = bestMatchingOffset(
-                    in: samples,
-                    referenceStart: referenceStart,
-                    searchCenter: idealTarget,
-                    searchRadius: searchRadius,
-                    compareLength: hop
-                )
-            } else {
-                inStart = idealTarget
-            }
-            previousActualStart = inStart
-
-            if inStart >= 0 && inStart + grainSize <= samples.count {
-                for i in 0..<grainSize {
-                    let w = window[i]
-                    let index = Int(outPos) + i
-                    output[index] += samples[inStart + i] * w
-                    weight[index] += w
-                }
-            }
-            outPos += Double(hop)
-            idealInPos += inputHop
-        }
-
-        // 겹쳐진 구간은 창(window) 값이 여러 번 더해져 커지므로, 누적된 가중치로 나눠서 정규화한다.
         for i in 0..<output.count where weight[i] > 0.0001 {
             output[i] /= weight[i]
         }
-
-        return Array(output.prefix(outputLength))
+        fillUncoveredGapsInPlace(&output, weight: weight)
+        return output
     }
 
-    /// `referenceStart` 위치의 파형(`compareLength` 길이)과 가장 비슷한(상관관계가 가장 큰) 구간을
-    /// `searchCenter` 근처 ±`searchRadius` 범위에서 찾아 그 시작 위치를 반환한다 — WSOLA의 핵심.
-    /// "비슷하다"는 건 단순히 부호가 바뀌는 지점(영교차) 하나가 아니라, 두 구간을 곱해서 더한 값
-    /// (내적)이 가장 큰 경우로 정의한다 — 파형 모양 전체가 가장 잘 겹치는 위치를 찾는 것.
-    private static func bestMatchingOffset(
-        in samples: [Float],
-        referenceStart: Int,
-        searchCenter: Int,
-        searchRadius: Int,
-        compareLength: Int
-    ) -> Int {
-        guard referenceStart >= 0, referenceStart + compareLength <= samples.count else {
-            return max(0, min(searchCenter, samples.count - 1))
-        }
+    /// 어떤 그레인도 닿지 않은(weight가 계속 0인) 구간은 디지털 무음(정확히 0)으로 남는다 —
+    /// 그대로 두면 재생할 때 뚝뚝 끊기는 클릭음으로 들릴 수 있다. 짧은 틈이라 정교하게
+    /// 복원할 필요는 없고, 양옆의 실제로 덮인 샘플 사이를 선형으로 이어주는 것만으로
+    /// 충분하다(사람 귀에는 매끄러운 전환처럼 들린다).
+    private static func fillUncoveredGapsInPlace(_ output: inout [Float], weight: [Float]) {
+        var i = 0
+        while i < output.count {
+            guard weight[i] <= 0.0001 else { i += 1; continue }
+            var gapEnd = i
+            while gapEnd < output.count, weight[gapEnd] <= 0.0001 { gapEnd += 1 }
 
-        let lowerBound = max(0, searchCenter - searchRadius)
-        let upperBound = min(samples.count - compareLength, searchCenter + searchRadius)
-        guard lowerBound <= upperBound else { return max(0, min(searchCenter, samples.count - 1)) }
-
-        var bestOffset = lowerBound
-        var bestScore = -Float.greatestFiniteMagnitude
-
-        // 이 내적(dot product) 계산이 WSOLA에서 가장 무거운 부분이다 — 그레인마다
-        // (탐색 반경 x compareLength)번 곱셈+덧셈을 반복한다. Swift for-loop 대신
-        // Accelerate(vDSP_dotpr)로 벡터화하면, 컴파일 최적화 수준과 무관하게(디버그
-        // 빌드에서도) 하드웨어 SIMD 명령으로 훨씬 빠르게 계산된다.
-        samples.withUnsafeBufferPointer { buffer in
-            let base = buffer.baseAddress!
-            for candidate in lowerBound...upperBound {
-                var score: Float = 0
-                vDSP_dotpr(base + referenceStart, 1, base + candidate, 1, &score, vDSP_Length(compareLength))
-                if score > bestScore {
-                    bestScore = score
-                    bestOffset = candidate
-                }
+            let leftValue = i > 0 ? output[i - 1] : (gapEnd < output.count ? output[gapEnd] : 0)
+            let rightValue = gapEnd < output.count ? output[gapEnd] : leftValue
+            let gapLength = gapEnd - i
+            for offset in 0..<gapLength {
+                let t = Float(offset + 1) / Float(gapLength + 1)
+                output[i + offset] = leftValue * (1 - t) + rightValue * t
             }
+            i = gapEnd
         }
-        return bestOffset
     }
 
     /// 반달 모양 창(Hann window) — 그레인의 시작과 끝을 0으로 부드럽게 줄여서, 겹쳐 더할 때
     /// 이음매에서 클릭음(불연속)이 나지 않게 한다.
-    ///
-    /// 분모를 `size`(주기형)로 쓴다 — `size - 1`(대칭형, 양 끝이 정확히 0)을 쓰면 75% 오버랩으로
-    /// 겹쳐 더했을 때 창들의 합이 완전히 일정(COLA, constant overlap-add)하지 않아서 미세한
-    /// 진폭 출렁임이 생긴다. 주기형으로 쓰면 겹친 창의 합이 상수가 되어 이 문제가 사라진다.
     private static func hannWindow(size: Int) -> [Float] {
         guard size > 1 else { return [1.0] }
         return (0..<size).map { i in
-            Float(0.5 - 0.5 * cos(2.0 * Double.pi * Double(i) / Double(size)))
+            Float(0.5 - 0.5 * cos(2.0 * Double.pi * Double(i) / Double(size - 1)))
         }
-    }
-
-    // MARK: - 2단계: 리샘플링(선형 보간)
-
-    static func resample(samples: [Float], rate: Double) -> [Float] {
-        guard rate > 0 else { return samples }
-
-        // rate > 1(3도/5도처럼 음을 높일 때)은 이 단계에서 사실상 다운샘플링이다 — 매 출력
-        // 샘플마다 입력을 rate배씩 건너뛰며 읽는다. 다운샘플링 전에 새 나이퀴스트 주파수보다
-        // 높은 성분을 걸러두지 않으면 그 성분이 접혀 들어와(에일리어싱) 특히 "쇠소리" 같은
-        // 거슬리는 잡음으로 들린다 — 사용자가 "화음이 어색하다"고 느낀 것들 중 상당수가
-        // 이 원인일 가능성이 크다(3도/5도가 베이스보다 훨씬 자주 쓰이는 비율이라 더 눈에 띔).
-        // rate <= 1(베이스처럼 낮출 때)은 반대로 보간(업샘플링)이라 이 문제가 없다.
-        let filtered = rate > 1 ? antiAliasFilter(samples, decimationRate: rate) : samples
-
-        let outputLength = max(1, Int(Double(filtered.count) / rate))
-        var output = [Float](repeating: 0, count: outputLength)
-
-        for i in 0..<outputLength {
-            let sourcePosition = Double(i) * rate
-            let index0 = Int(sourcePosition)
-            let fraction = Float(sourcePosition - Double(index0))
-
-            if index0 + 1 < filtered.count {
-                output[i] = filtered[index0] * (1 - fraction) + filtered[index0 + 1] * fraction
-            } else if index0 < filtered.count {
-                output[i] = filtered[index0]
-            }
-        }
-        return output
-    }
-
-    /// 다운샘플링 전에 거는 저역통과 필터 — 진짜 sinc 기반 필터 대신 단순 이동평균(박스 필터)을
-    /// 쓴 이유는, 감쇠 특성은 덜 날카롭지만(약간의 고음 뭉개짐) 구현이 짧고 인덱스 실수로
-    /// 버그가 날 여지가 거의 없어서다(귀로 직접 검증하기 어려운 DSP 코드라 단순함을 우선했다).
-    /// 탭 개수를 감쇠 비율(decimationRate)에 맞춰 정해서, 많이 접을수록(다운샘플링 비율이
-    /// 클수록) 더 넓게 평균 내 더 많은 고음을 걸러낸다.
-    static func antiAliasFilter(_ samples: [Float], decimationRate: Double) -> [Float] {
-        guard decimationRate > 1, !samples.isEmpty else { return samples }
-        let taps = max(2, Int(decimationRate.rounded()))
-
-        var output = [Float](repeating: 0, count: samples.count)
-        var runningSum: Float = 0
-        for i in 0..<samples.count {
-            runningSum += samples[i]
-            if i >= taps { runningSum -= samples[i - taps] }
-            let windowSize = Float(min(i + 1, taps))
-            output[i] = runningSum / windowSize
-        }
-        return output
     }
 }
