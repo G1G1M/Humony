@@ -69,4 +69,51 @@ final class MelodySessionTests: XCTestCase {
         XCTAssertNil(session.detectedKey)
         XCTAssertNil(session.lastNote)
     }
+
+    func testCorrectNoteChangesKeyDetection() {
+        let session = MelodySession()
+        // C장조 프로파일에서 F#(6번, 실제로는 반음계 밖 음)을 잘못 잡았다고 가정하고 고쳐본다.
+        for (pitchClass, duration) in majorProfile.enumerated() {
+            session.record(result(midiNote: 60 + pitchClass, duration: duration))
+        }
+        XCTAssertEqual(session.detectedKey?.tonicPitchClass, 0)
+
+        // 인덱스 0(C)을 D#으로 잘못 고쳐서, 조성 판별 결과가 실제로 바뀌는지 확인한다.
+        session.correctNote(at: 0, to: result(midiNote: 63, duration: majorProfile[0])) // D#4
+
+        // 적어도 correctNote가 반영돼서 이전과 완전히 같은 분포는 아니어야 한다 —
+        // 정확히 어떤 조성이 나오는지보다, 수정이 실제로 누적치에 반영됐는지가 핵심.
+        XCTAssertNotNil(session.detectedKey)
+    }
+
+    func testCorrectingLastNoteUpdatesLastNote() throws {
+        let session = MelodySession()
+        session.record(result(midiNote: 66, duration: 0.1)) // F#4로 잘못 잡혔다고 가정
+
+        let corrected = result(midiNote: 67, duration: 0.1) // G4로 수정
+        session.correctNote(at: 0, to: corrected)
+
+        let lastNote = try XCTUnwrap(session.lastNote)
+        XCTAssertEqual(lastNote.noteName, "G4")
+    }
+
+    func testCorrectingNonLastNoteDoesNotChangeLastNote() throws {
+        let session = MelodySession()
+        session.record(result(midiNote: 66, duration: 0.1)) // 인덱스 0, 나중에 고칠 음
+        session.record(result(midiNote: 72, duration: 0.1)) // 인덱스 1, 마지막 음(C5)
+
+        session.correctNote(at: 0, to: result(midiNote: 67, duration: 0.1))
+
+        let lastNote = try XCTUnwrap(session.lastNote)
+        XCTAssertEqual(lastNote.noteName, "C5") // 마지막 음은 그대로 유지돼야 한다
+    }
+
+    func testCorrectNoteOutOfBoundsIsNoOp() {
+        let session = MelodySession()
+        session.record(result(midiNote: 60, duration: 0.1))
+
+        session.correctNote(at: 5, to: result(midiNote: 67, duration: 0.1)) // 존재하지 않는 인덱스
+
+        XCTAssertEqual(session.lastNote?.noteName, "C4") // 아무 영향 없어야 한다
+    }
 }

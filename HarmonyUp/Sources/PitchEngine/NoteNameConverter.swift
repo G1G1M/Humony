@@ -33,6 +33,12 @@ enum NoteNameConverter {
         frequency(forMIDINote: Double(midiNote))
     }
 
+    /// pitch class(0=C ~ 11=B)만 놓고 옥타브 없이 음이름만 보고 싶을 때 — 수동 음 수정 UI처럼
+    /// "12개 중 하나를 고르는" 화면에서 쓴다.
+    static func pitchClassName(_ pitchClass: Int) -> String {
+        noteNames[pitchClass.mod(12)]
+    }
+
     /// - Parameter frequency: 검출된 기본 주파수(Hz). 0 이하면 nil을 반환한다.
     static func convert(frequency: Double) -> Result? {
         guard frequency > 0 else { return nil }

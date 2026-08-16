@@ -5,8 +5,9 @@ import SwiftData
 /// 부른 음마다 하나씩 쌓아서 "곡 전체를 부르면 순서대로 화음이 나오는" 흐름을 보여준다.
 private struct MelodyStep: Identifiable {
     let id = UUID()
-    let noteName: String
-    let harmonyNames: String?
+    var noteName: String
+    var midiNote: Int      // 옥타브까지 포함한 실제 MIDI 노트 — 수정 시 같은 옥타브 안에서 pitch class만 바꾸는 데 쓴다.
+    var harmonyNames: String?
 }
 
 struct ContentView: View {
@@ -116,16 +117,28 @@ struct ContentView: View {
                                     .foregroundStyle(.secondary)
                             } else {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    ForEach(melodySteps) { step in
+                                    ForEach(Array(melodySteps.enumerated()), id: \.element.id) { index, step in
                                         HStack {
-                                            Text(step.noteName)
-                                                .font(.system(.body, design: .monospaced))
+                                            // 실시간 검출이 틀렸을 때(예: F#3으로 잘못 잡힘) 눌러서 직접 고칠 수 있다.
+                                            Menu {
+                                                ForEach(0..<12, id: \.self) { pitchClass in
+                                                    Button(NoteNameConverter.pitchClassName(pitchClass)) {
+                                                        correctMelodyStep(at: index, toPitchClass: pitchClass)
+                                                    }
+                                                }
+                                            } label: {
+                                                Text("\(step.noteName) ✏️")
+                                                    .font(.system(.body, design: .monospaced))
+                                            }
                                             Text("→ \(step.harmonyNames ?? "온음계 밖")")
                                                 .font(.system(.caption, design: .monospaced))
                                                 .foregroundStyle(.secondary)
                                         }
                                     }
                                 }
+                                Text("음을 눌러서 잘못 잡힌 음을 고칠 수 있어요")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
                             }
                         } else {
                             Text(harmonyText.isEmpty ? "아직 제안 없음" : harmonyText)
@@ -361,7 +374,8 @@ struct ContentView: View {
                         }
 
                         if sessionMode == .melody {
-                            melodySteps.append(MelodyStep(noteName: result.noteName, harmonyNames: harmonyNames))
+                            let midiNote = Int(NoteNameConverter.exactMIDINote(forFrequency: result.frequency).rounded())
+                            melodySteps.append(MelodyStep(noteName: result.noteName, midiNote: midiNote, harmonyNames: harmonyNames))
                         } else if let harmonyNames {
                             harmonyText = "화음 제안: \(harmonyNames)"
                         }
@@ -488,6 +502,51 @@ struct ContentView: View {
             averageAbsCentsOffset: aggregate.averageAbsCentsOffset
         )
         modelContext.insert(attempt)
+    }
+
+    // 캡처할 때 쓰는 실제 프레임 길이와 맞춰준다 — 수정된 음도 조성 판별 가중치에서
+    // 다른 음들과 동등하게 취급되도록 (AudioCapture의 bufferSize 2048 / 44.1kHz ≈ 46ms).
+    private let approximateFrameDuration = 0.046
+
+    /// 멜로디 모드에서 잘못 잡힌 음을 사용자가 직접 골라 고친다. 같은 옥타브 안에서
+    /// pitch class만 바꾸고(F#3 -> G3처럼), MelodySession의 조성 판별 누적치도 같이 갱신한 뒤,
+    /// 이 수정으로 조성이 달라졌을 수 있으니 화면에 보이는 모든 스텝의 화음을 다시 계산한다.
+    private func correctMelodyStep(at index: Int, toPitchClass newPitchClass: Int) {
+        guard melodySteps.indices.contains(index) else { return }
+
+        let oldMIDINote = melodySteps[index].midiNote
+        let newMIDINote = oldMIDINote - oldMIDINote.mod(12) + newPitchClass
+        let newFrequency = NoteNameConverter.frequency(forMIDINote: newMIDINote)
+        guard let newNote = NoteNameConverter.convert(frequency: newFrequency) else { return }
+
+        let corrected = AudioCapture.DetectionResult(
+            frequency: newFrequency,
+            noteName: newNote.noteName,
+            centsOffset: 0,
+            confidence: 1.0,
+            pitchClass: newNote.pitchClass,
+            frameDuration: approximateFrameDuration
+        )
+        melodySession.correctNote(at: index, to: corrected)
+
+        melodySteps[index].noteName = newNote.noteName
+        melodySteps[index].midiNote = newMIDINote
+
+        guard let key = melodySession.detectedKey else { return }
+        keyText = String(format: "조성: %@ (확신도 %.2f)", key.name, key.confidence)
+
+        // 조성이 바뀌었을 수 있으므로, 지금까지 쌓인 스텝 전부를 최신 조성 기준으로 다시 계산한다 —
+        // 그래야 화면에 보이는 시퀀스가 서로 다른 조성 가정을 섞어 보여주지 않는다.
+        for i in melodySteps.indices {
+            let frequency = NoteNameConverter.frequency(forMIDINote: melodySteps[i].midiNote)
+            if let harmony = ChordGenerator.generateHarmony(melodyFrequency: frequency, key: key) {
+                melodySteps[i].harmonyNames = harmony
+                    .map { NoteNameConverter.convert(frequency: $0.frequency)?.noteName ?? "?" }
+                    .joined(separator: ", ")
+            } else {
+                melodySteps[i].harmonyNames = nil
+            }
+        }
     }
 
     private func resetSession() {
