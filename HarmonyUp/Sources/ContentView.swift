@@ -58,6 +58,15 @@ struct ContentView: View {
     @State private var playingMelodyLineInterval: ChordGenerator.Interval?
     @State private var melodyLineTask: Task<Void, Never>?
 
+    // "내 목소리로 화음 만들기" — 합성음(TonePlayer) 대신 사용자 목소리를 짧게 녹음해서
+    // PitchShifter로 3도/5도 위로 옮긴 뒤 그대로 재생한다.
+    @State private var isRecordingVoiceClip = false
+    @State private var voiceClipBuffer: [Float] = []
+    @State private var voiceClipSampleRate: Double = 44100
+    @State private var voiceClipRecordingTask: Task<Void, Never>?
+    private let voiceClipPlayer = VoiceClipPlayer()
+    private let voiceClipDuration: Duration = .milliseconds(1200)
+
     // 노이즈성 프레임 하나로 잘못 확정되지 않도록, 같은 pitch class가 이만큼
     // 연속 프레임(약 46ms x 3 = 140ms) 유지돼야 "이 음으로 확정"한다.
     private let captureStreakRequired = 3
@@ -210,6 +219,25 @@ struct ContentView: View {
                         Button(isPlayingTone ? "화음 정지" : "화음 듣기 (3도→5도)", action: toggleTonePlayback)
                             .buttonStyle(.bordered)
                             .disabled((melodySession.suggestedHarmony == nil && !isPlayingTone) || isPlayingStartingNote)
+
+                        // 합성음이 아니라 내 목소리 톤으로 화음을 듣고 싶을 때 — 짧게 녹음해서
+                        // PitchShifter로 피치를 옮긴 뒤 그대로 재생한다.
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Button(isRecordingVoiceClip ? "녹음 중…" : "내 목소리로 3도") {
+                                    recordAndHarmonizeVoice(interval: .third)
+                                }
+                                Button(isRecordingVoiceClip ? "녹음 중…" : "내 목소리로 5도") {
+                                    recordAndHarmonizeVoice(interval: .fifth)
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(!isCapturing || isPlaybackBusy || isRecordingVoiceClip || melodySession.suggestedHarmony == nil)
+
+                            Text("버튼을 누르면 1.2초 녹음 후 그 음을 3도/5도로 옮겨서 들려줘요")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
 
@@ -268,8 +296,10 @@ struct ContentView: View {
             tonePlaybackTask?.cancel()
             startingNoteTask?.cancel()
             melodyLineTask?.cancel()
+            voiceClipRecordingTask?.cancel()
             audioCapture.stop()
             tonePlayer.stop()
+            voiceClipPlayer.stop()
         }
     }
 
@@ -419,13 +449,21 @@ struct ContentView: View {
                 statusText = line
                 print(line) // Phase 1 완료 조건: 감지된 결과를 콘솔에 실시간 출력
 
+                // "내 목소리로 화음 만들기" 녹음 중이면 원본 파형을 그대로 모은다 — VAD를 통과한
+                // (즉 무음이 아닌) 프레임만 여기 도달하므로, 자연스럽게 숨/침묵 구간은 빠진다.
+                if isRecordingVoiceClip {
+                    voiceClipBuffer.append(contentsOf: result.samples)
+                    voiceClipSampleRate = result.sampleRate
+                }
+
                 // 단음 모드에서는 이미 한 음을 확정했으면 더 이상 새 음을 잡지 않는다 —
                 // 안 그러면 숨소리/다음 음절/잡음이 들어올 때마다 계속 바뀐다.
                 // 멜로디 모드에서는 이 가드가 없다 — 음이 바뀔 때마다 계속 새로 잡아야 하니까.
-                // 단, 채점 중(activeScoringInterval != nil)에는 멜로디 모드에서도 캡처를 멈춘다 —
-                // 안 그러면 목표음을 따라 부르는 것 자체가 "새 멜로디 음"으로 잡혀서 조성/화음이
-                // 계속 바뀌고, suggestedHarmony가 갑자기 nil이 돼서 채점이 먹통이 되는 문제가 있었다.
-                let shouldEvaluateCapture = activeScoringInterval == nil && (sessionMode == .melody || !hasCapturedNote)
+                // 채점 중(activeScoringInterval != nil)이거나 목소리 녹음 중에도 멜로디 모드에서
+                // 캡처를 멈춘다 — 안 그러면 목표음을 따라 부르거나 녹음용으로 내는 소리 자체가
+                // "새 멜로디 음"으로 잡혀서 조성/화음이 계속 바뀌는 문제가 있었다.
+                let shouldEvaluateCapture = activeScoringInterval == nil && !isRecordingVoiceClip
+                    && (sessionMode == .melody || !hasCapturedNote)
 
                 if shouldEvaluateCapture {
                     // 같은 pitch class가 몇 프레임 연속 유지돼야 "진짜 이 음을 내고 있다"고 보고 확정한다.
@@ -570,6 +608,46 @@ struct ContentView: View {
         }
     }
 
+    /// 마지막으로 잡은 음을 기준으로, 목표 interval(3도/5도) 위 주파수까지의 배율(pitchRatio)을 구한다.
+    private func pitchRatio(toInterval interval: ChordGenerator.Interval) -> Double? {
+        guard let lastFrequency = melodySession.lastNote?.frequency,
+              let harmony = melodySession.suggestedHarmony,
+              let target = harmony.first(where: { $0.interval == interval }) else { return nil }
+        return target.frequency / lastFrequency
+    }
+
+    /// "내 목소리로 화음 만들기" — 짧게 녹음한 뒤, 그 녹음을 3도/5도 위로 피치 시프트해서
+    /// 합성음이 아니라 사용자 자신의 목소리 톤으로 화음을 들려준다.
+    private func recordAndHarmonizeVoice(interval: ChordGenerator.Interval) {
+        guard isCapturing, !isPlaybackBusy, !isRecordingVoiceClip else { return }
+        guard let ratio = pitchRatio(toInterval: interval) else { return }
+
+        voiceClipBuffer = []
+        isRecordingVoiceClip = true
+        statusText = "🎤 녹음 중… (\(interval == .third ? "3도" : "5도")로 화음을 만듭니다)"
+
+        voiceClipRecordingTask = Task {
+            try? await Task.sleep(for: voiceClipDuration)
+            guard !Task.isCancelled else { return }
+            isRecordingVoiceClip = false
+
+            let recorded = voiceClipBuffer
+            let rate = voiceClipSampleRate
+            guard !recorded.isEmpty else {
+                statusText = "녹음된 소리가 없어요 — 녹음되는 동안 계속 소리를 내주세요"
+                return
+            }
+
+            let shifted = PitchShifter.shift(samples: recorded, pitchRatio: ratio, sampleRate: rate)
+            do {
+                try voiceClipPlayer.play(samples: shifted, sampleRate: rate)
+                statusText = "내 목소리로 만든 화음을 재생합니다"
+            } catch {
+                statusText = "재생 실패: \(error.localizedDescription)"
+            }
+        }
+    }
+
     /// 노래를 시작하기 전 사용자가 고른 기준음을 잠깐 들려준다 — 무반주로 노래할 때
     /// 첫 음을 잡기 위한 "피치 파이프". 화음 재생과 마찬가지로 재생 중엔 마이크를 무시해서
     /// 스피커 소리가 되먹임되는 걸 막는다.
@@ -682,7 +760,9 @@ struct ContentView: View {
             centsOffset: 0,
             confidence: 1.0,
             pitchClass: newNote.pitchClass,
-            frameDuration: approximateFrameDuration
+            frameDuration: approximateFrameDuration,
+            samples: [],
+            sampleRate: 44100
         )
         melodySession.correctNote(at: index, to: corrected)
 
@@ -717,10 +797,15 @@ struct ContentView: View {
         startingNoteTask = nil
         melodyLineTask?.cancel()
         melodyLineTask = nil
+        voiceClipRecordingTask?.cancel()
+        voiceClipRecordingTask = nil
         tonePlayer.stop()
+        voiceClipPlayer.stop()
         isPlayingTone = false
         isPlayingStartingNote = false
         playingMelodyLineInterval = nil
+        isRecordingVoiceClip = false
+        voiceClipBuffer = []
         activeScoringInterval = nil
         lockedScoringTargets = [:]
         latestScores = [:]

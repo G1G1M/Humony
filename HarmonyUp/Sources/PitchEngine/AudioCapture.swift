@@ -12,6 +12,8 @@ final class AudioCapture {
         let confidence: Double
         let pitchClass: Int      // KeyDetector 입력용 (옥타브 무관 음이름)
         let frameDuration: Double  // 이 프레임이 실제로 몇 초 길이였는지 — MelodySession이 조성 판별 가중치로 사용
+        let samples: [Float]      // 이 프레임의 원본 파형 — "내 목소리로 화음 만들기"처럼 녹음이 필요한 기능용
+        let sampleRate: Double
     }
 
     /// nil이면 이 프레임은 무음/저에너지로 판정되어 걸러졌다는 뜻.
@@ -85,7 +87,9 @@ final class AudioCapture {
             centsOffset: note.centsOffset,
             confidence: candidate.confidence,
             pitchClass: note.pitchClass,
-            frameDuration: Double(samples.count) / sampleRate
+            frameDuration: Double(samples.count) / sampleRate,
+            samples: samples,
+            sampleRate: sampleRate
         )
     }
 }

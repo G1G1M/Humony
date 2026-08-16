@@ -12,7 +12,9 @@ final class MelodySessionTests: XCTestCase {
             centsOffset: note.centsOffset,
             confidence: 0.99,
             pitchClass: note.pitchClass,
-            frameDuration: duration
+            frameDuration: duration,
+            samples: [],
+            sampleRate: 44100
         )
     }
 
