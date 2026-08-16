@@ -158,17 +158,23 @@ struct PracticeView: View {
     }
     @State private var isPlayingVoiceClip = false
 
+    // 화음이 나오는 순간(카드 2개가 한꺼번에 등장) 새로 나타난 카드로 자동 스크롤하기 위한 판정.
+    // melodySession.suggestedHarmony(Optional 배열) 자체는 Equatable이 아니라서, onChange/애니메이션
+    // 트리거로 쓰기 쉬운 단순 Bool로 한 번 감싼다.
+    private var hasHarmony: Bool { melodySession.suggestedHarmony != nil }
+
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
-                    Picker("모드", selection: $sessionMode) {
-                        ForEach(SessionMode.allCases) { mode in
-                            Text(mode.rawValue).tag(mode)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                        Picker("모드", selection: $sessionMode) {
+                            ForEach(SessionMode.allCases) { mode in
+                                Text(mode.rawValue).tag(mode)
+                            }
                         }
-                    }
-                    .pickerStyle(.segmented)
-                    .onChange(of: sessionMode) { _, _ in resetSession() } // 모드가 바뀌면 상태가 섞이지 않게 항상 리셋
+                        .pickerStyle(.segmented)
+                        .onChange(of: sessionMode) { _, _ in resetSession() } // 모드가 바뀌면 상태가 섞이지 않게 항상 리셋
 
                     // 캡처: 항상 보이는 유일한 카드 — 여기서부터 흐름이 시작된다.
                     // 정보를 한 덩어리로 몰아넣지 않고 세 그룹(측정 버튼 -> 파형+판독값 ->
@@ -213,6 +219,7 @@ struct PracticeView: View {
                             }
                         }
                     }
+                    .id("captureCard")
 
                     // 조성+화음: 첫 음이 잡히기 전엔 아예 렌더링하지 않는다(점진적 공개) —
                     // "아직 판별되지 않음" 같은 빈 상태를 계속 보여주는 대신, 관련 데이터가
@@ -273,6 +280,8 @@ struct PracticeView: View {
                                 .disabled((melodySession.suggestedHarmony == nil && !isPlayingTone) || isPlayingStartingNote)
                             }
                         }
+                        .id("keyHarmonyCard")
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                     }
 
                     // 내 목소리로 화음: 화음이 나오기 전엔 안 보인다(할 게 없으므로). 화음이
@@ -309,6 +318,8 @@ struct PracticeView: View {
                                 .disabled(!isCapturing || isPlaybackBusy)
                             }
                         }
+                        .id("voiceHarmonyCard")
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                     }
 
                     // 채점: 화음이 나오기 전엔 채점할 대상이 없으므로 안 보인다.
@@ -320,18 +331,38 @@ struct PracticeView: View {
                                 scoringPanel(for: .fifth)
                             }
                         }
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                     }
 
-                    Button(role: .destructive, action: resetSession) {
-                        Label("다시 시작", systemImage: "arrow.counterclockwise")
+                        Button(role: .destructive, action: resetSession) {
+                            Label("다시 시작", systemImage: "arrow.counterclockwise")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .frame(maxWidth: .infinity)
+                    .padding()
+                    // 카드가 새로 생기거나 사라질 때 위 .transition이 실제로 애니메이션되게 한다 —
+                    // 이 modifier가 없으면 SwiftUI가 즉시(애니메이션 없이) 나타나고 사라진다.
+                    .animation(.easeOut(duration: 0.3), value: hasCapturedNote)
+                    .animation(.easeOut(duration: 0.3), value: hasHarmony)
                 }
-                .padding()
+                .background(Color(uiColor: .systemGroupedBackground))
+                .navigationTitle("연습")
+                // 카드가 막 나타난 시점에 화면 아래로 스크롤해서, "방금 뭐가 생겼다"는 걸
+                // 사용자가 놓치지 않고 바로 보게 한다.
+                .onChange(of: hasCapturedNote) { _, appeared in
+                    guard appeared else { return }
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        proxy.scrollTo("keyHarmonyCard", anchor: .top)
+                    }
+                }
+                .onChange(of: hasHarmony) { _, appeared in
+                    guard appeared else { return }
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        proxy.scrollTo("voiceHarmonyCard", anchor: .top)
+                    }
+                }
             }
-            .background(Color(uiColor: .systemGroupedBackground))
-            .navigationTitle("연습")
         }
         .tint(Theme.tint) // 앱 전역 유일한 인터랙션 틴트(Theme.swift) — 버튼/피커 등에 일괄 적용
         .onAppear {
