@@ -72,7 +72,30 @@ struct ContentView: View {
     private let startingNoteDuration: Duration = .seconds(2)
 
     private var startingNoteName: String {
-        NoteNameConverter.convert(frequency: NoteNameConverter.frequency(forMIDINote: startingNoteMIDI))?.noteName ?? "?"
+        noteName(forMIDINote: startingNoteMIDI)
+    }
+
+    private func noteName(forMIDINote midiNote: Int) -> String {
+        NoteNameConverter.convert(frequency: NoteNameConverter.frequency(forMIDINote: midiNote))?.noteName ?? "?"
+    }
+
+    /// 기준음 선택 + 재생 — 반음씩 -/+ 누르던 Stepper는 매번 여러 번 눌러야 해서 불편하다는
+    /// 피드백을 받아 드롭다운(Picker)으로 바꿨다. 목록에서 바로 원하는 음을 골라 한 번에 이동한다.
+    @ViewBuilder
+    private var startingNoteControls: some View {
+        HStack {
+            Picker("첫 음", selection: $startingNoteMIDI) {
+                ForEach(Array(startingNoteRange), id: \.self) { midiNote in
+                    Text(noteName(forMIDINote: midiNote)).tag(midiNote)
+                }
+            }
+            .pickerStyle(.menu)
+            .disabled(isPlaybackBusy)
+
+            Button(isPlayingStartingNote ? "재생 중…" : "시작음 듣기", action: playStartingNote)
+                .buttonStyle(.bordered)
+                .disabled(isPlaybackBusy)
+        }
     }
 
     // 재생 중(화음/시작음)엔 마이크를 완전히 무시한다 — 스피커 소리가 되먹임되는 피드백 루프 방지.
@@ -103,6 +126,10 @@ struct ContentView: View {
                         Text(isCapturing ? singleNoteStatusHint : "측정 시작을 눌러야 마이크가 켜집니다")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+
+                        // 노래를 시작하기 전 여기서 바로 기준음을 듣고 첫 음을 잡을 수 있게 —
+                        // 3단계(화음 제안)까지 안 내려가도 되도록 실시간 피치 섹션에도 둔다.
+                        startingNoteControls
                     }
                 }
 
@@ -160,21 +187,11 @@ struct ContentView: View {
                                 .foregroundStyle(harmonyText.isEmpty ? .secondary : .primary)
                         }
 
-                        HStack {
-                            Stepper(value: $startingNoteMIDI, in: startingNoteRange) {
-                                Text("첫 음: \(startingNoteName)")
-                                    .font(.system(.body, design: .monospaced))
-                            }
-                            .disabled(isPlaybackBusy)
-                        }
+                        startingNoteControls
 
-                        HStack {
-                            Button(isPlayingStartingNote ? "재생 중…" : "시작음 듣기", action: playStartingNote)
-                                .disabled(isPlaybackBusy)
-                            Button(isPlayingTone ? "화음 정지" : "화음 듣기 (3도→5도)", action: toggleTonePlayback)
-                                .disabled((melodySession.suggestedHarmony == nil && !isPlayingTone) || isPlayingStartingNote)
-                        }
-                        .buttonStyle(.bordered)
+                        Button(isPlayingTone ? "화음 정지" : "화음 듣기 (3도→5도)", action: toggleTonePlayback)
+                            .buttonStyle(.bordered)
+                            .disabled((melodySession.suggestedHarmony == nil && !isPlayingTone) || isPlayingStartingNote)
                     }
                 }
 
