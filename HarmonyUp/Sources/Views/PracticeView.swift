@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+import AVFAudio
+import UIKit
 
 /// "연습" 탭 — 마이크 캡처 -> 조성/화음 판별 -> 화음 청취(합성음/내 목소리) -> 채점까지
 /// 한 세션의 흐름을 담당한다. 예전엔 이 화면 자체가 앱의 유일한 화면(`ContentView`)이었는데,
@@ -17,6 +19,9 @@ struct PracticeView: View {
     // 예전엔 화면이 뜨자마자 자동으로 마이크를 켰는데, 사용자가 원하는 타이밍에
     // 직접 "측정 시작"을 눌러야 캡처가 시작되도록 바꿨다 — 준비되기 전에 소리가 잡히는 걸 방지.
     @State private var isCapturing = false
+    // "측정 시작"을 눌러도 반응이 statusText 한 줄에 묻혀서 왜 안 되는지 알기 어려웠다 —
+    // 마이크 권한이 꺼진 상태는 버튼을 누르기도 전에(onAppear에서) 미리 감지해서 전용 UI로 보여준다.
+    @State private var micPermissionDenied = false
 
     @State private var statusText = "마이크 대기 중..."
     @State private var keyText = ""
@@ -116,6 +121,25 @@ struct PracticeView: View {
         }
     }
 
+    /// 마이크 권한이 꺼져 있을 때 캡처 카드 자리에 보여주는 전용 상태 — "왜 안 되는지" 설명하고
+    /// 바로 설정 앱의 이 앱 권한 화면으로 이동할 수 있게 한다.
+    @ViewBuilder
+    private var micPermissionDeniedContent: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            Label("마이크 권한이 꺼져 있어요", systemImage: "mic.slash.fill")
+                .font(Theme.Typography.subheadlineBold)
+                .foregroundStyle(.orange)
+            Text("설정에서 마이크 권한을 허용하면 바로 시작할 수 있어요")
+                .font(Theme.Typography.caption)
+                .foregroundStyle(.secondary)
+            Button("설정 열기") {
+                guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                UIApplication.shared.open(url)
+            }
+            .buttonStyle(.borderedProminent)
+        }
+    }
+
     // 재생 중(화음/시작음/멜로디 라인/내 목소리 화음)엔 마이크를 완전히 무시한다 — 스피커 소리가
     // 되먹임되는 피드백 루프 방지. isPlayingVoiceClip이 빠져 있던 게 26절 버그의 원인이었다.
     private var isPlaybackBusy: Bool {
@@ -137,18 +161,22 @@ struct PracticeView: View {
 
                     // 캡처: 항상 보이는 유일한 카드 — 여기서부터 흐름이 시작된다.
                     HarmonyCard("실시간 피치", systemImage: "waveform") {
-                        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                            Button(isCapturing ? "측정 중지" : "측정 시작", action: toggleCapture)
-                                .buttonStyle(.borderedProminent)
+                        if micPermissionDenied {
+                            micPermissionDeniedContent
+                        } else {
+                            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                                Button(isCapturing ? "측정 중지" : "측정 시작", action: toggleCapture)
+                                    .buttonStyle(.borderedProminent)
 
-                            Text(statusText)
-                                .font(.system(.title2, design: .monospaced))
-                            Text(isCapturing ? singleNoteStatusHint : "측정 시작을 눌러야 마이크가 켜집니다")
-                                .font(Theme.Typography.caption)
-                                .foregroundStyle(.secondary)
+                                Text(statusText)
+                                    .font(.system(.title2, design: .monospaced))
+                                Text(isCapturing ? singleNoteStatusHint : "측정 시작을 눌러야 마이크가 켜집니다")
+                                    .font(Theme.Typography.caption)
+                                    .foregroundStyle(.secondary)
 
-                            // 노래를 시작하기 전 여기서 바로 기준음을 듣고 첫 음을 잡을 수 있게.
-                            startingNoteControls
+                                // 노래를 시작하기 전 여기서 바로 기준음을 듣고 첫 음을 잡을 수 있게.
+                                startingNoteControls
+                            }
                         }
                     }
 
@@ -259,6 +287,11 @@ struct PracticeView: View {
             .navigationTitle("연습")
         }
         .tint(Theme.tint) // 앱 전역 유일한 인터랙션 틴트(Theme.swift) — 버튼/피커 등에 일괄 적용
+        .onAppear {
+            // 버튼을 눌러보기 전에 미리 알려준다 — 이전에 거부했다면 "측정 시작"을 눌러도
+            // 반응이 statusText 한 줄에 묻혀서 왜 안 되는지 알기 어려웠다.
+            micPermissionDenied = AVAudioApplication.shared.recordPermission == .denied
+        }
         .onDisappear {
             tonePlaybackTask?.cancel()
             startingNoteTask?.cancel()
@@ -348,9 +381,35 @@ struct PracticeView: View {
     /// 측정이 꺼져 있으면 켠다. 이미 켜져 있으면 아무 것도 하지 않는다(중복 start 방지).
     /// "채점하기" 버튼도 이걸 호출해서, 사용자가 미리 "측정 시작"을 눌러두지 않았어도
     /// 채점 버튼 하나로 바로 측정+채점이 시작되게 한다.
+    ///
+    /// 마이크 권한을 먼저 확인한다 — 거부된 상태에서 그냥 start()를 호출하면 실패 이유가
+    /// statusText 한 줄짜리 에러 메시지로만 나타나서 눈에 잘 안 띄었다. 여기서 미리 걸러서
+    /// 전용 UI(micPermissionDeniedContent)로 보여준다.
     private func beginCapturingIfNeeded() {
         guard !isCapturing else { return }
 
+        switch AVAudioApplication.shared.recordPermission {
+        case .granted:
+            micPermissionDenied = false
+            startCaptureAfterPermissionGranted()
+        case .denied:
+            micPermissionDenied = true
+        case .undetermined:
+            AVAudioApplication.requestRecordPermission { granted in
+                DispatchQueue.main.async {
+                    if granted {
+                        beginCapturingIfNeeded()
+                    } else {
+                        micPermissionDenied = true
+                    }
+                }
+            }
+        @unknown default:
+            micPermissionDenied = true
+        }
+    }
+
+    private func startCaptureAfterPermissionGranted() {
         do {
             try audioCapture.start { result, rawSamples, rawSampleRate in
                 // 화음/시작음 재생 중엔 마이크 입력을 완전히 무시한다 — 안 그러면 스피커로 낸 소리가
