@@ -7,6 +7,11 @@ struct MelodyStep: Identifiable {
     var noteName: String
     var midiNote: Int      // 옥타브까지 포함한 실제 MIDI 노트 — 수정 시 같은 옥타브 안에서 pitch class만 바꾸는 데 쓴다.
     var harmonyNames: String?
+    // 빠른 녹음(RecordingAnalyzer) 경로에서만 채워진다 — 녹음 시작 기준 시작 시각/길이(초).
+    // 실시간 캡처 경로(기존 멜로디 모드)는 "지금 막 확정된 음"이라는 개념만 있고 녹음 타임라인이
+    // 없어서 nil로 둔다. 옵셔널로 추가해서 기존 실시간 캡처 코드는 손대지 않고 그대로 컴파일된다.
+    var onsetTime: Double? = nil
+    var duration: Double? = nil
 }
 
 /// 멜로디 모드에서 잡힌 음 한 줄 — 실시간 검출이 틀렸을 때 눌러서 고치는 메뉴와,

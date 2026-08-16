@@ -868,3 +868,21 @@ SwiftUI에서 `if` 조건으로 뷰가 나타나거나 사라지는 걸 애니�
 ### 아직 잠정값인 것들
 
 `windowSize`/`hop`/`streakRequired`/`minimumNoteDuration`은 전부 합성 사인파 기준으로 논리를 검증한 값이지, 실제 목소리(숨소리, 콧소리, 음 사이 글라이드, 자음 시작 잡음)로 튜닝된 값이 아니다. 다음 단계(빠른 녹음 UI + 실기기)에서 실제로 불러보고 다시 조정할 예정이다.
+
+---
+
+## 37. `RecordingAnalyzer` — 배치 분석을 기존 UI 모델에 연결하기
+
+### 왜 새 UI를 거의 안 만들어도 되는가
+
+`RecordingAnalyzer`는 `MelodySegmenter`가 잘라낸 음표들을 `KeyDetector.detectKey(notes:)`와 `ChordGenerator.generateHarmony(...)`에 그대로 넘긴다 — 두 함수 다 원래부터 순수 함수라, "프레임을 실시간으로 하나씩 받았는지" "녹음을 통째로 배치 분석했는지"를 전혀 신경 쓰지 않는다. `MelodySession`이 실시간 캡처에서 이 두 함수를 호출해주던 "글루" 역할을, `RecordingAnalyzer`가 배치 경로에서 대신 해주는 것뿐이다.
+
+더 중요한 건 `RecordingAnalyzer.melodySteps(from:)`이다 — 분석 결과를 새 UI가 아니라 **기존에 멜로디 모드가 쓰던 `MelodyStep` 배열**로 바꿔준다. `MelodyStep`에 `onsetTime`/`duration`(옵셔널, 기본값 `nil`)만 추가했을 뿐, 기존 실시간 캡처 코드(`PracticeView.swift`가 `MelodyStep(noteName:midiNote:harmonyNames:)`로 호출하는 부분)는 한 글자도 안 고쳤는데 그대로 컴파일된다 — Swift의 멤버와이즈 이니셜라이저는 기본값이 있는 프로퍼티를 호출부에서 생략할 수 있게 해주기 때문이다. 이렇게 해두면 다음 단계(빠른 녹음 UI)에서 이 배열만 채워 넣으면, 조성+화음 카드와 `MelodyStepRow` 목록, 스텝별 채점까지 **거의 손 안 대고** 재사용할 수 있다.
+
+### 화음 없는 음(온음계 밖)을 다루는 법
+
+`ChordGenerator.generateHarmony`는 멜로디 음이 판별된 조성의 온음계 밖이면 원래부터 `nil`을 반환한다(실시간 멜로디 모드에서 이미 "온음계 밖"이라고 표시하던 그 케이스). `RecordingAnalyzer`는 이 의미를 그대로 물려받아서, 화음이 없는 음표는 `harmonies` 딕셔너리에 아예 항목을 안 만든다 — 녹음 기반이라고 해서 "반음계 화성" 같은 새 규칙을 발명하지 않고, 이미 검증된 기존 동작을 그대로 재사용한 것.
+
+### 테스트: C장조 아르페지오
+
+"도-미-솔-도"(C4-E4-G4-C5)를 이어붙인 합성 버퍼로 조성 판별부터 화음 생성, `MelodyStep` 변환까지 한 번에 검증했다. 세 음(도/미/솔)이 각각 으뜸음/장3도/완전5도라 Temperley 프로파일에서 가장 높은 가중치를 가진 자리들이라, 짧은 아르페지오만으로도 C장조로 뚜렷하게 판별된다 — 별도 후처리(온음계 스냅 등) 없이도 조성 판별기가 원래 하려던 일을 그대로 잘한다는 걸 확인한 것.
