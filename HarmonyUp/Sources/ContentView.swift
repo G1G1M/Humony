@@ -12,6 +12,17 @@ struct ContentView: View {
     @State private var scoringTargetNoteName = ""
     @State private var currentScore: PitchScorer.Score?
 
+    // 지금은(향후 곡 전체를 듣고 여러 화음을 뽑는 것과 달리) 단음 모드다 —
+    // 한 번 음을 안정적으로 잡으면 그 음으로 조성/화음을 고정하고, 이후에 들어오는
+    // 다른 소리(숨소리, 다음 음절, 잡음)에 계속 휩쓸려 바뀌지 않게 한다.
+    @State private var hasCapturedNote = false
+    @State private var pendingPitchClass: Int?
+    @State private var pendingStreak = 0
+
+    // 노이즈성 프레임 하나로 잘못 확정되지 않도록, 같은 pitch class가 이만큼
+    // 연속 프레임(약 46ms x 3 = 140ms) 유지돼야 "이 음으로 확정"한다.
+    private let captureStreakRequired = 3
+
     private let audioCapture = AudioCapture()
     private let melodySession = MelodySession()
     private let tonePlayer = TonePlayer()
@@ -37,8 +48,13 @@ struct ContentView: View {
 
                 // 1. 지금 마이크가 뭘 듣고 있는지 — 파이프라인의 첫 단계(YIN)
                 flowSection(step: 1, title: "실시간 피치") {
-                    Text(statusText)
-                        .font(.system(.title2, design: .monospaced))
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(statusText)
+                            .font(.system(.title2, design: .monospaced))
+                        Text(hasCapturedNote ? "🔒 음 고정됨 — 다시 시작을 눌러야 새로 잡습니다" : "음을 안정적으로 내면 자동으로 잡습니다")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 // 2. 지금까지 부른 멜로디로 판별된 조성 — 두 번째 단계(KeyDetector)
@@ -132,9 +148,9 @@ struct ContentView: View {
                 // 다시 마이크로 들어가서 "새로 부른 음"으로 인식되고, 거기에 또 화음이 붙는 피드백 루프가 생긴다.
                 guard !isPlaybackBusy else { return }
 
-                melodySession.record(result)
-
                 guard let result else {
+                    pendingPitchClass = nil
+                    pendingStreak = 0
                     statusText = "..."
                     return
                 }
@@ -146,17 +162,33 @@ struct ContentView: View {
                 statusText = line
                 print(line) // Phase 1 완료 조건: 감지된 결과를 콘솔에 실시간 출력
 
-                if let key = melodySession.detectedKey {
-                    keyText = String(format: "조성: %@ (확신도 %.2f)", key.name, key.confidence)
-                }
+                // 단음 모드: 이미 한 음을 확정했으면 조성/화음은 더 이상 갱신하지 않는다 —
+                // 안 그러면 숨소리/다음 음절/잡음이 들어올 때마다 계속 바뀐다.
+                // (아래 채점 로직은 이 블록 밖에서 계속 돌아간다 — 확정된 목표음을 따라 부르는 걸 들어야 하니까)
+                if !hasCapturedNote {
+                    // 같은 pitch class가 몇 프레임 연속 유지돼야 "진짜 이 음을 내고 있다"고 보고 확정한다.
+                    if pendingPitchClass == result.pitchClass {
+                        pendingStreak += 1
+                    } else {
+                        pendingPitchClass = result.pitchClass
+                        pendingStreak = 1
+                    }
 
-                if let harmony = melodySession.suggestedHarmony {
-                    let names = harmony
-                        .map { NoteNameConverter.convert(frequency: $0.frequency)?.noteName ?? "?" }
-                        .joined(separator: ", ")
-                    harmonyText = "화음 제안: \(names)"
-                } else {
-                    harmonyText = ""
+                    if pendingStreak >= captureStreakRequired {
+                        melodySession.record(result)
+                        hasCapturedNote = true
+
+                        if let key = melodySession.detectedKey {
+                            keyText = String(format: "조성: %@ (확신도 %.2f)", key.name, key.confidence)
+                        }
+
+                        if let harmony = melodySession.suggestedHarmony {
+                            let names = harmony
+                                .map { NoteNameConverter.convert(frequency: $0.frequency)?.noteName ?? "?" }
+                                .joined(separator: ", ")
+                            harmonyText = "화음 제안: \(names)"
+                        }
+                    }
                 }
 
                 if let target = scoringTarget {
@@ -259,6 +291,9 @@ struct ContentView: View {
         currentScore = nil
         pitchSmoother.reset()
         melodySession.reset()
+        hasCapturedNote = false
+        pendingPitchClass = nil
+        pendingStreak = 0
         keyText = ""
         harmonyText = ""
         statusText = "..."
