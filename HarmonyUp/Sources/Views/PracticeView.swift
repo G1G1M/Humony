@@ -106,18 +106,25 @@ struct PracticeView: View {
     /// 피드백을 받아 드롭다운(Picker)으로 바꿨다. 목록에서 바로 원하는 음을 골라 한 번에 이동한다.
     @ViewBuilder
     private var startingNoteControls: some View {
-        HStack {
-            Picker("첫 음", selection: $startingNoteMIDI) {
-                ForEach(Array(startingNoteRange), id: \.self) { midiNote in
-                    Text(noteName(forMIDINote: midiNote)).tag(midiNote)
-                }
+        let picker = Picker("첫 음", selection: $startingNoteMIDI) {
+            ForEach(Array(startingNoteRange), id: \.self) { midiNote in
+                Text(noteName(forMIDINote: midiNote)).tag(midiNote)
             }
-            .pickerStyle(.menu)
+        }
+        .pickerStyle(.menu)
+        .disabled(isPlaybackBusy)
+
+        let listenButton = Button(isPlayingStartingNote ? "재생 중…" : "시작음 듣기", action: playStartingNote)
+            .buttonStyle(.bordered)
             .disabled(isPlaybackBusy)
 
-            Button(isPlayingStartingNote ? "재생 중…" : "시작음 듣기", action: playStartingNote)
-                .buttonStyle(.bordered)
-                .disabled(isPlaybackBusy)
+        // 글자 크기를 크게 키우면(Dynamic Type) 가로로 나란히 두 컨트롤을 넣을 공간이 부족해져서
+        // 버튼 텍스트가 줄바꿈되며 알약 모양이 찌그러지는 문제가 있었다 — ViewThatFits로 한 줄에
+        // 안 들어가면 자동으로 세로 배치로 바뀌게 했다(실기기 대신 시뮬레이터의 접근성 최대 글자
+        // 크기 설정으로 실제 깨지는 걸 확인하고 고쳤다).
+        ViewThatFits {
+            HStack { picker; listenButton }
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) { picker; listenButton }
         }
     }
 
@@ -210,12 +217,24 @@ struct PracticeView: View {
 
                                         // 도-미-솔을 부르면 그 3도(또는 5도) 라인을 처음부터 끝까지
                                         // 이어서 들려준다 — 멜로디 전체를 화음으로 들어보는 것.
-                                        HStack {
-                                            Button(playingMelodyLineInterval == .third ? "3도 라인 정지" : "전체 3도 듣기") {
-                                                toggleMelodyLinePlayback(interval: .third)
+                                        // ViewThatFits: 글자 크기를 크게 키우면 두 버튼이 한 줄에
+                                        // 안 들어가서 자동으로 세로 배치로 바뀐다.
+                                        ViewThatFits {
+                                            HStack {
+                                                Button(playingMelodyLineInterval == .third ? "3도 라인 정지" : "전체 3도 듣기") {
+                                                    toggleMelodyLinePlayback(interval: .third)
+                                                }
+                                                Button(playingMelodyLineInterval == .fifth ? "5도 라인 정지" : "전체 5도 듣기") {
+                                                    toggleMelodyLinePlayback(interval: .fifth)
+                                                }
                                             }
-                                            Button(playingMelodyLineInterval == .fifth ? "5도 라인 정지" : "전체 5도 듣기") {
-                                                toggleMelodyLinePlayback(interval: .fifth)
+                                            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                                                Button(playingMelodyLineInterval == .third ? "3도 라인 정지" : "전체 3도 듣기") {
+                                                    toggleMelodyLinePlayback(interval: .third)
+                                                }
+                                                Button(playingMelodyLineInterval == .fifth ? "5도 라인 정지" : "전체 5도 듣기") {
+                                                    toggleMelodyLinePlayback(interval: .fifth)
+                                                }
                                             }
                                         }
                                         .buttonStyle(.bordered)
@@ -241,15 +260,30 @@ struct PracticeView: View {
                     if melodySession.suggestedHarmony != nil {
                         HarmonyCard("내 목소리로 화음", systemImage: "music.mic", iconColor: Theme.voiceAccent) {
                             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                                HStack {
-                                    Button("내 목소리로 3도") {
-                                        recordAndHarmonizeVoice(interval: .third)
+                                // ViewThatFits: 버튼 3개가 한 줄에 안 들어갈 만큼 글자가 커지면
+                                // 세로 배치로 자동 전환된다(가로 배치가 압축되며 깨지는 것 방지).
+                                ViewThatFits {
+                                    HStack {
+                                        Button("내 목소리로 3도") {
+                                            recordAndHarmonizeVoice(interval: .third)
+                                        }
+                                        Button("내 목소리로 5도") {
+                                            recordAndHarmonizeVoice(interval: .fifth)
+                                        }
+                                        Button("내 목소리로 전체 화음") {
+                                            recordAndHarmonizeFullChordWithVoice()
+                                        }
                                     }
-                                    Button("내 목소리로 5도") {
-                                        recordAndHarmonizeVoice(interval: .fifth)
-                                    }
-                                    Button("내 목소리로 전체 화음") {
-                                        recordAndHarmonizeFullChordWithVoice()
+                                    VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                                        Button("내 목소리로 3도") {
+                                            recordAndHarmonizeVoice(interval: .third)
+                                        }
+                                        Button("내 목소리로 5도") {
+                                            recordAndHarmonizeVoice(interval: .fifth)
+                                        }
+                                        Button("내 목소리로 전체 화음") {
+                                            recordAndHarmonizeFullChordWithVoice()
+                                        }
                                     }
                                 }
                                 .buttonStyle(.bordered)

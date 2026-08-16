@@ -35,7 +35,8 @@
 - [x] **UI/UX 리디자인 — 탭 구조 + 카드 분리**: 앱을 "연습"/"기록" 탭 2개로 나누고(`RootTabView`), `ContentView.swift`(955줄, 단일 화면)를 `PracticeView.swift`(연습 탭)+`HistoryView.swift`(기록 탭)+`MelodyStepRow.swift`로 분리. 화면은 번호 섹션 대신 `HarmonyCard` 카드로 재구성하고, 데이터가 없는 카드는 아예 렌더링하지 않는 점진적 공개 적용(첫 음 잡히기 전엔 캡처 카드만 보임). 시뮬레이터에서 라이트/다크 + 실제 탭 전환까지 스크린샷으로 확인, 실기기 설치·실행 완료
 - [x] **폰트를 Pretendard로 통일**: 오픈소스 폰트(SIL OFL) 4개 굵기(Regular/Medium/SemiBold/Bold)를 앱에 번들. `Theme.Typography`가 `Font.custom(_:size:relativeTo:)`로 Dynamic Type을 유지하면서 커스텀 폰트를 적용. 실시간 숫자 표시(Hz/cent 등)는 자릿수 흔들림 방지 목적이 있어 시스템 모노스페이스 예외 유지. 실기기 설치·실행 완료
 - [x] **마이크 권한 거부 상태 전용 UI**: `AVAudioApplication.recordPermission` 확인 → 거부 시 전용 카드(아이콘+설명+"설정 열기" 버튼)로 안내, 미결정 시 시스템 권한 팝업 요청. 시뮬레이터에서 `simctl privacy revoke`로 거부 상태를 강제 재현해 실제 화면 확인
-- [ ] **UI/UX 리디자인 진행 중**: 남은 단계 — Dynamic Type 확인, 전반적 카피/아이콘 다듬기
+- [x] **Dynamic Type 최대 크기 검증 + 레이아웃 수정**: 시뮬레이터를 접근성 최대 글자 크기로 강제 설정해 실제로 확인 → 버튼 여러 개가 나란한 곳(시작음 컨트롤, 전체 3도/5도 듣기, 내 목소리로 3도/5도/전체 화음)에서 텍스트가 찌그러지고 겹치는 문제 발견·수정. `ViewThatFits`로 "가로에 안 들어가면 세로로" 자동 전환
+- [ ] **UI/UX 리디자인 진행 중**: 남은 단계 — 전반적 카피/아이콘 다듬기, 필요 시 레퍼런스 반영
 
 ## 구성 요소 (`HarmonyUp/Sources/PitchEngine/`)
 
