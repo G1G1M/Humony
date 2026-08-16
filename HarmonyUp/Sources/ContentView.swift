@@ -233,9 +233,13 @@ struct ContentView: View {
                                 }
                             }
                             .buttonStyle(.bordered)
-                            .disabled(!isCapturing || isPlaybackBusy || recentVoiceBuffer.isEmpty || melodySession.suggestedHarmony == nil)
+                            // 예전엔 조건 여러 개를 한꺼번에 disabled에 걸어놔서, 어떤 조건 때문에
+                            // 막혔는지 사용자가 알 수 없이 "눌러도 반응 없음"으로만 보였다.
+                            // 최소한(측정 꺼짐/재생 중)만 막고, 나머지는 눌렀을 때 이유를 메시지로 알려준다.
+                            .disabled(!isCapturing || isPlaybackBusy)
 
-                            Text("방금까지 부른 음을 그대로 3도/5도로 옮겨서 들려줘요")
+                            Text(String(format: "방금까지 부른 음을 그대로 3도/5도로 옮겨서 들려줘요 (확보된 목소리: %.1f초)",
+                                        Double(recentVoiceBuffer.count) / recentVoiceSampleRate))
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
@@ -623,8 +627,24 @@ struct ContentView: View {
     /// "내 목소리로 화음 만들기" — 방금까지 부른 소리(recentVoiceBuffer)를 3도/5도 위로
     /// 피치 시프트해서, 합성음이 아니라 사용자 자신의 목소리 톤으로 화음을 즉시 들려준다.
     private func recordAndHarmonizeVoice(interval: ChordGenerator.Interval) {
-        guard isCapturing, !isPlaybackBusy else { return }
-        guard let ratio = pitchRatio(toInterval: interval) else { return }
+        // 버튼을 눌렀는데 아무 것도 안 바뀌는 것처럼 보이는 문제를 막기 위해, 막힌 이유를
+        // 항상 statusText로 알려준다 — 조용히 return만 하면 "눌러도 반응 없음"으로 보인다.
+        guard isCapturing else {
+            statusText = "먼저 측정을 시작하세요"
+            return
+        }
+        guard !isPlaybackBusy else {
+            statusText = "다른 소리가 재생 중이에요 — 끝난 뒤 다시 눌러주세요"
+            return
+        }
+        guard melodySession.suggestedHarmony != nil else {
+            statusText = "아직 화음이 없어요 — 먼저 음을 안정적으로 불러주세요"
+            return
+        }
+        guard let ratio = pitchRatio(toInterval: interval) else {
+            statusText = "목표음을 계산하지 못했어요"
+            return
+        }
         guard !recentVoiceBuffer.isEmpty else {
             statusText = "아직 잡힌 목소리가 없어요 — 먼저 노래를 불러주세요"
             return
