@@ -167,16 +167,37 @@ struct PracticeView: View {
                     .onChange(of: sessionMode) { _, _ in resetSession() } // 모드가 바뀌면 상태가 섞이지 않게 항상 리셋
 
                     // 캡처: 항상 보이는 유일한 카드 — 여기서부터 흐름이 시작된다.
+                    // 정보를 한 덩어리로 몰아넣지 않고 세 그룹(측정 버튼 -> 파형+판독값 ->
+                    // 시작음 컨트롤)으로 나누고, 그룹 사이엔 카드 안 다른 요소보다 넓은 간격을 준다.
                     HarmonyCard("실시간 피치", systemImage: "waveform") {
                         if micPermissionDenied {
                             micPermissionDeniedContent
                         } else {
-                            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
                                 Button(isCapturing ? "측정 중지" : "측정 시작", action: toggleCapture)
                                     .buttonStyle(.borderedProminent)
 
-                                Text(statusText)
-                                    .font(.system(.title2, design: .monospaced))
+                                if isCapturing {
+                                    // 지금 마이크가 실제로 소리를 듣고 있다는 걸 텍스트보다 훨씬
+                                    // 직관적으로 보여준다 — "녹음 중"이라는 상태 자체를 시각화.
+                                    VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                                        WaveformView(samples: recentVoiceBuffer)
+                                            .frame(height: 88)
+                                            .padding(.horizontal, Theme.Spacing.sm)
+                                            .frame(maxWidth: .infinity)
+                                            .background(
+                                                Theme.tint.opacity(0.08),
+                                                in: RoundedRectangle(cornerRadius: Theme.cardCornerRadius - 4, style: .continuous)
+                                            )
+
+                                        Text(statusText)
+                                            .font(.system(.title2, design: .monospaced))
+                                    }
+                                } else {
+                                    Text(statusText)
+                                        .font(.system(.title2, design: .monospaced))
+                                }
+
                                 Text(isCapturing ? singleNoteStatusHint : "측정 시작을 눌러야 마이크가 켜집니다")
                                     .font(Theme.Typography.caption)
                                     .foregroundStyle(.secondary)
@@ -259,7 +280,14 @@ struct PracticeView: View {
                     // "확보된 목소리: N초" 캡션이 "조금만 더 부르면 된다"는 유용한 피드백이라서다.
                     if melodySession.suggestedHarmony != nil {
                         HarmonyCard("내 목소리로 화음", systemImage: "music.mic", iconColor: Theme.voiceAccent) {
-                            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                                // 버튼보다 먼저 설명을 둬서, 뭘 누르기 전에 "이게 뭘 하는 버튼인지"부터
+                                // 읽히게 한다 — 예전엔 버튼 아래 작은 캡션이라 자칫 못 보고 지나치기 쉬웠다.
+                                Text(String(format: "방금까지 부른 음을 그대로 3도/5도로 옮겨서 들려줘요 (확보된 목소리: %.1f초)",
+                                            Double(recentVoiceBuffer.count) / recentVoiceSampleRate))
+                                    .font(Theme.Typography.caption)
+                                    .foregroundStyle(.secondary)
+
                                 // ViewThatFits: 버튼 3개가 한 줄에 안 들어갈 만큼 글자가 커지면
                                 // 세로 배치로 자동 전환된다(가로 배치가 압축되며 깨지는 것 방지).
                                 ViewThatFits {
@@ -291,11 +319,6 @@ struct PracticeView: View {
                                 // 막혔는지 사용자가 알 수 없이 "눌러도 반응 없음"으로만 보였다.
                                 // 최소한(측정 꺼짐/재생 중)만 막고, 나머지는 눌렀을 때 이유를 메시지로 알려준다.
                                 .disabled(!isCapturing || isPlaybackBusy)
-
-                                Text(String(format: "방금까지 부른 음을 그대로 3도/5도로 옮겨서 들려줘요 (확보된 목소리: %.1f초)",
-                                            Double(recentVoiceBuffer.count) / recentVoiceSampleRate))
-                                    .font(Theme.Typography.caption2)
-                                    .foregroundStyle(.secondary)
                             }
                         }
                     }
