@@ -58,14 +58,15 @@ struct ContentView: View {
     @State private var playingMelodyLineInterval: ChordGenerator.Interval?
     @State private var melodyLineTask: Task<Void, Never>?
 
-    // "내 목소리로 화음 만들기" — 합성음(TonePlayer) 대신 사용자 목소리를 짧게 녹음해서
-    // PitchShifter로 3도/5도 위로 옮긴 뒤 그대로 재생한다.
-    @State private var isRecordingVoiceClip = false
-    @State private var voiceClipBuffer: [Float] = []
-    @State private var voiceClipSampleRate: Double = 44100
-    @State private var voiceClipRecordingTask: Task<Void, Never>?
+    // "내 목소리로 화음 만들기" — 합성음(TonePlayer) 대신 사용자 목소리를 그대로 3도/5도 위로
+    // 옮겨서 재생한다. 버튼을 누른 "이후"에 새로 녹음하는 방식이었을 땐, 이미 노래를 마치고
+    // 조용해진 상태에서 버튼을 누르면 그 녹음 구간이 무음이라 아무 소리도 안 나는 문제가 있었다.
+    // 그래서 방금까지 부른 소리를 항상 롤링 버퍼에 담아두고, 버튼을 누르면 그 자리에서 바로
+    // 그걸 피치 시프트해서 재생하는 방식으로 바꿨다.
+    @State private var recentVoiceBuffer: [Float] = []
+    @State private var recentVoiceSampleRate: Double = 44100
+    private let recentVoiceBufferMaxDuration: Double = 1.5 // 초 — 이보다 오래된 소리는 버린다
     private let voiceClipPlayer = VoiceClipPlayer()
-    private let voiceClipDuration: Duration = .milliseconds(1200)
 
     // 노이즈성 프레임 하나로 잘못 확정되지 않도록, 같은 pitch class가 이만큼
     // 연속 프레임(약 46ms x 3 = 140ms) 유지돼야 "이 음으로 확정"한다.
@@ -220,21 +221,21 @@ struct ContentView: View {
                             .buttonStyle(.bordered)
                             .disabled((melodySession.suggestedHarmony == nil && !isPlayingTone) || isPlayingStartingNote)
 
-                        // 합성음이 아니라 내 목소리 톤으로 화음을 듣고 싶을 때 — 짧게 녹음해서
-                        // PitchShifter로 피치를 옮긴 뒤 그대로 재생한다.
+                        // 합성음이 아니라 내 목소리 톤으로 화음을 듣고 싶을 때 — 방금까지
+                        // 부른 소리를 PitchShifter로 피치만 옮겨서 그대로 재생한다.
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
-                                Button(isRecordingVoiceClip ? "녹음 중…" : "내 목소리로 3도") {
+                                Button("내 목소리로 3도") {
                                     recordAndHarmonizeVoice(interval: .third)
                                 }
-                                Button(isRecordingVoiceClip ? "녹음 중…" : "내 목소리로 5도") {
+                                Button("내 목소리로 5도") {
                                     recordAndHarmonizeVoice(interval: .fifth)
                                 }
                             }
                             .buttonStyle(.bordered)
-                            .disabled(!isCapturing || isPlaybackBusy || isRecordingVoiceClip || melodySession.suggestedHarmony == nil)
+                            .disabled(!isCapturing || isPlaybackBusy || recentVoiceBuffer.isEmpty || melodySession.suggestedHarmony == nil)
 
-                            Text("버튼을 누르면 1.2초 녹음 후 그 음을 3도/5도로 옮겨서 들려줘요")
+                            Text("방금까지 부른 음을 그대로 3도/5도로 옮겨서 들려줘요")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
@@ -296,7 +297,6 @@ struct ContentView: View {
             tonePlaybackTask?.cancel()
             startingNoteTask?.cancel()
             melodyLineTask?.cancel()
-            voiceClipRecordingTask?.cancel()
             audioCapture.stop()
             tonePlayer.stop()
             voiceClipPlayer.stop()
@@ -449,20 +449,24 @@ struct ContentView: View {
                 statusText = line
                 print(line) // Phase 1 완료 조건: 감지된 결과를 콘솔에 실시간 출력
 
-                // "내 목소리로 화음 만들기" 녹음 중이면 원본 파형을 그대로 모은다 — VAD를 통과한
-                // (즉 무음이 아닌) 프레임만 여기 도달하므로, 자연스럽게 숨/침묵 구간은 빠진다.
-                if isRecordingVoiceClip {
-                    voiceClipBuffer.append(contentsOf: result.samples)
-                    voiceClipSampleRate = result.sampleRate
+                // "내 목소리로 화음 만들기"용 롤링 버퍼 — 항상(VAD를 통과한 프레임마다) 최근
+                // recentVoiceBufferMaxDuration초만큼만 유지한다. 버튼을 누르는 시점이 아니라
+                // 방금까지 부른 소리를 계속 담아두는 방식이라, 버튼을 눌렀을 때 이미 조용해진
+                // 상태라도(막 노래를 마친 직후) 방금 부른 음을 그대로 쓸 수 있다.
+                recentVoiceBuffer.append(contentsOf: result.samples)
+                recentVoiceSampleRate = result.sampleRate
+                let maxSamples = Int(recentVoiceBufferMaxDuration * result.sampleRate)
+                if recentVoiceBuffer.count > maxSamples {
+                    recentVoiceBuffer.removeFirst(recentVoiceBuffer.count - maxSamples)
                 }
 
                 // 단음 모드에서는 이미 한 음을 확정했으면 더 이상 새 음을 잡지 않는다 —
                 // 안 그러면 숨소리/다음 음절/잡음이 들어올 때마다 계속 바뀐다.
                 // 멜로디 모드에서는 이 가드가 없다 — 음이 바뀔 때마다 계속 새로 잡아야 하니까.
-                // 채점 중(activeScoringInterval != nil)이거나 목소리 녹음 중에도 멜로디 모드에서
-                // 캡처를 멈춘다 — 안 그러면 목표음을 따라 부르거나 녹음용으로 내는 소리 자체가
-                // "새 멜로디 음"으로 잡혀서 조성/화음이 계속 바뀌는 문제가 있었다.
-                let shouldEvaluateCapture = activeScoringInterval == nil && !isRecordingVoiceClip
+                // 채점 중(activeScoringInterval != nil)에도 멜로디 모드에서 캡처를 멈춘다 —
+                // 안 그러면 목표음을 따라 부르는 소리 자체가 "새 멜로디 음"으로 잡혀서 조성/화음이
+                // 계속 바뀌는 문제가 있었다.
+                let shouldEvaluateCapture = activeScoringInterval == nil
                     && (sessionMode == .melody || !hasCapturedNote)
 
                 if shouldEvaluateCapture {
@@ -616,35 +620,22 @@ struct ContentView: View {
         return target.frequency / lastFrequency
     }
 
-    /// "내 목소리로 화음 만들기" — 짧게 녹음한 뒤, 그 녹음을 3도/5도 위로 피치 시프트해서
-    /// 합성음이 아니라 사용자 자신의 목소리 톤으로 화음을 들려준다.
+    /// "내 목소리로 화음 만들기" — 방금까지 부른 소리(recentVoiceBuffer)를 3도/5도 위로
+    /// 피치 시프트해서, 합성음이 아니라 사용자 자신의 목소리 톤으로 화음을 즉시 들려준다.
     private func recordAndHarmonizeVoice(interval: ChordGenerator.Interval) {
-        guard isCapturing, !isPlaybackBusy, !isRecordingVoiceClip else { return }
+        guard isCapturing, !isPlaybackBusy else { return }
         guard let ratio = pitchRatio(toInterval: interval) else { return }
+        guard !recentVoiceBuffer.isEmpty else {
+            statusText = "아직 잡힌 목소리가 없어요 — 먼저 노래를 불러주세요"
+            return
+        }
 
-        voiceClipBuffer = []
-        isRecordingVoiceClip = true
-        statusText = "🎤 녹음 중… (\(interval == .third ? "3도" : "5도")로 화음을 만듭니다)"
-
-        voiceClipRecordingTask = Task {
-            try? await Task.sleep(for: voiceClipDuration)
-            guard !Task.isCancelled else { return }
-            isRecordingVoiceClip = false
-
-            let recorded = voiceClipBuffer
-            let rate = voiceClipSampleRate
-            guard !recorded.isEmpty else {
-                statusText = "녹음된 소리가 없어요 — 녹음되는 동안 계속 소리를 내주세요"
-                return
-            }
-
-            let shifted = PitchShifter.shift(samples: recorded, pitchRatio: ratio, sampleRate: rate)
-            do {
-                try voiceClipPlayer.play(samples: shifted, sampleRate: rate)
-                statusText = "내 목소리로 만든 화음을 재생합니다"
-            } catch {
-                statusText = "재생 실패: \(error.localizedDescription)"
-            }
+        let shifted = PitchShifter.shift(samples: recentVoiceBuffer, pitchRatio: ratio, sampleRate: recentVoiceSampleRate)
+        do {
+            try voiceClipPlayer.play(samples: shifted, sampleRate: recentVoiceSampleRate)
+            statusText = "내 목소리로 만든 화음을 재생합니다"
+        } catch {
+            statusText = "재생 실패: \(error.localizedDescription)"
         }
     }
 
@@ -797,15 +788,12 @@ struct ContentView: View {
         startingNoteTask = nil
         melodyLineTask?.cancel()
         melodyLineTask = nil
-        voiceClipRecordingTask?.cancel()
-        voiceClipRecordingTask = nil
         tonePlayer.stop()
         voiceClipPlayer.stop()
         isPlayingTone = false
         isPlayingStartingNote = false
         playingMelodyLineInterval = nil
-        isRecordingVoiceClip = false
-        voiceClipBuffer = []
+        recentVoiceBuffer = []
         activeScoringInterval = nil
         lockedScoringTargets = [:]
         latestScores = [:]
