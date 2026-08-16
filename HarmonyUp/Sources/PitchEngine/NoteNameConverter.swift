@@ -22,9 +22,15 @@ enum NoteNameConverter {
         referenceMIDINote + 12.0 * log2(frequency / referenceFrequency)
     }
 
-    /// MIDI 노트 번호 -> 주파수(Hz). 위 공식의 역변환.
+    /// MIDI 노트 번호(소수 가능) -> 주파수(Hz). 위 공식의 역변환.
+    /// PitchSmoother처럼 정수 반음이 아닌 연속적인 값을 다뤄야 하는 곳에서 쓴다.
+    static func frequency(forMIDINote midiNote: Double) -> Double {
+        referenceFrequency * pow(2.0, (midiNote - referenceMIDINote) / 12.0)
+    }
+
+    /// ChordGenerator처럼 항상 정수 반음 단위로만 다루는 곳을 위한 편의 오버로드.
     static func frequency(forMIDINote midiNote: Int) -> Double {
-        referenceFrequency * pow(2.0, (Double(midiNote) - referenceMIDINote) / 12.0)
+        frequency(forMIDINote: Double(midiNote))
     }
 
     /// - Parameter frequency: 검출된 기본 주파수(Hz). 0 이하면 nil을 반환한다.

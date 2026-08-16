@@ -15,6 +15,7 @@ struct ContentView: View {
     private let audioCapture = AudioCapture()
     private let melodySession = MelodySession()
     private let tonePlayer = TonePlayer()
+    private let pitchSmoother = PitchSmoother()
 
     // 화음의 각 음을 순서대로 들려줄 때 한 음당 재생하는 길이.
     private let noteHoldDuration: Duration = .milliseconds(800)
@@ -159,7 +160,10 @@ struct ContentView: View {
                 }
 
                 if let target = scoringTarget {
-                    currentScore = PitchScorer.score(sungFrequency: result.frequency, targetFrequency: target.frequency)
+                    // 원본 프레임 주파수를 그대로 채점하면 비브라토/발성 흔들림 때문에 바늘이
+                    // 지저분하게 튄다 — 스무딩을 거친 값으로 채점해서 "지금 대충 맞는지"가 잘 보이게 한다.
+                    let smoothedFrequency = pitchSmoother.smooth(frequency: result.frequency)
+                    currentScore = PitchScorer.score(sungFrequency: smoothedFrequency, targetFrequency: target.frequency)
                 }
             }
         } catch {
@@ -239,6 +243,7 @@ struct ContentView: View {
               let third = harmony.first(where: { $0.interval == .third }) else { return }
         scoringTarget = third
         scoringTargetNoteName = NoteNameConverter.convert(frequency: third.frequency)?.noteName ?? "?"
+        pitchSmoother.reset() // 이전 채점에서 쓰던 값이 새 채점에 섞여 들어가지 않도록
     }
 
     private func resetSession() {
@@ -252,6 +257,7 @@ struct ContentView: View {
         scoringTarget = nil
         scoringTargetNoteName = ""
         currentScore = nil
+        pitchSmoother.reset()
         melodySession.reset()
         keyText = ""
         harmonyText = ""
