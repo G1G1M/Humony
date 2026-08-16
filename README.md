@@ -47,7 +47,8 @@
 - [x] **아카펠라 4성부 화음 엔진(리드+베이스+이너보이스1(3도)+이너보이스2(5도))**: `ChordGenerator`가 멜로디 음 자신을 근음으로 삼아 베이스(1옥타브 아래)+3도/5도(베이스와 멜로디 사이)를 반환하도록 보이싱 전면 재작성 — 외부 "반주 코드" 입력 없이 멜로디만으로 전 성부 자동 생성(반주 오디오/코드 데이터 소스가 없는 이 앱 구조상 확정한 방향). 성부 교차 방지를 수학적으로 보장(3도 거리<5도 거리<베이스-멜로디 거리). `MelodyStep`을 성부별 딕셔너리(`harmonyVoices`)로 전환하고 멜로디 스텝 목록/재생(합성음+내 목소리 4트랙 믹싱)/채점(3패널)/기록 집계까지 전체 파이프라인에 베이스 연결. 유닛테스트 74개 통과, 실기기(Ian) 설치+실행 완료
 - [x] **음질/음량 개선 — RMS 러프니스 정규화 + 다운샘플링 안티에일리어싱**: `AudioGain.normalizeLoudness`(피크 대신 RMS 기준 게인, 클리핑 방지 peakCeiling 병행) 추가, `mixAndNormalize`가 합치기 전에 트랙별로 먼저 러프니스를 맞춰 성부 간 음량 불균등 해소. `PitchShifter.resample`의 다운샘플링(음을 높일 때) 직전에 안티에일리어싱 저역통과 필터 추가
 - [x] **`PitchShifter`를 리샘플링 없는 피치 동기(PSOLA) 방식으로 전면 재작성 — 포먼트 보존**: "화음이 기계음 같다"는 피드백의 근본 원인이 리샘플링 기반 피치시프트가 포먼트(성도 공명 특성)를 피치와 함께 왜곡시키는 것이었음을 확인 — 리샘플링 단계를 없애고, 읽는 위치/쓰는 위치를 다른 속도로 전진시켜 그레인을 원본 그대로 재배치하는 방식으로 재작성(그레인 파형 자체는 리샘플링하지 않아 포먼트 유지). 순음 대신 배음이 풍부한 합성 신호로 테스트를 다시 만들어 베이스(옥타브 아래)까지 정확한 피치 시프트를 검증. "화음만 듣기(멜로디 제외)" 버튼 추가. 유닛테스트 83개 통과, 실기기(Ian) 설치+실행 완료
-- [x] **직접 구현한 PSOLA를 WORLD 보코더로 교체(현재 사용 중)**: 위 PSOLA로도 "전체 화음이 더 이상하게 들린다"는 실기기 청취 피드백을 받아, [WORLD](https://github.com/mmorise/World)(BSD 라이선스, 검증된 음성 분석/합성 라이브러리)를 도입 — F0(기본주파수)/스펙트럼 포락선(포먼트)/비주기성을 분리해서 분석하고, F0만 원하는 비율로 스케일한 뒤 나머지는 그대로 재합성. WORLD 공개 API가 C 링키지라 얇은 C 브리지(`HarmonyUp/ThirdParty/World/HarmonyUpWorldBridge.h/.cpp`)만으로 Swift에서 직접 호출(`PitchShifter`의 공개 API는 그대로라 호출부 무변경). F0 추정을 Harvest에서 Dio+StoneMask로 바꿔 처리 속도 개선(30초 클립 기준 5.1초→3.6초). 유닛테스트 78개 통과(성능 회귀 테스트 포함), arm64 실기기 컴파일 확인 — 실제 청취 검증은 대기 중
+- [x] **직접 구현한 PSOLA를 WORLD 보코더로 교체(현재 사용 중)**: 위 PSOLA로도 "전체 화음이 더 이상하게 들린다"는 실기기 청취 피드백을 받아, [WORLD](https://github.com/mmorise/World)(BSD 라이선스, 검증된 음성 분석/합성 라이브러리)를 도입 — F0(기본주파수)/스펙트럼 포락선(포먼트)/비주기성을 분리해서 분석하고, F0만 원하는 비율로 스케일한 뒤 나머지는 그대로 재합성. WORLD 공개 API가 C 링키지라 얇은 C 브리지(`HarmonyUp/ThirdParty/World/HarmonyUpWorldBridge.h/.cpp`)만으로 Swift에서 직접 호출(`PitchShifter`의 공개 API는 그대로라 호출부 무변경). F0 추정을 Harvest에서 Dio+StoneMask로 바꿔 처리 속도 개선(30초 클립 기준 5.1초→3.6초). 유닛테스트 78개 통과(성능 회귀 테스트 포함), arm64 실기기 컴파일 확인 — 실기기 청취 결과 "생각보다 퀄 좋다"는 긍정 확인 받음
+- [x] **화음에 질감 더하기 — 리버브 + 보컬 더블링**: `VoiceClipPlayer`에 공유 `AVAudioUnitReverb`(`.mediumRoom`, wetDryMix 18%) 추가 — 성부들이 같은 공간에서 함께 부르는 듯한 일체감. `VoiceDoubler`(신규) — 베이스/3도/5도 각각을 살짝 지연(15~40ms)+미세 디튠(몇 센트)한 복사본과 섞는 ADT(더블링) 기법으로 "한 목소리를 피치만 옮긴 것"이 아니라 "다른 사람이 한 번 더 부른" 듯한 두께 추가, 성부마다 지연/디튠 값을 다르게 줘서 인공적인 동기화 방지, 멜로디(원음)는 더블링 제외. 유닛테스트 85개 통과, 실기기(Ian) 설치+실행 완료 — 청취 확인 대기 중
 - [ ] **로드맵 Phase 4~9**: 다중 트랙 동시 재생(성부별 뮤트), 악보 렌더링(`StaffGeometry`/`SheetMusicView`), 성부 표시/재생 공유 토글, 카라오케 재생헤드 동기화, 연습 탭 최종 통합, 다듬기
 
 ## 구성 요소 (`HarmonyUp/Sources/PitchEngine/`)
@@ -67,8 +68,9 @@
 | `PracticeSummary` | 채점 시도(Score 배열)를 정확도/평균편차 요약 통계로 압축 |
 | `PracticeAttempt` | SwiftData 모델 — 채점 시도 요약을 세션 기록으로 저장 |
 | `PitchShifter` | 피치 시프팅(길이 유지, 피치만 이동) — [WORLD](https://github.com/mmorise/World)(BSD, `HarmonyUp/ThirdParty/World/`) 호출로 포먼트 보존 |
-| `VoiceClipPlayer` | 임의의 오디오 버퍼([Float])를 한 번 재생 |
+| `VoiceClipPlayer` | 임의의 오디오 버퍼([Float])를 한 번 재생, 공유 `AVAudioUnitReverb`로 공간감 부여 |
 | `AudioGain` | 재생 전 샘플 자체를 스케일업하는 피크 정규화 + 여러 트랙 믹싱 |
+| `VoiceDoubler` | 성부별 지연+미세 디튠 복사본을 섞는 보컬 더블링(ADT) |
 | `MelodySegmenter` | 녹음 전체를 배치로 분석해 음표(음높이+시작시간+길이) 목록으로 잘라내기 |
 | `RecordingAnalyzer` | `MelodySegmenter` 출력을 `KeyDetector`/`ChordGenerator`에 연결해 기존 `MelodyStep` 배열로 변환 |
 

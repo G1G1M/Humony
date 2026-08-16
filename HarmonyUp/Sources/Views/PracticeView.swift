@@ -696,11 +696,14 @@ struct PracticeView: View {
 
         Task {
             let shifted = PitchShifter.shift(samples: recorded, pitchRatio: ratio, sampleRate: rate, expectedFrequency: rootFrequency)
+            // 살짝 지연+디튠한 복사본을 더해 "한 목소리를 피치만 옮긴 것"이 아니라 "다른 사람이
+            // 한 번 더 부른" 듯한 두께를 만든다(더블링, docs/CONCEPTS.md 49절).
+            let doubled = VoiceDoubler.apply(to: shifted, sampleRate: rate, interval: interval)
             // 마이크로 녹음한 원본은 보통 피크가 한참 낮게 들어와서(합성음보다 훨씬 작게 들림),
             // 재생 전에 체감 음량을 키운다. 피크가 아니라 RMS(전체 평균 에너지) 기준으로 키우는
             // 이유는 AudioGain.normalizeLoudness 문서 참고 — 숨소리 같은 순간적인 피크만 보고
             // 맞추면 나머지 목소리는 여전히 작게 들린다.
-            let normalized = AudioGain.normalizeLoudness(shifted)
+            let normalized = AudioGain.normalizeLoudness(doubled)
             // 녹음 버퍼는 원본 파형의 임의 지점에서 시작/끝나 있어서, 그대로 재생하면 시작/끝에서
             // "뚝" 하는 클릭음이 날 수 있다 — 양 끝을 짧게(15ms) 페이드해서 없앤다.
             let cleaned = AudioGain.applyFadeInOut(normalized, fadeSampleCount: Int(rate * voiceClipFadeDuration))
@@ -753,9 +756,15 @@ struct PracticeView: View {
             // 베이스(한 옥타브 아래, 비율 < 1) + 3도 + 5도로 각각 옮긴 목소리를 만든다.
             // PitchShifter.shift는 비율이 1보다 작아도(음을 낮출 때도) 그대로 동작하는
             // 양방향이라 베이스만 따로 다른 처리가 필요 없다.
-            let bass = PitchShifter.shift(samples: recorded, pitchRatio: bassRatio, sampleRate: rate, expectedFrequency: rootFrequency)
-            let third = PitchShifter.shift(samples: recorded, pitchRatio: thirdRatio, sampleRate: rate, expectedFrequency: rootFrequency)
-            let fifth = PitchShifter.shift(samples: recorded, pitchRatio: fifthRatio, sampleRate: rate, expectedFrequency: rootFrequency)
+            let bassShifted = PitchShifter.shift(samples: recorded, pitchRatio: bassRatio, sampleRate: rate, expectedFrequency: rootFrequency)
+            let thirdShifted = PitchShifter.shift(samples: recorded, pitchRatio: thirdRatio, sampleRate: rate, expectedFrequency: rootFrequency)
+            let fifthShifted = PitchShifter.shift(samples: recorded, pitchRatio: fifthRatio, sampleRate: rate, expectedFrequency: rootFrequency)
+            // 성부마다 다른 지연/디튠으로 더블링해서 두께를 준다 — 멜로디(원음)는 그대로 둔다.
+            // 이미 사용자 자신이 직접 부른 진짜 목소리라 "다른 사람이 한 번 더 부른" 효과가
+            // 필요 없고, 오히려 원음이 흔들리면 리드로서의 기준점이 흐려진다.
+            let bass = VoiceDoubler.apply(to: bassShifted, sampleRate: rate, interval: .bass)
+            let third = VoiceDoubler.apply(to: thirdShifted, sampleRate: rate, interval: .third)
+            let fifth = VoiceDoubler.apply(to: fifthShifted, sampleRate: rate, interval: .fifth)
             let tracks = includeMelody ? [recorded, bass, third, fifth] : [bass, third, fifth]
             // 트랙들을 섞으면 각자보다 커지므로, mixAndNormalize가 합친 뒤 다시 피크 기준으로
             // 정규화해서 트랙 개수에 상관없이 항상 비슷한 체감 음량이 되게 한다.

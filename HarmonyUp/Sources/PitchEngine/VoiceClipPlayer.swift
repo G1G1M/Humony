@@ -6,6 +6,7 @@ final class VoiceClipPlayer {
 
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
+    private let reverb = AVAudioUnitReverb()
     private var isConfigured = false
 
     /// - Parameter onFinished: 재생이 실제로 스피커까지 다 끝난 뒤 메인 스레드에서 호출된다.
@@ -17,11 +18,20 @@ final class VoiceClipPlayer {
 
         if !isConfigured {
             engine.attach(player)
+            engine.attach(reverb)
+            // 화음 성부들이 다 같은 공간에서 함께 부르는 듯한 일체감을 주는 공유 리버브
+            // (docs/CONCEPTS.md 49절) — 세게 걸면 오히려 성부 구분이 흐려지고 "울림 통에서
+            // 녹음한 것" 같아지므로, 은은하게(18%)만 섞어서 WORLD 합성의 미세한 기계음 느낌을
+            // 가리는 정도로만 쓴다.
+            reverb.loadFactoryPreset(.mediumRoom)
+            reverb.wetDryMix = 18
             // format: nil로 연결하면 엔진이 믹서의 기본 포맷(보통 스테레오, 2채널)으로 연결해버려서,
             // 나중에 모노(1채널) 버퍼를 재생하려 하면 "채널 수가 다르다"는 충돌로 앱이 죽는다
             // (_outputFormat.channelCount == buffer.format.channelCount 단언 실패).
-            // 버퍼와 정확히 같은 포맷(모노)으로 명시적으로 연결해서 이 불일치를 없앤다.
-            engine.connect(player, to: engine.mainMixerNode, format: format)
+            // 버퍼와 정확히 같은 포맷(모노)으로 player→reverb 연결만 명시하고, reverb→믹서는
+            // 리버브 유닛이 알아서 결정하는 포맷(보통 스테레오로 퍼짐)을 그대로 받아들인다.
+            engine.connect(player, to: reverb, format: format)
+            engine.connect(reverb, to: engine.mainMixerNode, format: nil)
             isConfigured = true
         }
 
