@@ -685,8 +685,10 @@ struct PracticeView: View {
         Task {
             let shifted = PitchShifter.shift(samples: recorded, pitchRatio: ratio, sampleRate: rate, expectedFrequency: rootFrequency)
             // 마이크로 녹음한 원본은 보통 피크가 한참 낮게 들어와서(합성음보다 훨씬 작게 들림),
-            // 재생 전에 거의 꽉 차는 수준(0.95)까지 디지털 게인을 올려서 체감 음량을 키운다.
-            let normalized = AudioGain.normalize(shifted)
+            // 재생 전에 체감 음량을 키운다. 피크가 아니라 RMS(전체 평균 에너지) 기준으로 키우는
+            // 이유는 AudioGain.normalizeLoudness 문서 참고 — 숨소리 같은 순간적인 피크만 보고
+            // 맞추면 나머지 목소리는 여전히 작게 들린다.
+            let normalized = AudioGain.normalizeLoudness(shifted)
             // 녹음 버퍼는 원본 파형의 임의 지점에서 시작/끝나 있어서, 그대로 재생하면 시작/끝에서
             // "뚝" 하는 클릭음이 날 수 있다 — 양 끝을 짧게(15ms) 페이드해서 없앤다.
             let cleaned = AudioGain.applyFadeInOut(normalized, fadeSampleCount: Int(rate * voiceClipFadeDuration))

@@ -14,14 +14,42 @@ enum AudioGain {
         return samples.map { $0 * gain }
     }
 
-    /// 여러 트랙(예: 원음 + 3도 + 5도로 각각 피치 시프트한 목소리)을 하나로 합친 뒤 정규화한다.
+    /// 버퍼의 RMS(전체 평균 에너지, 체감 음량에 훨씬 가까운 지표)가 `targetRMS`가 되도록 스케일한다.
+    /// `normalize`(피크 기준)와의 차이: 사람 목소리는 순간적인 피크(숨소리, 파열음, 비브라토
+    /// 정점)가 지속되는 소리보다 훨씬 커서(크레스트 팩터가 큼), 피크만 0.95로 맞추면 그 순간만
+    /// 크고 나머지는 여전히 조용하게 들린다 — "녹음한 목소리가 음성 메모 앱보다 작게 들린다"는
+    /// 피드백의 원인이 이거였다. RMS를 기준으로 올리면 전체적으로 확실히 크게 들리지만, 그 대신
+    /// 순간 피크가 1.0을 넘어(클리핑) 찢어질 수 있어서 `peakCeiling`으로 다시 한 번 상한을 걸고,
+    /// 둘 중 더 작은(보수적인) 게인을 최종적으로 쓴다.
+    static func normalizeLoudness(_ samples: [Float], targetRMS: Float = 0.25, peakCeiling: Float = 0.98) -> [Float] {
+        guard !samples.isEmpty else { return samples }
+        let sumOfSquares = samples.reduce(Float(0)) { $0 + $1 * $1 }
+        let rms = (sumOfSquares / Float(samples.count)).squareRoot()
+        guard rms > 0.0001 else { return samples }
+
+        var gain = targetRMS / rms
+        if let peak = samples.map({ abs($0) }).max(), peak > 0.0001 {
+            gain = min(gain, peakCeiling / peak)
+        }
+        return samples.map { $0 * gain }
+    }
+
+    /// 여러 트랙(예: 원음 + 베이스 + 3도 + 5도로 각각 피치 시프트한 목소리)을 하나로 합친다.
     /// 트랙마다 길이가 살짝 다를 수 있어서(피치 시프트 특성상) 가장 짧은 길이에 맞춘다.
+    ///
+    /// 합치기 "전에" 각 트랙을 같은 체감 음량(RMS)으로 맞춘다 — 안 그러면 어떤 트랙(예: 피치를
+    /// 적게 옮긴 성부)은 원본 진폭을 거의 그대로 유지하고, 다른 트랙은 WSOLA 처리로 진폭 특성이
+    /// 달라져서, 합친 소리를 피크 기준으로 한 번만 정규화했을 때 성부마다 체감 음량이 들쭉날쭉해질
+    /// 수 있다(우연히 순간적으로 큰 피크를 낸 트랙 하나가 전체 게인을 결정해버림). 합친 뒤엔
+    /// 클리핑 방지용으로만 피크를 다시 낮춘다(체감 음량은 이미 위 단계에서 맞춰졌으므로).
     static func mixAndNormalize(_ tracks: [[Float]], targetPeak: Float = 0.95) -> [Float] {
         let nonEmptyTracks = tracks.filter { !$0.isEmpty }
         guard let minLength = nonEmptyTracks.map(\.count).min(), minLength > 0 else { return [] }
 
+        let balancedTracks = nonEmptyTracks.map { normalizeLoudness($0) }
+
         var mixed = [Float](repeating: 0, count: minLength)
-        for track in nonEmptyTracks {
+        for track in balancedTracks {
             for i in 0..<minLength {
                 mixed[i] += track[i]
             }

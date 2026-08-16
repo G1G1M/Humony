@@ -95,6 +95,30 @@ final class PitchShifterTests: XCTestCase {
         XCTAssertTrue(PitchShifter.shift(samples: [], pitchRatio: 1.5, sampleRate: sampleRate).isEmpty)
     }
 
+    // 다운샘플링(rate > 1, 예: 3도/5도로 음을 높일 때) 전에 거는 저역통과 필터 — 나이퀴스트
+    // 위 성분을 미리 줄여서 에일리어싱(접힘 잡음, "쇠소리" 같은 거슬리는 소리)을 완화한다.
+    // 나이퀴스트에 가까운(가장 빠르게 진동하는) +1/-1 교대 신호는 크게 줄어들어야 하고,
+    // 거의 안 변하는(직류에 가까운) 신호는 그대로 통과해야 한다 — 저역통과 필터의 기본 성질.
+    func testAntiAliasFilterAttenuatesHighFrequencyMuchMoreThanLowFrequency() {
+        let highFrequency: [Float] = (0..<1000).map { $0 % 2 == 0 ? 1.0 : -1.0 } // 나이퀴스트 신호
+        let lowFrequency: [Float] = Array(repeating: 1.0, count: 1000) // 직류(0Hz)
+
+        let filteredHigh = PitchShifter.antiAliasFilter(highFrequency, decimationRate: 4.0)
+        let filteredLow = PitchShifter.antiAliasFilter(lowFrequency, decimationRate: 4.0)
+
+        let highRMS = (filteredHigh.reduce(Float(0)) { $0 + $1 * $1 } / Float(filteredHigh.count)).squareRoot()
+        let lowRMS = (filteredLow.reduce(Float(0)) { $0 + $1 * $1 } / Float(filteredLow.count)).squareRoot()
+
+        XCTAssertLessThan(highRMS, 0.1)   // 거의 다 걸러짐
+        XCTAssertEqual(lowRMS, 1.0, accuracy: 0.01) // 직류는 그대로 통과
+    }
+
+    func testAntiAliasFilterSkipsWhenNotDownsampling() {
+        let samples: [Float] = [1, -1, 1, -1, 1]
+        XCTAssertEqual(PitchShifter.antiAliasFilter(samples, decimationRate: 1.0), samples)
+        XCTAssertEqual(PitchShifter.antiAliasFilter(samples, decimationRate: 0.5), samples)
+    }
+
     // expectedFrequency를 넘겨도(탐색 반경이 좁아져도) 결과 피치 자체는 여전히 정확해야 한다 —
     // 회귀 방지용 테스트. (탐색 반경을 좁히는 게 프레임별 흔들림을 항상 줄여준다고 실측으로
     // 단정하긴 어려웠다 — 순음/유사음성 합성 신호로 여러 잡음 수준을 스윕해봤을 때 표준편차가

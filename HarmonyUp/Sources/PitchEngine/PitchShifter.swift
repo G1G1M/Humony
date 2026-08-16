@@ -166,7 +166,16 @@ enum PitchShifter {
 
     static func resample(samples: [Float], rate: Double) -> [Float] {
         guard rate > 0 else { return samples }
-        let outputLength = max(1, Int(Double(samples.count) / rate))
+
+        // rate > 1(3도/5도처럼 음을 높일 때)은 이 단계에서 사실상 다운샘플링이다 — 매 출력
+        // 샘플마다 입력을 rate배씩 건너뛰며 읽는다. 다운샘플링 전에 새 나이퀴스트 주파수보다
+        // 높은 성분을 걸러두지 않으면 그 성분이 접혀 들어와(에일리어싱) 특히 "쇠소리" 같은
+        // 거슬리는 잡음으로 들린다 — 사용자가 "화음이 어색하다"고 느낀 것들 중 상당수가
+        // 이 원인일 가능성이 크다(3도/5도가 베이스보다 훨씬 자주 쓰이는 비율이라 더 눈에 띔).
+        // rate <= 1(베이스처럼 낮출 때)은 반대로 보간(업샘플링)이라 이 문제가 없다.
+        let filtered = rate > 1 ? antiAliasFilter(samples, decimationRate: rate) : samples
+
+        let outputLength = max(1, Int(Double(filtered.count) / rate))
         var output = [Float](repeating: 0, count: outputLength)
 
         for i in 0..<outputLength {
@@ -174,11 +183,31 @@ enum PitchShifter {
             let index0 = Int(sourcePosition)
             let fraction = Float(sourcePosition - Double(index0))
 
-            if index0 + 1 < samples.count {
-                output[i] = samples[index0] * (1 - fraction) + samples[index0 + 1] * fraction
-            } else if index0 < samples.count {
-                output[i] = samples[index0]
+            if index0 + 1 < filtered.count {
+                output[i] = filtered[index0] * (1 - fraction) + filtered[index0 + 1] * fraction
+            } else if index0 < filtered.count {
+                output[i] = filtered[index0]
             }
+        }
+        return output
+    }
+
+    /// 다운샘플링 전에 거는 저역통과 필터 — 진짜 sinc 기반 필터 대신 단순 이동평균(박스 필터)을
+    /// 쓴 이유는, 감쇠 특성은 덜 날카롭지만(약간의 고음 뭉개짐) 구현이 짧고 인덱스 실수로
+    /// 버그가 날 여지가 거의 없어서다(귀로 직접 검증하기 어려운 DSP 코드라 단순함을 우선했다).
+    /// 탭 개수를 감쇠 비율(decimationRate)에 맞춰 정해서, 많이 접을수록(다운샘플링 비율이
+    /// 클수록) 더 넓게 평균 내 더 많은 고음을 걸러낸다.
+    static func antiAliasFilter(_ samples: [Float], decimationRate: Double) -> [Float] {
+        guard decimationRate > 1, !samples.isEmpty else { return samples }
+        let taps = max(2, Int(decimationRate.rounded()))
+
+        var output = [Float](repeating: 0, count: samples.count)
+        var runningSum: Float = 0
+        for i in 0..<samples.count {
+            runningSum += samples[i]
+            if i >= taps { runningSum -= samples[i - taps] }
+            let windowSize = Float(min(i + 1, taps))
+            output[i] = runningSum / windowSize
         }
         return output
     }
