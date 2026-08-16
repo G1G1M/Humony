@@ -51,7 +51,10 @@ final class RecordingAnalyzerTests: XCTestCase {
             XCTAssertNotNil(step.duration)
         }
         XCTAssertEqual(steps.first?.noteName, "C4")
-        XCTAssertNotNil(steps.first?.harmonyNames)
+        let firstVoices = try XCTUnwrap(steps.first?.harmonyVoices)
+        XCTAssertEqual(firstVoices[.bass], "C3")  // 근음, 1옥타브 아래
+        XCTAssertEqual(firstVoices[.third], "E3")
+        XCTAssertEqual(firstVoices[.fifth], "G3")
     }
 
     func testEmptyRecordingProducesNoStepsAndNoKey() {

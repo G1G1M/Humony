@@ -978,3 +978,23 @@ SwiftUI에서 `if` 조건으로 뷰가 나타나거나 사라지는 걸 애니�
 `ChordGenerator.generateHarmony`는 이제 2개(3도/5도) 대신 3개(`[베이스, 3도, 5도]`)를 반환한다. `Interval`에 `.bass` 케이스(스케일 디그리 0칸, 즉 근음 자신)를 추가했다. 이 함수의 반환값을 `.first(where: { $0.interval == ... })`로만 쓰던 기존 호출부(`PracticeView`의 채점/재생 로직 등)는 배열 길이가 늘어난 것 자체는 영향을 받지 않아서 이번 단계(Phase 1)에서는 손대지 않았다 — 베이스 성부를 실제로 화면/재생/채점에 연결하는 건 이어지는 단계에서 진행한다.
 
 **참고**: 이 작업 도중 별도의 실패한 백그라운드 작업이 워킹트리에 미완성 변경(다른 방식의 베이스 성부 추가 시도, `ChordGenerator`/`PracticeView`/`HistoryView`/`MelodyStepRow`에 걸쳐 있었음)을 남겨뒀던 걸 발견해서, 이번 설계로 전부 대체하고 커밋된 기준으로 되돌린 뒤 시작했다.
+
+---
+
+## 42. `MelodyStep`을 문자열 한 덩어리에서 성부별 딕셔너리로 — 3성부를 화면에서 각각 다루기
+
+### 왜 `harmonyNames: String?`으로는 부족해졌는가
+
+지금까지 `MelodyStep.harmonyNames`는 화음을 `"E, G"`처럼 이미 합쳐진 문자열 하나로만 들고 있었다 — 3도/5도 두 개뿐이던 시절엔 "보여주기"만 하면 됐지 "이 스텝의 특정 성부를 채점 대상으로 고르기"는 버튼 두 개(`onScoreThird`/`onScoreFifth`)가 별도의 `ChordGenerator.generateHarmony(...)` 재계산으로 처리했었다. 베이스가 추가되면서 이 패턴을 그대로 버튼 하나 더 늘리는 식으로 갈 수도 있었지만, "화면에 보여줄 이름"과 "채점에 쓸 값"이 서로 다른 곳(문자열 파싱 vs 재계산)에서 따로 관리되는 구조라 성부가 늘수록 어긋나기 쉬웠다.
+
+### `[Interval: String]` 딕셔너리로 전환
+
+`MelodyStep.harmonyVoices: [ChordGenerator.Interval: String]?`로 바꾸고, `ChordGenerator.HarmonyNote` 배열을 이 딕셔너리로 변환하는 로직(`MelodyStep.harmonyVoices(from:)`)을 한 곳에 모았다 — 예전엔 `RecordingAnalyzer.melodySteps(from:)`와 `PracticeView`의 `applyQuickRecordResult`/`correctMelodyStep` 세 곳에서 각자 `.map { NoteNameConverter.convert(...) }.joined(...)` 를 반복하고 있었다. `PracticeView`/`PracticeAttempt` 등 나머지 코드는 이미 `[ChordGenerator.Interval: T]` 딕셔너리 패턴(`lockedScoringTargets`, `latestScores` 등)에 익숙하므로, 새로 만든 게 아니라 기존 관례를 그대로 따른 것.
+
+`MelodyStepRow`는 화면에 보여줄 요약 문자열(`harmonySummary`)을 `ChordGenerator.Interval.allCases`(베이스, 3도, 5도 순서로 선언됨) 순회로 그때그때 조립한다 — 딕셔너리 자체는 순서가 없지만, `Interval`의 선언 순서를 그대로 순회 순서로 쓰면 항상 "베이스 → 3도 → 5도" 일관된 표시 순서가 나온다.
+
+### 버튼 3개, 좁아지면 자동 줄바꿈
+
+베이스 채점 버튼이 추가되면서 한 줄(음이름 메뉴 + 화음 요약 + 버튼 3개)에 다 넣기엔 좁아질 여지가 커졌다 — 기존 앱 전역에서 이미 여러 번 쓴 `ViewThatFits` 패턴(시작음 컨트롤, "내 목소리로 화음" 버튼들 등)을 그대로 재사용해서, 한 줄에 안 들어가면 요약 줄 아래에 버튼 줄이 자동으로 내려가게 했다.
+
+`ChordGenerator.Interval`에 `koreanLabel`("베이스"/"3도"/"5도")을 추가해서, 버튼 라벨/화음 요약 텍스트가 이 한 곳만 보고 일관되게 나오도록 정리했다 — 앞으로 재생(Phase 3/4)·채점 패널(Phase 5)에서도 같은 라벨을 재사용할 예정.

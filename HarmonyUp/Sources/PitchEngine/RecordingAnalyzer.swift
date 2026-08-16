@@ -10,7 +10,7 @@ enum RecordingAnalyzer {
     struct AnalyzedRecording {
         let notes: [MelodySegmenter.SegmentedNote]
         let key: KeyDetector.DetectedKey?
-        // notes 배열의 인덱스 -> 그 음의 3도/5도 화음. 온음계 밖 음(ChordGenerator가 nil을 주는 경우)은
+        // notes 배열의 인덱스 -> 그 음의 3성부(베이스/3도/5도) 화음. 온음계 밖 음(ChordGenerator가 nil을 주는 경우)은
         // 이 딕셔너리에 아예 항목이 없다 — "화음 없음"을 별도 케이스로 발명하지 않고 기존
         // ChordGenerator의 nil 의미를 그대로 물려받는다.
         let harmonies: [Int: [ChordGenerator.HarmonyNote]]
@@ -48,15 +48,10 @@ enum RecordingAnalyzer {
         analyzed.notes.enumerated().map { index, note in
             let frequency = NoteNameConverter.frequency(forMIDINote: note.midiNote)
             let noteName = NoteNameConverter.convert(frequency: frequency)?.noteName ?? "?"
-            let harmonyNames = analyzed.harmonies[index].map { harmony in
-                harmony
-                    .map { NoteNameConverter.convert(frequency: $0.frequency)?.noteName ?? "?" }
-                    .joined(separator: ", ")
-            }
             return MelodyStep(
                 noteName: noteName,
                 midiNote: note.midiNote,
-                harmonyNames: harmonyNames,
+                harmonyVoices: MelodyStep.harmonyVoices(from: analyzed.harmonies[index]),
                 onsetTime: note.onsetTime,
                 duration: note.duration
             )

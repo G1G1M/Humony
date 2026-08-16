@@ -185,11 +185,12 @@ struct PracticeView: View {
                                                 step: step,
                                                 onCorrect: { pitchClass in correctMelodyStep(at: index, toPitchClass: pitchClass) },
                                                 onScoreThird: { startScoringMelodyStep(at: index, interval: .third) },
-                                                onScoreFifth: { startScoringMelodyStep(at: index, interval: .fifth) }
+                                                onScoreFifth: { startScoringMelodyStep(at: index, interval: .fifth) },
+                                                onScoreBass: { startScoringMelodyStep(at: index, interval: .bass) }
                                             )
                                         }
                                     }
-                                    Text("음을 눌러서 고치거나, 3도/5도로 그 스텝을 바로 채점할 수 있어요")
+                                    Text("음을 눌러서 고치거나, 베이스/3도/5도로 그 스텝을 바로 채점할 수 있어요")
                                         .font(Theme.Typography.caption2)
                                         .foregroundStyle(.secondary)
 
@@ -555,12 +556,8 @@ struct PracticeView: View {
         melodySteps = analyzed.notes.map { note in
             let frequency = NoteNameConverter.frequency(forMIDINote: note.midiNote)
             let noteName = NoteNameConverter.convert(frequency: frequency)?.noteName ?? "?"
-            let harmonyNames = ChordGenerator.generateHarmony(melodyFrequency: frequency, key: key).map { harmony in
-                harmony
-                    .map { NoteNameConverter.convert(frequency: $0.frequency)?.noteName ?? "?" }
-                    .joined(separator: ", ")
-            }
-            return MelodyStep(noteName: noteName, midiNote: note.midiNote, harmonyNames: harmonyNames, onsetTime: note.onsetTime, duration: note.duration)
+            let harmony = ChordGenerator.generateHarmony(melodyFrequency: frequency, key: key)
+            return MelodyStep(noteName: noteName, midiNote: note.midiNote, harmonyVoices: MelodyStep.harmonyVoices(from: harmony), onsetTime: note.onsetTime, duration: note.duration)
         }
 
         // "내 목소리로 화음"/채점 카드가 그대로 재사용하는 recentVoiceBuffer를 녹음 전체로 채운다 —
@@ -610,7 +607,7 @@ struct PracticeView: View {
     }
 
     /// 멜로디 각 스텝을 현재(최신) 조성 기준으로 다시 계산해서, interval(3도 또는 5도) 라인 전체를
-    /// 순서대로 반환한다. 저장된 harmonyNames 문자열 대신 매번 새로 계산하는 이유는, 사용자가 중간에
+    /// 순서대로 반환한다. 저장된 harmonyVoices 대신 매번 새로 계산하는 이유는, 사용자가 중간에
     /// 스텝을 고쳐서 조성이 바뀌었을 수도 있으니 재생 시점 기준으로 항상 최신 상태를 들려주기 위함이다.
     private func melodyHarmonyLine(interval: ChordGenerator.Interval) -> [ChordGenerator.HarmonyNote] {
         guard let key = melodySession.detectedKey else { return [] }
@@ -896,13 +893,8 @@ struct PracticeView: View {
         // 그래야 화면에 보이는 시퀀스가 서로 다른 조성 가정을 섞어 보여주지 않는다.
         for i in melodySteps.indices {
             let frequency = NoteNameConverter.frequency(forMIDINote: melodySteps[i].midiNote)
-            if let harmony = ChordGenerator.generateHarmony(melodyFrequency: frequency, key: key) {
-                melodySteps[i].harmonyNames = harmony
-                    .map { NoteNameConverter.convert(frequency: $0.frequency)?.noteName ?? "?" }
-                    .joined(separator: ", ")
-            } else {
-                melodySteps[i].harmonyNames = nil
-            }
+            let harmony = ChordGenerator.generateHarmony(melodyFrequency: frequency, key: key)
+            melodySteps[i].harmonyVoices = MelodyStep.harmonyVoices(from: harmony)
         }
     }
 

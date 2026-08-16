@@ -26,6 +26,16 @@ enum ChordGenerator {
             case .fifth: return 4
             }
         }
+
+        /// 화면에 보여줄 짧은 한글 라벨 — 여러 화면(멜로디 스텝 목록, 재생 버튼, 채점 패널)에서
+        /// 같은 표기를 반복하지 않도록 한 곳에 모았다.
+        var koreanLabel: String {
+            switch self {
+            case .bass: return "베이스"
+            case .third: return "3도"
+            case .fifth: return "5도"
+            }
+        }
     }
 
     struct HarmonyNote {
