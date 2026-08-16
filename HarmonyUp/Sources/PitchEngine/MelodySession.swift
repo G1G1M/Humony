@@ -9,6 +9,9 @@ final class MelodySession {
 
     struct RecordedNote {
         let pitchClass: Int
+        // 코드 진행(ChordGenerator.harmonizeSequence)이 화음의 실제 옥타브를 배치하려면
+        // 음이름(pitchClass)뿐 아니라 실제 MIDI 노트(옥타브 포함)가 필요하다.
+        let midiNote: Int
         let duration: Double
     }
 
@@ -23,7 +26,8 @@ final class MelodySession {
     /// nil(무음/VAD로 걸러진 프레임)은 조성 판단에 영향을 주지 않도록 무시한다.
     func record(_ result: AudioCapture.DetectionResult?) {
         guard let result else { return }
-        notes.append(RecordedNote(pitchClass: result.pitchClass, duration: result.frameDuration))
+        let midiNote = Int(NoteNameConverter.exactMIDINote(forFrequency: result.frequency).rounded())
+        notes.append(RecordedNote(pitchClass: result.pitchClass, midiNote: midiNote, duration: result.frameDuration))
         lastNote = result
     }
 
@@ -31,7 +35,8 @@ final class MelodySession {
     /// 조성 판별에 쓰이는 누적치를 갱신하고, 고친 게 마지막 음이었다면 화음 생성 기준(lastNote)도 같이 바꾼다.
     func correctNote(at index: Int, to corrected: AudioCapture.DetectionResult) {
         guard notes.indices.contains(index) else { return }
-        notes[index] = RecordedNote(pitchClass: corrected.pitchClass, duration: notes[index].duration)
+        let midiNote = Int(NoteNameConverter.exactMIDINote(forFrequency: corrected.frequency).rounded())
+        notes[index] = RecordedNote(pitchClass: corrected.pitchClass, midiNote: midiNote, duration: notes[index].duration)
 
         if index == notes.count - 1 {
             lastNote = corrected
@@ -51,8 +56,13 @@ final class MelodySession {
 
     /// 마지막으로 부른 음 위에 현재 조성 기준 3도/5도 화음을 제안한다.
     /// 조성이 아직 불명확하거나, 마지막 음이 그 조성의 온음계 밖이면 nil.
+    ///
+    /// `ChordGenerator.harmonizeSequence`는 Viterbi로 문맥(앞뒤 노트)을 보고 코드를 고르므로,
+    /// 마지막 음 하나만 떼어 계산할 수 없다 — 지금까지 누적된 노트 전체로 다시 돌리고 마지막
+    /// 결과만 취한다. 녹음 하나에 노트가 많아야 수십 개라 매번 다시 돌려도 성능 문제는 없다.
     var suggestedHarmony: [ChordGenerator.HarmonyNote]? {
-        guard let key = detectedKey, let lastNote else { return nil }
-        return ChordGenerator.generateHarmony(melodyFrequency: lastNote.frequency, key: key)
+        guard let key = detectedKey, !notes.isEmpty else { return nil }
+        let sequence = ChordGenerator.harmonizeSequence(melodyNotes: notes.map { ($0.midiNote, $0.duration) }, key: key)
+        return sequence.last ?? nil
     }
 }

@@ -554,11 +554,24 @@ struct PracticeView: View {
         // 녹음 전체를 다 보고 확정한 "최종" 조성 기준으로 한 번에 다시 계산한다 — 실시간 캡처처럼
         // "그때까지 들은 것만으로 추측한 조성"을 스텝마다 다르게 쓰면, 이미 다 끝난 녹음을 배치로
         // 분석하는 이 경로에서는 앞부분 스텝의 화음이 뒤늦게 밝혀진 진짜 조성과 어긋나 보일 수 있다.
-        melodySteps = analyzed.notes.map { note in
+        // ChordGenerator.harmonizeSequence는 Viterbi로 노트 시퀀스 전체의 문맥을 보고 코드
+        // 진행을 고르므로, 노트별로 따로따로가 아니라 한 번에 통째로 넘긴다(docs/CONCEPTS.md 51절).
+        let harmonySequence = ChordGenerator.harmonizeSequence(
+            melodyNotes: analyzed.notes.map { ($0.midiNote, $0.duration) },
+            key: key
+        )
+        melodySteps = analyzed.notes.enumerated().map { index, note in
             let frequency = NoteNameConverter.frequency(forMIDINote: note.midiNote)
             let noteName = NoteNameConverter.convert(frequency: frequency)?.noteName ?? "?"
-            let harmony = ChordGenerator.generateHarmony(melodyFrequency: frequency, key: key)
-            return MelodyStep(noteName: noteName, midiNote: note.midiNote, harmonyVoices: MelodyStep.harmonyVoices(from: harmony), onsetTime: note.onsetTime, duration: note.duration)
+            let harmony = harmonySequence[index]
+            return MelodyStep(
+                noteName: noteName,
+                midiNote: note.midiNote,
+                harmonyVoices: MelodyStep.harmonyVoices(from: harmony),
+                harmony: harmony,
+                onsetTime: note.onsetTime,
+                duration: note.duration
+            )
         }
 
         // "내 목소리로 화음"/채점 카드가 그대로 재사용하는 recentVoiceBuffer를 녹음 전체로 채운다 —
@@ -607,14 +620,15 @@ struct PracticeView: View {
         }
     }
 
-    /// 멜로디 각 스텝을 현재(최신) 조성 기준으로 다시 계산해서, interval(3도 또는 5도) 라인 전체를
-    /// 순서대로 반환한다. 저장된 harmonyVoices 대신 매번 새로 계산하는 이유는, 사용자가 중간에
-    /// 스텝을 고쳐서 조성이 바뀌었을 수도 있으니 재생 시점 기준으로 항상 최신 상태를 들려주기 위함이다.
+    /// 멜로디 각 스텝의 interval(베이스/3도/5도) 라인 전체를 순서대로 반환한다. 스텝 하나만
+    /// 떼어 다시 계산하지 않고 `melodySteps[i].harmony`(배치로 계산해둔 원본)를 그대로 읽는다 —
+    /// Viterbi가 노트 시퀀스 전체의 문맥을 보고 코드를 고르므로, 스텝 하나만 따로 재계산하면
+    /// 앞뒤 문맥이 없어 다른(틀린) 코드가 나올 수 있다(docs/CONCEPTS.md 51절). `correctMelodyStep`이
+    /// 스텝을 고칠 때마다 전체를 다시 계산해 `harmony`를 갱신해두므로, 이 함수는 항상 최신
+    /// 상태를 그대로 읽기만 하면 된다.
     private func melodyHarmonyLine(interval: ChordGenerator.Interval) -> [ChordGenerator.HarmonyNote] {
-        guard let key = melodySession.detectedKey else { return [] }
-        return melodySteps.compactMap { step in
-            let frequency = NoteNameConverter.frequency(forMIDINote: step.midiNote)
-            return ChordGenerator.generateHarmony(melodyFrequency: frequency, key: key)?.first { $0.interval == interval }
+        melodySteps.compactMap { step in
+            step.harmony?.first { $0.interval == interval }
         }
     }
 
@@ -845,10 +859,11 @@ struct PracticeView: View {
     /// toggleScoring(interval:)은 항상 melodySession.suggestedHarmony(마지막 음 기준)만 봤어서
     /// 멜로디가 여러 개 쌓여도 마지막 스텝만 채점할 수 있었다 — 이건 그 제약을 없앤 버전이다.
     private func startScoringMelodyStep(at index: Int, interval: ChordGenerator.Interval) {
-        guard melodySteps.indices.contains(index), let key = melodySession.detectedKey else { return }
-
-        let frequency = NoteNameConverter.frequency(forMIDINote: melodySteps[index].midiNote)
-        guard let harmony = ChordGenerator.generateHarmony(melodyFrequency: frequency, key: key),
+        // 이 스텝 하나만 떼어 다시 계산하지 않고 melodySteps[index].harmony(배치로 계산해둔
+        // 원본)를 그대로 읽는다 — Viterbi가 앞뒤 노트 문맥을 보고 코드를 고르므로, 스텝 하나만
+        // 따로 재계산하면 문맥이 없어 다른 코드가 나올 수 있다(docs/CONCEPTS.md 51절).
+        guard melodySteps.indices.contains(index),
+              let harmony = melodySteps[index].harmony,
               let target = harmony.first(where: { $0.interval == interval }) else { return }
 
         if let previous = activeScoringInterval {
@@ -914,12 +929,16 @@ struct PracticeView: View {
         guard let key = melodySession.detectedKey else { return }
         keyText = String(format: "조성: %@ (확신도 %.2f)", key.name, key.confidence)
 
-        // 조성이 바뀌었을 수 있으므로, 지금까지 쌓인 스텝 전부를 최신 조성 기준으로 다시 계산한다 —
-        // 그래야 화면에 보이는 시퀀스가 서로 다른 조성 가정을 섞어 보여주지 않는다.
+        // 조성이 바뀌었을 수 있고, 무엇보다 Viterbi는 노트 시퀀스 전체의 문맥을 보고 코드
+        // 진행을 고르므로(docs/CONCEPTS.md 51절) 스텝 하나를 고치면 그 스텝뿐 아니라 주변
+        // 스텝의 화음까지 달라질 수 있다 — 그래서 개별 재계산이 아니라 전체를 한 번에 다시 돌린다.
+        let harmonySequence = ChordGenerator.harmonizeSequence(
+            melodyNotes: melodySteps.map { ($0.midiNote, $0.duration ?? approximateFrameDuration) },
+            key: key
+        )
         for i in melodySteps.indices {
-            let frequency = NoteNameConverter.frequency(forMIDINote: melodySteps[i].midiNote)
-            let harmony = ChordGenerator.generateHarmony(melodyFrequency: frequency, key: key)
-            melodySteps[i].harmonyVoices = MelodyStep.harmonyVoices(from: harmony)
+            melodySteps[i].harmony = harmonySequence[i]
+            melodySteps[i].harmonyVoices = MelodyStep.harmonyVoices(from: harmonySequence[i])
         }
     }
 

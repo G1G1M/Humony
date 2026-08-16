@@ -31,9 +31,11 @@ enum RecordingAnalyzer {
 
         var harmonies: [Int: [ChordGenerator.HarmonyNote]] = [:]
         if let key {
-            for (index, note) in notes.enumerated() {
-                let frequency = NoteNameConverter.frequency(forMIDINote: note.midiNote)
-                if let harmony = ChordGenerator.generateHarmony(melodyFrequency: frequency, key: key) {
+            // ChordGenerator.harmonizeSequence는 Viterbi로 노트 시퀀스 전체의 문맥을 보고 코드
+            // 진행을 고르므로, 노트별로 따로따로가 아니라 한 번에 통째로 넘겨야 한다.
+            let sequence = ChordGenerator.harmonizeSequence(melodyNotes: notes.map { ($0.midiNote, $0.duration) }, key: key)
+            for (index, harmony) in sequence.enumerated() {
+                if let harmony {
                     harmonies[index] = harmony
                 }
             }
@@ -52,6 +54,7 @@ enum RecordingAnalyzer {
                 noteName: noteName,
                 midiNote: note.midiNote,
                 harmonyVoices: MelodyStep.harmonyVoices(from: analyzed.harmonies[index]),
+                harmony: analyzed.harmonies[index],
                 onsetTime: note.onsetTime,
                 duration: note.duration
             )

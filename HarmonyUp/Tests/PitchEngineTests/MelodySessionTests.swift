@@ -43,19 +43,23 @@ final class MelodySessionTests: XCTestCase {
         XCTAssertEqual(session.detectedKey?.mode, .major)
     }
 
-    func testSuggestedHarmonyUsesLastNoteAboveDetectedKey() throws {
+    // ChordGenerator.harmonizeSequence(Viterbi)는 지금까지 누적된 노트 전체의 문맥을 보고
+    // 코드를 고르므로, suggestedHarmony가 그 결과의 "마지막 노트" 값을 정확히 반환하는지
+    // 확인하려면 결과가 뚜렷하게 예측 가능한 시퀀스를 써야 한다 — C-E-G는 셋 다 C장조 I의
+    // 구성음이라 I가 유일하게 최적인 코드로 뽑힌다(다른 후보는 최소 한 음에서 페널티를 받음).
+    func testSuggestedHarmonyReflectsLastNoteInContext() throws {
         let session = MelodySession()
-        for (pitchClass, duration) in majorProfile.enumerated() {
-            session.record(result(midiNote: 60 + pitchClass, duration: duration))
-        }
-        session.record(result(midiNote: 60, duration: 0.05)) // 마지막으로 부른 음 = C4
+        session.record(result(midiNote: 60, duration: 0.3)) // C4
+        session.record(result(midiNote: 64, duration: 0.3)) // E4
+        session.record(result(midiNote: 67, duration: 0.3)) // G4 — 마지막 음
 
         let harmony = try XCTUnwrap(session.suggestedHarmony)
         let byInterval = Dictionary(uniqueKeysWithValues: harmony.map { ($0.interval, $0) })
-        // 마지막 음(C4=60) 기준 베이스는 1옥타브 아래(C3=48), 3도/5도는 베이스와 멜로디 사이.
-        XCTAssertEqual(byInterval[.bass]?.midiNote, 48)  // C3
-        XCTAssertEqual(byInterval[.third]?.midiNote, 52) // E3
-        XCTAssertEqual(byInterval[.fifth]?.midiNote, 55) // G3
+        XCTAssertEqual(byInterval[.bass]?.pitchClass, 0)  // C — I의 근음
+        XCTAssertEqual(byInterval[.third]?.pitchClass, 4) // E
+        XCTAssertEqual(byInterval[.fifth]?.pitchClass, 7) // G
+        // 배치 위치는 항상 마지막 노트(G4=67) 기준이어야 한다.
+        XCTAssertLessThan(byInterval[.fifth]!.midiNote, 67)
     }
 
     func testEmptySessionHasNoKeyOrHarmony() {

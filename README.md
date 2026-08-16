@@ -50,6 +50,7 @@
 - [x] **직접 구현한 PSOLA를 WORLD 보코더로 교체(현재 사용 중)**: 위 PSOLA로도 "전체 화음이 더 이상하게 들린다"는 실기기 청취 피드백을 받아, [WORLD](https://github.com/mmorise/World)(BSD 라이선스, 검증된 음성 분석/합성 라이브러리)를 도입 — F0(기본주파수)/스펙트럼 포락선(포먼트)/비주기성을 분리해서 분석하고, F0만 원하는 비율로 스케일한 뒤 나머지는 그대로 재합성. WORLD 공개 API가 C 링키지라 얇은 C 브리지(`HarmonyUp/ThirdParty/World/HarmonyUpWorldBridge.h/.cpp`)만으로 Swift에서 직접 호출(`PitchShifter`의 공개 API는 그대로라 호출부 무변경). F0 추정을 Harvest에서 Dio+StoneMask로 바꿔 처리 속도 개선(30초 클립 기준 5.1초→3.6초). 유닛테스트 78개 통과(성능 회귀 테스트 포함), arm64 실기기 컴파일 확인 — 실기기 청취 결과 "생각보다 퀄 좋다"는 긍정 확인 받음
 - [x] **화음에 질감 더하기 — 리버브 + 보컬 더블링**: `VoiceClipPlayer`에 공유 `AVAudioUnitReverb`(`.mediumRoom`, wetDryMix 18%) 추가 — 성부들이 같은 공간에서 함께 부르는 듯한 일체감. `VoiceDoubler`(신규) — 베이스/3도/5도 각각을 살짝 지연(15~40ms)+미세 디튠(몇 센트)한 복사본과 섞는 ADT(더블링) 기법으로 "한 목소리를 피치만 옮긴 것"이 아니라 "다른 사람이 한 번 더 부른" 듯한 두께 추가, 성부마다 지연/디튠 값을 다르게 줘서 인공적인 동기화 방지, 멜로디(원음)는 더블링 제외. 리버브 도입 과정에서 재생 그래프 포맷 관련 버그 2건(리버브 노드 기본 포맷 불일치, "다시 녹음" 후 샘플레이트 변경 미반영) 발견·수정. 유닛테스트 85개 통과, 실기기(Ian) 설치+실행 완료 — 청취 확인 대기 중
 - [x] **베이스 리듬 독립화 — 화음이 "뻣뻣하다"는 피드백 대응**: 화성학(SATB voice leading, 병행/반진행)·아카펠라 편곡 리서치로 원인 진단(멜로디 음을 그대로 근음 삼는 구조 → 병행 진행 + 화성 리듬이 멜로디 리듬과 동일 + 베이스가 멜로디 리듬을 그대로 복사). 그중 지금 구조를 거의 안 건드리고 적용 가능한 "베이스 리듬 독립화"부터 착수 — `NoteSequenceGrouper`(신규, 순수 함수) 추가해 "전체 베이스/3도/5도 듣기" 재생이 연속된 같은 음을 매번 재트리거하지 않고 하나의 지속음으로 묶도록 수정(총 재생 길이는 그대로 유지). 유닛테스트 92개 통과, 실기기(Ian) 설치+실행 완료
+- [x] **화음 생성을 "근음=멜로디 음" 모델에서 실제 코드 진행(HMM+Viterbi)으로 교체**: 화음이 뻣뻣한 나머지 원인(병행 진행, 화성 리듬=멜로디 리듬)은 화성 모델 자체를 바꿔야 해결됨을 확인 — 기성 API/라이브러리는 없어서(반대 방향 문제이거나 ML 필요), ML 없이 화성학 규칙만으로 구현 가능한 HMM+Viterbi로 직접 구현(plan mode로 설계 확정 후 진행). `ChordGenerator.harmonizeSequence(melodyNotes:key:)`(배치 API)가 조성의 다이어토닉 코드 7개(I~vii°) 중 방출 점수(코드 구성음 적합도, 길이 가중)+전이 점수(같은 코드 유지 최우선, 근음 강한 진행 선호, T→S→D→T 순환 반영)로 최적 코드 진행을 Viterbi로 찾아 베이스/3도/5도를 배정 — 경과음 위에서 화음이 안 바뀌고 유지될 수 있게 됨. 기존 단일 노트 API(`generateHarmony`)는 완전히 제거하고 `RecordingAnalyzer`/`MelodySession`/`PracticeView`(채점·재생·수정 로직) 전부 배치 API로 전환, `MelodyStep`에 원본 화음 데이터(`harmony`) 필드 추가. 유닛테스트 94개 통과, 실기기(Ian) 빌드+설치 완료 — 청취 확인 대기 중
 - [ ] **로드맵 Phase 4~9**: 다중 트랙 동시 재생(성부별 뮤트), 악보 렌더링(`StaffGeometry`/`SheetMusicView`), 성부 표시/재생 공유 토글, 카라오케 재생헤드 동기화, 연습 탭 최종 통합, 다듬기
 
 ## 구성 요소 (`HarmonyUp/Sources/PitchEngine/`)
@@ -61,7 +62,7 @@
 | `VoiceActivityDetector` | 에너지 임계값 기반 무음 구간 필터링 |
 | `AudioCapture` | AVAudioEngine 마이크 캡처 + 파이프라인 연결 |
 | `KeyDetector` | pitch-class 히스토그램 기반 조성 판별 (Temperley 1999 key profile) |
-| `ChordGenerator` | 판별된 조성 기준 diatonic 3도/5도 화음 생성 |
+| `ChordGenerator` | 멜로디 노트 시퀀스 전체에 HMM+Viterbi로 다이어토닉 코드 진행을 붙여 베이스/3도/5도 생성 |
 | `MelodySession` | 프레임별 감지 결과를 누적해 KeyDetector/ChordGenerator에 연결 |
 | `TonePlayer` | 지정 주파수 톤 재생(배음+envelope) — 제안된 화음/시작음을 귀로 확인 |
 | `PitchScorer` | 목표 주파수 대비 사용자 음정의 cent 편차 채점 |
