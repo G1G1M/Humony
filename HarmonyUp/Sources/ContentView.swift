@@ -53,6 +53,11 @@ struct ContentView: View {
     @State private var lastCapturedPitchClass: Int?
     @State private var melodySteps: [MelodyStep] = []
 
+    // 멜로디 전체의 화음 라인(3도 또는 5도)을 이어서 들려주는 재생 상태 — "도미솔을 부르면
+    // 그 3도/5도를 처음부터 끝까지 이어서 들려준다"는 요청에 대응한다.
+    @State private var playingMelodyLineInterval: ChordGenerator.Interval?
+    @State private var melodyLineTask: Task<Void, Never>?
+
     // 노이즈성 프레임 하나로 잘못 확정되지 않도록, 같은 pitch class가 이만큼
     // 연속 프레임(약 46ms x 3 = 140ms) 유지돼야 "이 음으로 확정"한다.
     private let captureStreakRequired = 3
@@ -98,8 +103,8 @@ struct ContentView: View {
         }
     }
 
-    // 재생 중(화음/시작음)엔 마이크를 완전히 무시한다 — 스피커 소리가 되먹임되는 피드백 루프 방지.
-    private var isPlaybackBusy: Bool { isPlayingTone || isPlayingStartingNote }
+    // 재생 중(화음/시작음/멜로디 라인)엔 마이크를 완전히 무시한다 — 스피커 소리가 되먹임되는 피드백 루프 방지.
+    private var isPlaybackBusy: Bool { isPlayingTone || isPlayingStartingNote || playingMelodyLineInterval != nil }
 
     var body: some View {
         ScrollView {
@@ -181,6 +186,19 @@ struct ContentView: View {
                                 Text("음을 눌러서 고치거나, 3도/5도로 그 스텝을 바로 채점할 수 있어요")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
+
+                                // 도-미-솔을 부르면 그 3도(또는 5도) 라인을 처음부터 끝까지 이어서
+                                // 들려준다 — 한 스텝씩 끊어 듣는 게 아니라 멜로디 전체를 화음으로 들어보는 것.
+                                HStack {
+                                    Button(playingMelodyLineInterval == .third ? "3도 라인 정지" : "전체 3도 듣기") {
+                                        toggleMelodyLinePlayback(interval: .third)
+                                    }
+                                    Button(playingMelodyLineInterval == .fifth ? "5도 라인 정지" : "전체 5도 듣기") {
+                                        toggleMelodyLinePlayback(interval: .fifth)
+                                    }
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(isPlayingTone || isPlayingStartingNote)
                             }
                         } else {
                             Text(harmonyText.isEmpty ? "아직 제안 없음" : harmonyText)
@@ -249,6 +267,7 @@ struct ContentView: View {
         .onDisappear {
             tonePlaybackTask?.cancel()
             startingNoteTask?.cancel()
+            melodyLineTask?.cancel()
             audioCapture.stop()
             tonePlayer.stop()
         }
@@ -503,6 +522,54 @@ struct ContentView: View {
         }
     }
 
+    /// 멜로디 각 스텝을 현재(최신) 조성 기준으로 다시 계산해서, interval(3도 또는 5도) 라인 전체를
+    /// 순서대로 반환한다. 저장된 harmonyNames 문자열 대신 매번 새로 계산하는 이유는, 사용자가 중간에
+    /// 스텝을 고쳐서 조성이 바뀌었을 수도 있으니 재생 시점 기준으로 항상 최신 상태를 들려주기 위함이다.
+    private func melodyHarmonyLine(interval: ChordGenerator.Interval) -> [ChordGenerator.HarmonyNote] {
+        guard let key = melodySession.detectedKey else { return [] }
+        return melodySteps.compactMap { step in
+            let frequency = NoteNameConverter.frequency(forMIDINote: step.midiNote)
+            return ChordGenerator.generateHarmony(melodyFrequency: frequency, key: key)?.first { $0.interval == interval }
+        }
+    }
+
+    /// 멜로디 전체의 화음 라인(3도 또는 5도)을 처음부터 끝까지 한 바퀴 이어서 들려준다.
+    /// 화음 듣기(단일 목표음)와 달리 끝나면 자동으로 멈춘다 — 멜로디는 길이가 정해져 있어서
+    /// 무한 반복하면 오히려 "언제 끝났는지" 헷갈린다.
+    private func toggleMelodyLinePlayback(interval: ChordGenerator.Interval) {
+        if playingMelodyLineInterval == interval {
+            melodyLineTask?.cancel()
+            melodyLineTask = nil
+            tonePlayer.stop()
+            playingMelodyLineInterval = nil
+            return
+        }
+
+        let line = melodyHarmonyLine(interval: interval)
+        guard !line.isEmpty else { return }
+
+        melodyLineTask?.cancel()
+
+        do {
+            try tonePlayer.start()
+            playingMelodyLineInterval = interval
+        } catch {
+            statusText = "재생 실패: \(error.localizedDescription)"
+            return
+        }
+
+        melodyLineTask = Task {
+            for note in line {
+                guard !Task.isCancelled else { return }
+                tonePlayer.setFrequency(note.frequency)
+                try? await Task.sleep(for: noteHoldDuration)
+            }
+            guard !Task.isCancelled else { return }
+            tonePlayer.stop()
+            playingMelodyLineInterval = nil
+        }
+    }
+
     /// 노래를 시작하기 전 사용자가 고른 기준음을 잠깐 들려준다 — 무반주로 노래할 때
     /// 첫 음을 잡기 위한 "피치 파이프". 화음 재생과 마찬가지로 재생 중엔 마이크를 무시해서
     /// 스피커 소리가 되먹임되는 걸 막는다.
@@ -648,9 +715,12 @@ struct ContentView: View {
         tonePlaybackTask = nil
         startingNoteTask?.cancel()
         startingNoteTask = nil
+        melodyLineTask?.cancel()
+        melodyLineTask = nil
         tonePlayer.stop()
         isPlayingTone = false
         isPlayingStartingNote = false
+        playingMelodyLineInterval = nil
         activeScoringInterval = nil
         lockedScoringTargets = [:]
         latestScores = [:]
