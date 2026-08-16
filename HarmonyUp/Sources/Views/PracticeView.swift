@@ -69,6 +69,7 @@ struct PracticeView: View {
 
     // 화음의 각 음을 순서대로 들려줄 때 한 음당 재생하는 길이.
     private let noteHoldDuration: Duration = .milliseconds(800)
+    private let noteHoldMilliseconds = 800
 
     // 시작음(무반주로 노래할 때 첫 음을 잡기 위해 짧게 불어주는 "피치 파이프")의 MIDI 노트 번호.
     // 곡마다 부르기 편한 음이 다르므로 A4(440Hz, MIDI 69)를 기본값으로 하되 직접 고를 수 있게 한다.
@@ -632,6 +633,12 @@ struct PracticeView: View {
         let line = melodyHarmonyLine(interval: interval)
         guard !line.isEmpty else { return }
 
+        // 연속된 스텝의 화음 음이 같으면(멜로디가 같은 음을 반복하는 구간) 매번 다시 어택하지
+        // 않고 하나의 지속음으로 묶는다 — 실제 아카펠라 베이스가 멜로디 리듬을 그대로 복사하지
+        // 않고 지속음+독립적 리듬을 섞어 쓰는 것과 같은 원리(docs/CONCEPTS.md 50절). 총 재생
+        // 길이는 그대로 유지된다(묶인 구간은 원래 스텝 개수만큼 길게 유지하므로).
+        let heldNotes = NoteSequenceGrouper.group(line.map(\.frequency))
+
         melodyLineTask?.cancel()
 
         do {
@@ -643,10 +650,10 @@ struct PracticeView: View {
         }
 
         melodyLineTask = Task {
-            for note in line {
+            for held in heldNotes {
                 guard !Task.isCancelled else { return }
-                tonePlayer.setFrequency(note.frequency)
-                try? await Task.sleep(for: noteHoldDuration)
+                tonePlayer.setFrequency(held.frequency)
+                try? await Task.sleep(for: .milliseconds(noteHoldMilliseconds * held.holdCount))
             }
             guard !Task.isCancelled else { return }
             tonePlayer.stop()
