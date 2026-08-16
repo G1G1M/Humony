@@ -25,13 +25,14 @@ final class VoiceClipPlayer {
             // 가리는 정도로만 쓴다.
             reverb.loadFactoryPreset(.mediumRoom)
             reverb.wetDryMix = 18
-            // format: nil로 연결하면 엔진이 믹서의 기본 포맷(보통 스테레오, 2채널)으로 연결해버려서,
-            // 나중에 모노(1채널) 버퍼를 재생하려 하면 "채널 수가 다르다"는 충돌로 앱이 죽는다
-            // (_outputFormat.channelCount == buffer.format.channelCount 단언 실패).
-            // 버퍼와 정확히 같은 포맷(모노)으로 player→reverb 연결만 명시하고, reverb→믹서는
-            // 리버브 유닛이 알아서 결정하는 포맷(보통 스테레오로 퍼짐)을 그대로 받아들인다.
+            // format: nil로 연결하면 그 노드의 "기본" 포맷을 쓰는데, AVAudioUnitReverb는
+            // 명시적으로 연결하기 전엔 자체 기본 포맷(보통 44.1kHz)을 갖고 있어서 마이크의
+            // 실제 샘플레이트(기종에 따라 48kHz 등)와 어긋날 수 있다 — 이 불일치가
+            // engine.start()에서 "재생 실패"로 이어지는 원인이었다(reverb→mixer만 format: nil로
+            // 뒀다가 재현됨). player→reverb→mixer 전 구간을 버퍼와 정확히 같은 포맷(모노,
+            // 실제 샘플레이트)으로 명시해서 이 불일치를 없앤다.
             engine.connect(player, to: reverb, format: format)
-            engine.connect(reverb, to: engine.mainMixerNode, format: nil)
+            engine.connect(reverb, to: engine.mainMixerNode, format: format)
             isConfigured = true
         }
 
