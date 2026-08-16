@@ -57,11 +57,15 @@ extension Color {
 struct HarmonyCard<Content: View>: View {
     let title: String
     let systemImage: String?
+    /// 카드 제목 아이콘 색. nil이면 기본(`.primary`) — "내 목소리로 화음" 카드처럼 아이콘만으로
+    /// 다른 계열임을 표시하고 싶을 때만 `Theme.voiceAccent`를 넘긴다(버튼 틴트는 건드리지 않는다).
+    let iconColor: Color?
     @ViewBuilder let content: Content
 
-    init(_ title: String, systemImage: String? = nil, @ViewBuilder content: () -> Content) {
+    init(_ title: String, systemImage: String? = nil, iconColor: Color? = nil, @ViewBuilder content: () -> Content) {
         self.title = title
         self.systemImage = systemImage
+        self.iconColor = iconColor
         self.content = content()
     }
 
@@ -70,6 +74,7 @@ struct HarmonyCard<Content: View>: View {
             HStack(spacing: Theme.Spacing.xs) {
                 if let systemImage {
                     Image(systemName: systemImage)
+                        .foregroundStyle(iconColor ?? .primary)
                 }
                 Text(title)
             }

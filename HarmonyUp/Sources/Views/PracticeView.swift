@@ -1,18 +1,11 @@
 import SwiftUI
 import SwiftData
 
-/// 마지막으로 확정된 한 음과, 그 시점 조성 기준으로 만든 화음 — 멜로디 모드에서
-/// 부른 음마다 하나씩 쌓아서 "곡 전체를 부르면 순서대로 화음이 나오는" 흐름을 보여준다.
-private struct MelodyStep: Identifiable {
-    let id = UUID()
-    var noteName: String
-    var midiNote: Int      // 옥타브까지 포함한 실제 MIDI 노트 — 수정 시 같은 옥타브 안에서 pitch class만 바꾸는 데 쓴다.
-    var harmonyNames: String?
-}
-
-struct ContentView: View {
+/// "연습" 탭 — 마이크 캡처 -> 조성/화음 판별 -> 화음 청취(합성음/내 목소리) -> 채점까지
+/// 한 세션의 흐름을 담당한다. 예전엔 이 화면 자체가 앱의 유일한 화면(`ContentView`)이었는데,
+/// 세션 기록(`HistoryView`)을 별도 탭으로 분리하면서 이름도 역할에 맞게 바꿨다.
+struct PracticeView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \PracticeAttempt.date, order: .reverse) private var attempts: [PracticeAttempt]
 
     enum SessionMode: String, CaseIterable, Identifiable {
         case single = "단음"
@@ -131,188 +124,139 @@ struct ContentView: View {
     @State private var isPlayingVoiceClip = false
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                Text("HarmonyUp — Phase 1~3 프로토타입")
-                    .font(.headline)
-
-                Picker("모드", selection: $sessionMode) {
-                    ForEach(SessionMode.allCases) { mode in
-                        Text(mode.rawValue).tag(mode)
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                    Picker("모드", selection: $sessionMode) {
+                        ForEach(SessionMode.allCases) { mode in
+                            Text(mode.rawValue).tag(mode)
+                        }
                     }
-                }
-                .pickerStyle(.segmented)
-                .onChange(of: sessionMode) { _, _ in resetSession() } // 모드가 바뀌면 상태가 섞이지 않게 항상 리셋
+                    .pickerStyle(.segmented)
+                    .onChange(of: sessionMode) { _, _ in resetSession() } // 모드가 바뀌면 상태가 섞이지 않게 항상 리셋
 
-                // 1. 지금 마이크가 뭘 듣고 있는지 — 파이프라인의 첫 단계(YIN)
-                flowSection(step: 1, title: "실시간 피치") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Button(isCapturing ? "측정 중지" : "측정 시작", action: toggleCapture)
-                            .buttonStyle(.borderedProminent)
+                    // 캡처: 항상 보이는 유일한 카드 — 여기서부터 흐름이 시작된다.
+                    HarmonyCard("실시간 피치", systemImage: "waveform") {
+                        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                            Button(isCapturing ? "측정 중지" : "측정 시작", action: toggleCapture)
+                                .buttonStyle(.borderedProminent)
 
-                        Text(statusText)
-                            .font(.system(.title2, design: .monospaced))
-                        Text(isCapturing ? singleNoteStatusHint : "측정 시작을 눌러야 마이크가 켜집니다")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            Text(statusText)
+                                .font(.system(.title2, design: .monospaced))
+                            Text(isCapturing ? singleNoteStatusHint : "측정 시작을 눌러야 마이크가 켜집니다")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
 
-                        // 노래를 시작하기 전 여기서 바로 기준음을 듣고 첫 음을 잡을 수 있게 —
-                        // 3단계(화음 제안)까지 안 내려가도 되도록 실시간 피치 섹션에도 둔다.
-                        startingNoteControls
+                            // 노래를 시작하기 전 여기서 바로 기준음을 듣고 첫 음을 잡을 수 있게.
+                            startingNoteControls
+                        }
                     }
-                }
 
-                // 2. 지금까지 부른 멜로디로 판별된 조성 — 두 번째 단계(KeyDetector)
-                flowSection(step: 2, title: "조성 판별") {
-                    Text(keyText.isEmpty ? "아직 판별되지 않음 — 몇 소절 불러보세요" : keyText)
-                        .foregroundStyle(keyText.isEmpty ? .secondary : .primary)
-                }
+                    // 조성+화음: 첫 음이 잡히기 전엔 아예 렌더링하지 않는다(점진적 공개) —
+                    // "아직 판별되지 않음" 같은 빈 상태를 계속 보여주는 대신, 관련 데이터가
+                    // 생긴 뒤에만 화면에 등장하게 한다.
+                    if hasCapturedNote {
+                        HarmonyCard("조성과 화음", systemImage: "music.note.list") {
+                            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                                Text(keyText)
+                                    .font(.subheadline)
 
-                // 3. 그 조성 기준 화음 제안 + 귀로 확인 — 세 번째 단계(ChordGenerator + TonePlayer)
-                flowSection(step: 3, title: "화음 제안") {
-                    VStack(alignment: .leading, spacing: 12) {
-                        if sessionMode == .melody {
-                            if melodySteps.isEmpty {
-                                Text("아직 잡은 음 없음")
-                                    .foregroundStyle(.secondary)
-                            } else {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    ForEach(Array(melodySteps.enumerated()), id: \.element.id) { index, step in
-                                        HStack {
-                                            // 실시간 검출이 틀렸을 때(예: F#3으로 잘못 잡힘) 눌러서 직접 고칠 수 있다.
-                                            Menu {
-                                                ForEach(0..<12, id: \.self) { pitchClass in
-                                                    Button(NoteNameConverter.pitchClassName(pitchClass)) {
-                                                        correctMelodyStep(at: index, toPitchClass: pitchClass)
-                                                    }
-                                                }
-                                            } label: {
-                                                Text("\(step.noteName) ✏️")
-                                                    .font(.system(.body, design: .monospaced))
-                                            }
-                                            Text("→ \(step.harmonyNames ?? "온음계 밖")")
-                                                .font(.system(.caption, design: .monospaced))
-                                                .foregroundStyle(.secondary)
-
-                                            // 예전엔 채점이 항상 "마지막으로 잡은 음"만 대상으로 해서
-                                            // 멜로디가 여러 개 쌓여도 마지막 스텝만 채점할 수 있었다.
-                                            // 이 스텝의 화음을 그 자리에서 바로 채점 대상으로 고를 수 있게 한다.
-                                            if step.harmonyNames != nil {
-                                                Spacer()
-                                                Button("3도") { startScoringMelodyStep(at: index, interval: .third) }
-                                                Button("5도") { startScoringMelodyStep(at: index, interval: .fifth) }
+                                if sessionMode == .melody {
+                                    if melodySteps.isEmpty {
+                                        Text("아직 잡은 음 없음")
+                                            .foregroundStyle(.secondary)
+                                    } else {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            ForEach(Array(melodySteps.enumerated()), id: \.element.id) { index, step in
+                                                MelodyStepRow(
+                                                    step: step,
+                                                    onCorrect: { pitchClass in correctMelodyStep(at: index, toPitchClass: pitchClass) },
+                                                    onScoreThird: { startScoringMelodyStep(at: index, interval: .third) },
+                                                    onScoreFifth: { startScoringMelodyStep(at: index, interval: .fifth) }
+                                                )
                                             }
                                         }
-                                        .font(.caption2)
-                                        .buttonStyle(.bordered)
-                                    }
-                                }
-                                Text("음을 눌러서 고치거나, 3도/5도로 그 스텝을 바로 채점할 수 있어요")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
+                                        Text("음을 눌러서 고치거나, 3도/5도로 그 스텝을 바로 채점할 수 있어요")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
 
-                                // 도-미-솔을 부르면 그 3도(또는 5도) 라인을 처음부터 끝까지 이어서
-                                // 들려준다 — 한 스텝씩 끊어 듣는 게 아니라 멜로디 전체를 화음으로 들어보는 것.
-                                HStack {
-                                    Button(playingMelodyLineInterval == .third ? "3도 라인 정지" : "전체 3도 듣기") {
-                                        toggleMelodyLinePlayback(interval: .third)
+                                        // 도-미-솔을 부르면 그 3도(또는 5도) 라인을 처음부터 끝까지
+                                        // 이어서 들려준다 — 멜로디 전체를 화음으로 들어보는 것.
+                                        HStack {
+                                            Button(playingMelodyLineInterval == .third ? "3도 라인 정지" : "전체 3도 듣기") {
+                                                toggleMelodyLinePlayback(interval: .third)
+                                            }
+                                            Button(playingMelodyLineInterval == .fifth ? "5도 라인 정지" : "전체 5도 듣기") {
+                                                toggleMelodyLinePlayback(interval: .fifth)
+                                            }
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .disabled(isPlayingTone || isPlayingStartingNote)
                                     }
-                                    Button(playingMelodyLineInterval == .fifth ? "5도 라인 정지" : "전체 5도 듣기") {
-                                        toggleMelodyLinePlayback(interval: .fifth)
+                                } else {
+                                    Text(harmonyText.isEmpty ? "아직 제안 없음" : harmonyText)
+                                        .foregroundStyle(harmonyText.isEmpty ? .secondary : .primary)
+                                }
+
+                                startingNoteControls
+
+                                Button(isPlayingTone ? "화음 정지" : "화음 듣기 (3도→5도)", action: toggleTonePlayback)
+                                    .buttonStyle(.bordered)
+                                    .disabled((melodySession.suggestedHarmony == nil && !isPlayingTone) || isPlayingStartingNote)
+                            }
+                        }
+                    }
+
+                    // 내 목소리로 화음: 화음이 나오기 전엔 안 보인다(할 게 없으므로). 화음이
+                    // 생긴 뒤엔, 목소리 버퍼가 아직 덜 찼어도 카드 자체는 계속 보이게 둔다 —
+                    // "확보된 목소리: N초" 캡션이 "조금만 더 부르면 된다"는 유용한 피드백이라서다.
+                    if melodySession.suggestedHarmony != nil {
+                        HarmonyCard("내 목소리로 화음", systemImage: "music.mic", iconColor: Theme.voiceAccent) {
+                            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                                HStack {
+                                    Button("내 목소리로 3도") {
+                                        recordAndHarmonizeVoice(interval: .third)
+                                    }
+                                    Button("내 목소리로 5도") {
+                                        recordAndHarmonizeVoice(interval: .fifth)
+                                    }
+                                    Button("내 목소리로 전체 화음") {
+                                        recordAndHarmonizeFullChordWithVoice()
                                     }
                                 }
                                 .buttonStyle(.bordered)
-                                .disabled(isPlayingTone || isPlayingStartingNote)
-                            }
-                        } else {
-                            Text(harmonyText.isEmpty ? "아직 제안 없음" : harmonyText)
-                                .foregroundStyle(harmonyText.isEmpty ? .secondary : .primary)
-                        }
+                                // 예전엔 조건 여러 개를 한꺼번에 disabled에 걸어놔서, 어떤 조건 때문에
+                                // 막혔는지 사용자가 알 수 없이 "눌러도 반응 없음"으로만 보였다.
+                                // 최소한(측정 꺼짐/재생 중)만 막고, 나머지는 눌렀을 때 이유를 메시지로 알려준다.
+                                .disabled(!isCapturing || isPlaybackBusy)
 
-                        startingNoteControls
-
-                        Button(isPlayingTone ? "화음 정지" : "화음 듣기 (3도→5도)", action: toggleTonePlayback)
-                            .buttonStyle(.bordered)
-                            .disabled((melodySession.suggestedHarmony == nil && !isPlayingTone) || isPlayingStartingNote)
-
-                        // 합성음이 아니라 내 목소리 톤으로 화음을 듣고 싶을 때 — 방금까지
-                        // 부른 소리를 PitchShifter로 피치만 옮겨서 그대로 재생한다.
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Button("내 목소리로 3도") {
-                                    recordAndHarmonizeVoice(interval: .third)
-                                }
-                                Button("내 목소리로 5도") {
-                                    recordAndHarmonizeVoice(interval: .fifth)
-                                }
-                                Button("내 목소리로 전체 화음") {
-                                    recordAndHarmonizeFullChordWithVoice()
-                                }
-                            }
-                            .buttonStyle(.bordered)
-                            // 예전엔 조건 여러 개를 한꺼번에 disabled에 걸어놔서, 어떤 조건 때문에
-                            // 막혔는지 사용자가 알 수 없이 "눌러도 반응 없음"으로만 보였다.
-                            // 최소한(측정 꺼짐/재생 중)만 막고, 나머지는 눌렀을 때 이유를 메시지로 알려준다.
-                            .disabled(!isCapturing || isPlaybackBusy)
-
-                            Text(String(format: "방금까지 부른 음을 그대로 3도/5도로 옮겨서 들려줘요 (확보된 목소리: %.1f초)",
-                                        Double(recentVoiceBuffer.count) / recentVoiceSampleRate))
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-
-                // 4. 목표음을 따라 불러서 채점 — 네 번째 단계(PitchScorer)
-                // 3도/5도를 각각 독립된 패널로 보여준다 — 하나 채점하고 다른 쪽으로 넘어가도
-                // 이전 결과가 화면에서 사라지지 않는다.
-                flowSection(step: 4, title: "따라 부르기 채점") {
-                    VStack(alignment: .leading, spacing: 16) {
-                        scoringPanel(for: .third)
-                        Divider()
-                        scoringPanel(for: .fifth)
-                    }
-                }
-
-                // 5. 지금까지 저장된 채점 시도들의 요약 — PRD 3.2.3 "정확도 요약 + 자주 벗어난 화음 유형"
-                flowSection(step: 5, title: "세션 기록") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        if attempts.isEmpty {
-                            Text("아직 기록 없음 — 채점을 중지하거나 다른 음으로 바꾸면 이번 시도가 저장됩니다")
-                                .foregroundStyle(.secondary)
-                        } else {
-                            HStack(spacing: 24) {
-                                intervalSummary(label: "3도", list: thirdAttempts)
-                                intervalSummary(label: "5도", list: fifthAttempts)
-                            }
-
-                            if let message = weakerIntervalMessage {
-                                Text(message)
-                                    .font(.caption)
-                                    .foregroundStyle(.orange)
-                            }
-
-                            Divider()
-
-                            ForEach(attempts.prefix(5), id: \.persistentModelID) { attempt in
-                                HStack {
-                                    Text("\(attempt.targetNoteName) (\(attempt.intervalRawValue == "third" ? "3도" : "5도"))")
-                                    Spacer()
-                                    Text(String(format: "%.0f%% 정확", attempt.onPitchRatio * 100))
-                                    Text(String(format: "평균 ±%.0fcent", attempt.averageAbsCentsOffset))
-                                        .foregroundStyle(.secondary)
-                                }
-                                .font(.system(.caption, design: .monospaced))
+                                Text(String(format: "방금까지 부른 음을 그대로 3도/5도로 옮겨서 들려줘요 (확보된 목소리: %.1f초)",
+                                            Double(recentVoiceBuffer.count) / recentVoiceSampleRate))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
                             }
                         }
                     }
-                }
 
-                Button("다시 시작", role: .destructive, action: resetSession)
-                    .buttonStyle(.borderedProminent)
-                    .frame(maxWidth: .infinity)
+                    // 채점: 화음이 나오기 전엔 채점할 대상이 없으므로 안 보인다.
+                    if melodySession.suggestedHarmony != nil {
+                        HarmonyCard("따라 부르기 채점", systemImage: "target") {
+                            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                                scoringPanel(for: .third)
+                                Divider()
+                                scoringPanel(for: .fifth)
+                            }
+                        }
+                    }
+
+                    Button("다시 시작", role: .destructive, action: resetSession)
+                        .buttonStyle(.borderedProminent)
+                        .frame(maxWidth: .infinity)
+                }
+                .padding()
             }
-            .padding()
+            .background(Color(uiColor: .systemGroupedBackground))
+            .navigationTitle("연습")
         }
         .tint(Theme.tint) // 앱 전역 유일한 인터랙션 틴트(Theme.swift) — 버튼/피커 등에 일괄 적용
         .onDisappear {
@@ -336,23 +280,6 @@ struct ContentView: View {
         case .melody:
             return "음을 계속 이어 부르면 음마다 화음이 순서대로 쌓입니다"
         }
-    }
-
-    private var thirdAttempts: [PracticeAttempt] { attempts.filter { $0.intervalRawValue == "third" } }
-    private var fifthAttempts: [PracticeAttempt] { attempts.filter { $0.intervalRawValue == "fifth" } }
-
-    private func averageOnPitchRatio(_ list: [PracticeAttempt]) -> Double? {
-        guard !list.isEmpty else { return nil }
-        return list.map(\.onPitchRatio).reduce(0, +) / Double(list.count)
-    }
-
-    /// 3도/5도 평균 정확도 차이가 뚜렷하면(10%p 이상) 어느 쪽에서 더 자주 벗어나는지 알려준다 —
-    /// PRD 페르소나 시나리오의 "5도 화음에서 정확도가 낮음을 확인" 같은 걸 구현한 것.
-    private var weakerIntervalMessage: String? {
-        guard let thirdAverage = averageOnPitchRatio(thirdAttempts),
-              let fifthAverage = averageOnPitchRatio(fifthAttempts),
-              abs(thirdAverage - fifthAverage) > 0.1 else { return nil }
-        return thirdAverage < fifthAverage ? "3도 화음에서 더 자주 벗어나는 편이에요" : "5도 화음에서 더 자주 벗어나는 편이에요"
     }
 
     /// 3도 또는 5도 하나에 대한 채점 패널 — 목표음, 바늘 미터, 시작/중지 버튼을 묶어서 보여준다.
@@ -391,38 +318,10 @@ struct ContentView: View {
                 if let score {
                     Text(String(format: "%+.0f cent  %@", score.centsOffset, score.isOnPitch ? "✅ 정확" : "벗어남"))
                         .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(score.isOnPitch ? .green : .secondary)
+                        .foregroundStyle(score.isOnPitch ? Theme.pitchGood : .secondary)
                 }
             }
         }
-    }
-
-    @ViewBuilder
-    private func intervalSummary(label: String, list: [PracticeAttempt]) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label).font(.caption).foregroundStyle(.secondary)
-            if let average = averageOnPitchRatio(list) {
-                Text(String(format: "%.0f%% (%d회)", average * 100, list.count))
-                    .font(.system(.body, design: .monospaced))
-            } else {
-                Text("기록 없음").font(.caption).foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    /// 파이프라인 단계를 "1. 실시간 피치"처럼 번호가 붙은 섹션으로 보여줘서,
-    /// 화면만 봐도 마이크 입력 -> 조성 판별 -> 화음 제안 -> 채점으로 이어지는 전체 흐름이 드러나게 한다.
-    @ViewBuilder
-    private func flowSection<Content: View>(step: Int, title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("\(step). \(title)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            content()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
     }
 
     /// "측정 시작/중지" 버튼에 연결된다. AudioCapture는 stop() 이후 다시 start()해도

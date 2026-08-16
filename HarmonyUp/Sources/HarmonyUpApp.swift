@@ -4,7 +4,7 @@ import SwiftUI
 struct HarmonyUpApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            RootTabView()
         }
         .modelContainer(for: PracticeAttempt.self)
     }
