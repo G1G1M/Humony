@@ -94,4 +94,24 @@ final class PitchShifterTests: XCTestCase {
     func testEmptyInputReturnsEmpty() {
         XCTAssertTrue(PitchShifter.shift(samples: [], pitchRatio: 1.5, sampleRate: sampleRate).isEmpty)
     }
+
+    // expectedFrequency를 넘겨도(탐색 반경이 좁아져도) 결과 피치 자체는 여전히 정확해야 한다 —
+    // 회귀 방지용 테스트. (탐색 반경을 좁히는 게 프레임별 흔들림을 항상 줄여준다고 실측으로
+    // 단정하긴 어려웠다 — 순음/유사음성 합성 신호로 여러 잡음 수준을 스윕해봤을 때 표준편차가
+    // 오히려 커지는 경우도 있었다. 다만 원치 않는 먼 주기로 튀는 경우를 원천 차단한다는
+    // 점에서 이론적으로는 여전히 안전망 역할을 하므로 파라미터 자체는 유지한다.)
+    func testShiftWithExpectedFrequencyStillShiftsPitchCorrectly() throws {
+        let input = sineWave(frequency: 220.0, sampleCount: 8192)
+        let ratio = pow(2.0, 4.0 / 12.0) // 장3도 위
+
+        let shifted = PitchShifter.shift(samples: input, pitchRatio: ratio, sampleRate: sampleRate, expectedFrequency: 220.0)
+
+        let middle = middleSegment(of: shifted, length: 4096)
+        let candidates = YINPitchDetector.detectPitch(samples: middle, sampleRate: sampleRate)
+        let detected = try XCTUnwrap(candidates.first)
+
+        let expectedFrequency = 220.0 * ratio
+        let cents = 1200.0 * log2(detected.frequency / expectedFrequency)
+        XCTAssertEqual(cents, 0, accuracy: 50)
+    }
 }

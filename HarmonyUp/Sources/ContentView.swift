@@ -660,10 +660,17 @@ struct ContentView: View {
         // 화면(statusText)과 오디오 재생을 갱신한다.
         let recorded = recentVoiceBuffer
         let rate = recentVoiceSampleRate
+        let rootFrequency = melodySession.lastNote?.frequency
         statusText = "화음 만드는 중…"
 
         Task {
-            let shifted = PitchShifter.shift(samples: recorded, pitchRatio: ratio, sampleRate: rate)
+            // 롤링 버퍼는 음이 바뀌어도 무조건 최근 1.5초를 담고 있어서, 지금 기준 음과
+            // 상관없는 예전 음/숨소리가 앞쪽에 섞여있을 수 있다. 그걸 그대로 옮기면 재생했을
+            // 때 화음의 음정이 왔다갔다하는 것처럼 들려서, 최근의 안정된 구간만 골라낸다.
+            let stableSegment = rootFrequency.map {
+                VoiceSegmentTrimmer.trimToStableSegment(samples: recorded, sampleRate: rate, targetFrequency: $0)
+            } ?? recorded
+            let shifted = PitchShifter.shift(samples: stableSegment, pitchRatio: ratio, sampleRate: rate, expectedFrequency: rootFrequency)
             // 마이크로 녹음한 원본은 보통 피크가 한참 낮게 들어와서(합성음보다 훨씬 작게 들림),
             // 재생 전에 거의 꽉 차는 수준(0.95)까지 디지털 게인을 올려서 체감 음량을 키운다.
             let normalized = AudioGain.normalize(shifted)
@@ -703,15 +710,23 @@ struct ContentView: View {
 
         let recorded = recentVoiceBuffer
         let rate = recentVoiceSampleRate
+        let rootFrequency = melodySession.lastNote?.frequency
         statusText = "전체 화음 만드는 중…"
 
         Task {
+            // 롤링 버퍼 앞쪽에 섞여 있을 수 있는 이전 음/잡음을 잘라내고, 최근의 안정된
+            // 한 음 구간만 남긴다 — 세 트랙(원음+3도+5도)이 전부 같은 구간을 기준으로
+            // 만들어져야 화음의 음정이 흔들리지 않는다.
+            let stableSegment = rootFrequency.map {
+                VoiceSegmentTrimmer.trimToStableSegment(samples: recorded, sampleRate: rate, targetFrequency: $0)
+            } ?? recorded
+
             // 원음(비율 1.0, 시프트 없이 그대로) + 3도 + 5도로 각각 옮긴 목소리를 만든다.
-            let third = PitchShifter.shift(samples: recorded, pitchRatio: thirdRatio, sampleRate: rate)
-            let fifth = PitchShifter.shift(samples: recorded, pitchRatio: fifthRatio, sampleRate: rate)
+            let third = PitchShifter.shift(samples: stableSegment, pitchRatio: thirdRatio, sampleRate: rate, expectedFrequency: rootFrequency)
+            let fifth = PitchShifter.shift(samples: stableSegment, pitchRatio: fifthRatio, sampleRate: rate, expectedFrequency: rootFrequency)
             // 세 트랙을 섞으면 각자보다 커지므로, mixAndNormalize가 합친 뒤 다시 피크 기준으로
             // 정규화해서 서로 다른 음 개수(1개 vs 3개)에 상관없이 항상 비슷한 체감 음량이 되게 한다.
-            let mixed = AudioGain.mixAndNormalize([recorded, third, fifth])
+            let mixed = AudioGain.mixAndNormalize([stableSegment, third, fifth])
 
             do {
                 try voiceClipPlayer.play(samples: mixed, sampleRate: rate)

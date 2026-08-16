@@ -8,15 +8,19 @@ enum PitchShifter {
     /// - Parameters:
     ///   - samples: 원본 오디오(모노, [-1, 1] 범위)
     ///   - pitchRatio: 목표 주파수 / 원래 주파수. 1보다 크면 높은 음(예: 장3도 위 = 2^(4/12)).
+    ///   - expectedFrequency: 원본 음성의 대략적인 기본 주파수(Hz)를 알고 있다면 넘긴다.
+    ///     WSOLA의 그레인 탐색 반경을 피치 주기 이하로 제한해서 "주기 하나를 잘못 골라
+    ///     미세하게 음이 흔들리는" 현상(아래 `bestMatchingOffset` 설명 참고)을 줄인다.
+    ///     모르면 nil — 기존 동작(탐색 반경 = hop)으로 동작한다.
     /// - Returns: 길이는 원본과 거의 같고, 피치만 pitchRatio배 된 오디오.
-    static func shift(samples: [Float], pitchRatio: Double, sampleRate: Double) -> [Float] {
+    static func shift(samples: [Float], pitchRatio: Double, sampleRate: Double, expectedFrequency: Double? = nil) -> [Float] {
         guard !samples.isEmpty, pitchRatio > 0 else { return samples }
 
         // 1단계: 길이를 pitchRatio배로 늘이거나 줄인다(피치는 그대로 유지, WSOLA).
         // 2단계: 그 결과를 pitchRatio배 빠르기로 리샘플링한다 — 리샘플링은 피치와 길이를
         // 동시에 pitchRatio배 하기 때문에, 1단계에서 미리 늘려둔 길이가 다시 원래 길이로
         // 돌아오면서 피치만 pitchRatio배로 바뀐 결과가 나온다.
-        let stretched = timeStretch(samples: samples, factor: pitchRatio)
+        let stretched = timeStretch(samples: samples, factor: pitchRatio, sampleRate: sampleRate, expectedFrequency: expectedFrequency)
         return resample(samples: stretched, rate: pitchRatio)
     }
 
@@ -32,12 +36,23 @@ enum PitchShifter {
 
     // internal(private 아님)로 열어둔 이유: 유닛테스트에서 1단계(시간축 변형)와 2단계(리샘플링)를
     // 각각 따로 검증해서 버그가 어느 단계에 있는지 격리하기 위함.
-    static func timeStretch(samples: [Float], factor: Double) -> [Float] {
+    static func timeStretch(samples: [Float], factor: Double, sampleRate: Double? = nil, expectedFrequency: Double? = nil) -> [Float] {
         let hop = grainSize / hopDivisor
         // factor(=pitchRatio)가 1보다 크면(음을 높이려는 경우) 입력을 더 천천히(작은 보폭으로)
         // 읽어서, 출력이 원본보다 길어지게 만든다 — 그래야 2단계 리샘플링 후 원래 길이로 돌아온다.
         let inputHop = Double(hop) / factor
-        let searchRadius = hop
+
+        // 탐색 반경이 피치 한 주기보다 넓으면, 사람 목소리처럼 준주기적인 신호에서 이웃한 주기끼리
+        // 파형 모양이 거의 똑같아서 상관관계가 "한 주기 앞/뒤"를 잘못 고르는 경우가 생긴다. 매 그레인마다
+        // 이게 왔다갔다하면 결과물의 피치가 미세하게 흔들리는 것처럼 들린다("음이 왔다갔다한다"). 원본의
+        // 대략적인 기본 주파수를 알고 있으면, 탐색 반경을 반 주기 이하로 좁혀서 이 오탐 가능성을 줄인다.
+        let searchRadius: Int
+        if let sampleRate, let expectedFrequency, expectedFrequency > 0 {
+            let periodInSamples = sampleRate / expectedFrequency
+            searchRadius = max(16, min(hop, Int(periodInSamples / 2)))
+        } else {
+            searchRadius = hop
+        }
 
         let outputLength = max(grainSize, Int(Double(samples.count) * factor))
         var output = [Float](repeating: 0, count: outputLength + grainSize)
