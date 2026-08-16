@@ -44,4 +44,34 @@ final class AudioGainTests: XCTestCase {
     func testMixAndNormalizeAllEmptyReturnsEmpty() {
         XCTAssertTrue(AudioGain.mixAndNormalize([[], []]).isEmpty)
     }
+
+    func testApplyFadeInOutStartsAndEndsAtZero() {
+        let samples: [Float] = Array(repeating: 1.0, count: 100)
+        let faded = AudioGain.applyFadeInOut(samples, fadeSampleCount: 10)
+
+        XCTAssertEqual(faded[0], 0, accuracy: 0.0001)
+        XCTAssertEqual(faded[faded.count - 1], 0, accuracy: 0.0001)
+        // 페이드 구간 밖(가운데)은 원본 그대로 유지돼야 한다.
+        XCTAssertEqual(faded[50], 1.0, accuracy: 0.0001)
+    }
+
+    func testApplyFadeInOutRampIsLinear() {
+        let samples: [Float] = Array(repeating: 1.0, count: 100)
+        let faded = AudioGain.applyFadeInOut(samples, fadeSampleCount: 10)
+
+        XCTAssertEqual(faded[5], 0.5, accuracy: 0.01)
+    }
+
+    func testApplyFadeInOutOnBufferShorterThanFadeSplitsInHalf() {
+        // 페이드 구간(10)이 버퍼 절반(3)보다 길면, 전체가 무음이 되지 않도록 절반씩만 적용한다.
+        let samples: [Float] = Array(repeating: 1.0, count: 6)
+        let faded = AudioGain.applyFadeInOut(samples, fadeSampleCount: 10)
+
+        XCTAssertEqual(faded.count, samples.count)
+        XCTAssertFalse(faded.allSatisfy { $0 == 0 })
+    }
+
+    func testApplyFadeInOutOnEmptyBufferReturnsEmpty() {
+        XCTAssertTrue(AudioGain.applyFadeInOut([], fadeSampleCount: 10).isEmpty)
+    }
 }

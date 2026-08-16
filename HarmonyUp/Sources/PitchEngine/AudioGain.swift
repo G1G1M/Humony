@@ -28,4 +28,23 @@ enum AudioGain {
         }
         return normalize(mixed, targetPeak: targetPeak)
     }
+
+    /// 버퍼의 맨 앞과 맨 뒤를 짧게 선형으로 0까지 줄인다("페이드 인/아웃") — 재생 시작/끝에서
+    /// 나는 "뚝" 하는 클릭음을 없앤다. 롤링 버퍼에서 잘라낸 구간(`VoiceSegmentTrimmer` 등)은
+    /// 원본 파형의 임의 지점에서 시작/끝나기 때문에, 그 경계에서 값이 0이 아닌 채로 갑자기
+    /// 시작되거나 끊기면 스피커에서 그 불연속 자체가 짧은 클릭음으로 들린다.
+    static func applyFadeInOut(_ samples: [Float], fadeSampleCount: Int) -> [Float] {
+        guard !samples.isEmpty, fadeSampleCount > 0 else { return samples }
+        // 버퍼가 페이드 구간보다 짧으면(양 끝이 겹치면) 절반씩만 적용해서 전체가 무음이 되는 걸 막는다.
+        let fadeCount = min(fadeSampleCount, samples.count / 2)
+        guard fadeCount > 0 else { return samples }
+
+        var result = samples
+        for i in 0..<fadeCount {
+            let gain = Float(i) / Float(fadeCount)
+            result[i] *= gain
+            result[result.count - 1 - i] *= gain
+        }
+        return result
+    }
 }

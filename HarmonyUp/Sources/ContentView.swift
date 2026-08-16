@@ -68,12 +68,15 @@ struct ContentView: View {
     // 단음 모드는 음 하나만 담으면 되니 짧게(1.5초) 유지한다. 멜로디 모드는 "도미솔"처럼
     // 여러 음을 이어 부른 걸 전부 화음으로 옮겨 듣고 싶어하므로, 노래 한 프레이즈가
     // 통째로 잘리지 않도록 훨씬 넉넉하게(30초) 잡는다 — 무제한으로 두면 캡처를 오래
-    // 켜둔 채 침묵/딴짓을 해도 버퍼가 끝없이 커질 수 있어(단, VAD를 통과한 프레임만
-    // 쌓이므로 실제로는 "부른 시간"만큼만 늘어난다) 상한선은 남겨둔다.
+    // 켜둔 채 계속 두는 경우 버퍼가 한없이 커질 수 있어(24절 이후로는 마이크가 켜져
+    // 있는 한 항상 raw 오디오가 쌓이므로) 상한선은 남겨둔다.
     private var recentVoiceBufferMaxDuration: Double {
         sessionMode == .melody ? 30.0 : 1.5
     }
     private let voiceClipPlayer = VoiceClipPlayer()
+    // 목소리 화음 재생 시작/끝에 적용할 페이드 길이 — 롤링 버퍼에서 잘라낸 구간은 원본
+    // 파형의 임의 지점에서 시작/끝나서, 그대로 재생하면 클릭음이 날 수 있다(AudioGain 참고).
+    private let voiceClipFadeDuration: Double = 0.015
 
     // 노이즈성 프레임 하나로 잘못 확정되지 않도록, 같은 pitch class가 이만큼
     // 연속 프레임(약 46ms x 3 = 140ms) 유지돼야 "이 음으로 확정"한다.
@@ -695,12 +698,15 @@ struct ContentView: View {
             // 마이크로 녹음한 원본은 보통 피크가 한참 낮게 들어와서(합성음보다 훨씬 작게 들림),
             // 재생 전에 거의 꽉 차는 수준(0.95)까지 디지털 게인을 올려서 체감 음량을 키운다.
             let normalized = AudioGain.normalize(shifted)
+            // 트리밍/롤링 버퍼는 원본 파형의 임의 지점에서 잘려 있어서, 그대로 재생하면 시작/끝에서
+            // "뚝" 하는 클릭음이 날 수 있다 — 양 끝을 짧게(15ms) 페이드해서 없앤다.
+            let cleaned = AudioGain.applyFadeInOut(normalized, fadeSampleCount: Int(rate * voiceClipFadeDuration))
             do {
                 // 재생 중엔 마이크를 무시해야 한다(다른 재생 함수들과 동일한 콜앤리스폰스 규칙) —
                 // 안 그러면 스피커로 나온 화음을 마이크가 다시 듣고 "새 멜로디 음"으로 착각해서
                 // 조성/화음 판단이 오염된다(26절). 재생이 실제로 끝난 뒤에만 다시 켠다.
                 isPlayingVoiceClip = true
-                try voiceClipPlayer.play(samples: normalized, sampleRate: rate) {
+                try voiceClipPlayer.play(samples: cleaned, sampleRate: rate) {
                     isPlayingVoiceClip = false
                 }
                 statusText = "내 목소리로 만든 화음을 재생합니다"
@@ -759,10 +765,11 @@ struct ContentView: View {
             // 세 트랙을 섞으면 각자보다 커지므로, mixAndNormalize가 합친 뒤 다시 피크 기준으로
             // 정규화해서 서로 다른 음 개수(1개 vs 3개)에 상관없이 항상 비슷한 체감 음량이 되게 한다.
             let mixed = AudioGain.mixAndNormalize([stableSegment, third, fifth])
+            let cleaned = AudioGain.applyFadeInOut(mixed, fadeSampleCount: Int(rate * voiceClipFadeDuration))
 
             do {
                 isPlayingVoiceClip = true
-                try voiceClipPlayer.play(samples: mixed, sampleRate: rate) {
+                try voiceClipPlayer.play(samples: cleaned, sampleRate: rate) {
                     isPlayingVoiceClip = false
                 }
                 statusText = "내 목소리로 만든 전체 화음을 재생합니다"
