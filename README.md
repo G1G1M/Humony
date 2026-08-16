@@ -19,6 +19,7 @@
 - [x] **Phase 2 — 마이크 파이프라인과 연결**: `MelodySession`으로 프레임별 감지 결과를 누적해 조성 판별+화음 제안까지 실기기에서 실시간 동작 확인
 - [x] **Phase 3 — 화음 발성 훈련 UI + 실시간 채점**: `TonePlayer`(목표음/시작음 재생), `PitchScorer`(cent 채점), `PitchMeterView`(튜너 스타일 바늘 미터), `PitchSmoother`(비브라토 완화), 단음 캡처 모드(같은 음 3프레임 유지돼야 확정, 확정 후 고정), 3도/5도 각각 채점 가능. 콜앤리스폰스 방식으로 마이크/스피커 피드백 루프 회피. 실기기 확인 완료
 - [x] **Phase 3 — 세션 종료 후 정확도 요약 + 자주 벗어난 화음 유형 리포트**: `PracticeSummary`(채점 시도를 요약 통계로 압축) + `PracticeAttempt`(SwiftData 저장) + 3도/5도 평균 정확도 비교. Phase 3 완료
+- [x] **멜로디 모드**: 단음 모드(한 음 잡고 고정)와 별개로, 음을 계속 이어 부르면 음마다 화음이 순서대로 쌓이는 모드 추가 — `MelodySession`의 원래 설계(곡 전체 처리)를 실제로 사용하는 화면
 
 ## 구성 요소 (`HarmonyUp/Sources/PitchEngine/`)
 

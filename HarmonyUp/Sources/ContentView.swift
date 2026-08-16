@@ -1,9 +1,24 @@
 import SwiftUI
 import SwiftData
 
+/// 마지막으로 확정된 한 음과, 그 시점 조성 기준으로 만든 화음 — 멜로디 모드에서
+/// 부른 음마다 하나씩 쌓아서 "곡 전체를 부르면 순서대로 화음이 나오는" 흐름을 보여준다.
+private struct MelodyStep: Identifiable {
+    let id = UUID()
+    let noteName: String
+    let harmonyNames: String?
+}
+
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \PracticeAttempt.date, order: .reverse) private var attempts: [PracticeAttempt]
+
+    enum SessionMode: String, CaseIterable, Identifiable {
+        case single = "단음"
+        case melody = "멜로디"
+        var id: String { rawValue }
+    }
+    @State private var sessionMode: SessionMode = .single
 
     @State private var statusText = "마이크 대기 중..."
     @State private var keyText = ""
@@ -23,6 +38,11 @@ struct ContentView: View {
     @State private var hasCapturedNote = false
     @State private var pendingPitchClass: Int?
     @State private var pendingStreak = 0
+
+    // 멜로디 모드에서만 쓴다 — 직전에 확정한 음의 pitch class를 기억해서,
+    // "같은 음을 계속 홀드하는 것"과 "다음 음으로 넘어간 것"을 구분한다.
+    @State private var lastCapturedPitchClass: Int?
+    @State private var melodySteps: [MelodyStep] = []
 
     // 노이즈성 프레임 하나로 잘못 확정되지 않도록, 같은 pitch class가 이만큼
     // 연속 프레임(약 46ms x 3 = 140ms) 유지돼야 "이 음으로 확정"한다.
@@ -55,12 +75,20 @@ struct ContentView: View {
                 Text("HarmonyUp — Phase 1~3 프로토타입")
                     .font(.headline)
 
+                Picker("모드", selection: $sessionMode) {
+                    ForEach(SessionMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: sessionMode) { _, _ in resetSession() } // 모드가 바뀌면 상태가 섞이지 않게 항상 리셋
+
                 // 1. 지금 마이크가 뭘 듣고 있는지 — 파이프라인의 첫 단계(YIN)
                 flowSection(step: 1, title: "실시간 피치") {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(statusText)
                             .font(.system(.title2, design: .monospaced))
-                        Text(hasCapturedNote ? "🔒 음 고정됨 — 다시 시작을 눌러야 새로 잡습니다" : "음을 안정적으로 내면 자동으로 잡습니다")
+                        Text(singleNoteStatusHint)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -75,8 +103,27 @@ struct ContentView: View {
                 // 3. 그 조성 기준 화음 제안 + 귀로 확인 — 세 번째 단계(ChordGenerator + TonePlayer)
                 flowSection(step: 3, title: "화음 제안") {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text(harmonyText.isEmpty ? "아직 제안 없음" : harmonyText)
-                            .foregroundStyle(harmonyText.isEmpty ? .secondary : .primary)
+                        if sessionMode == .melody {
+                            if melodySteps.isEmpty {
+                                Text("아직 잡은 음 없음")
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    ForEach(melodySteps) { step in
+                                        HStack {
+                                            Text(step.noteName)
+                                                .font(.system(.body, design: .monospaced))
+                                            Text("→ \(step.harmonyNames ?? "온음계 밖")")
+                                                .font(.system(.caption, design: .monospaced))
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            Text(harmonyText.isEmpty ? "아직 제안 없음" : harmonyText)
+                                .foregroundStyle(harmonyText.isEmpty ? .secondary : .primary)
+                        }
 
                         HStack {
                             Stepper(value: $startingNoteMIDI, in: startingNoteRange) {
@@ -186,6 +233,15 @@ struct ContentView: View {
         }
     }
 
+    private var singleNoteStatusHint: String {
+        switch sessionMode {
+        case .single:
+            return hasCapturedNote ? "🔒 음 고정됨 — 다시 시작을 눌러야 새로 잡습니다" : "음을 안정적으로 내면 자동으로 잡습니다"
+        case .melody:
+            return "음을 계속 이어 부르면 음마다 화음이 순서대로 쌓입니다"
+        }
+    }
+
     private var thirdAttempts: [PracticeAttempt] { attempts.filter { $0.intervalRawValue == "third" } }
     private var fifthAttempts: [PracticeAttempt] { attempts.filter { $0.intervalRawValue == "fifth" } }
 
@@ -252,10 +308,13 @@ struct ContentView: View {
                 statusText = line
                 print(line) // Phase 1 완료 조건: 감지된 결과를 콘솔에 실시간 출력
 
-                // 단음 모드: 이미 한 음을 확정했으면 조성/화음은 더 이상 갱신하지 않는다 —
+                // 단음 모드에서는 이미 한 음을 확정했으면 더 이상 새 음을 잡지 않는다 —
                 // 안 그러면 숨소리/다음 음절/잡음이 들어올 때마다 계속 바뀐다.
+                // 멜로디 모드에서는 이 가드가 없다 — 음이 바뀔 때마다 계속 새로 잡아야 하니까.
                 // (아래 채점 로직은 이 블록 밖에서 계속 돌아간다 — 확정된 목표음을 따라 부르는 걸 들어야 하니까)
-                if !hasCapturedNote {
+                let shouldEvaluateCapture = sessionMode == .melody || !hasCapturedNote
+
+                if shouldEvaluateCapture {
                     // 같은 pitch class가 몇 프레임 연속 유지돼야 "진짜 이 음을 내고 있다"고 보고 확정한다.
                     if pendingPitchClass == result.pitchClass {
                         pendingStreak += 1
@@ -264,19 +323,31 @@ struct ContentView: View {
                         pendingStreak = 1
                     }
 
-                    if pendingStreak >= captureStreakRequired {
+                    // 단음 모드: 아직 하나도 안 잡았으면 이번이 새 음.
+                    // 멜로디 모드: 직전에 잡은 음과 pitch class가 다르면 새 음(같은 음을 계속 홀드하는 건 무시).
+                    let isNewNote = sessionMode == .melody
+                        ? result.pitchClass != lastCapturedPitchClass
+                        : !hasCapturedNote
+
+                    if pendingStreak >= captureStreakRequired && isNewNote {
                         melodySession.record(result)
                         hasCapturedNote = true
+                        lastCapturedPitchClass = result.pitchClass
 
                         if let key = melodySession.detectedKey {
                             keyText = String(format: "조성: %@ (확신도 %.2f)", key.name, key.confidence)
                         }
 
-                        if let harmony = melodySession.suggestedHarmony {
-                            let names = harmony
+                        let harmonyNames = melodySession.suggestedHarmony.map { harmony in
+                            harmony
                                 .map { NoteNameConverter.convert(frequency: $0.frequency)?.noteName ?? "?" }
                                 .joined(separator: ", ")
-                            harmonyText = "화음 제안: \(names)"
+                        }
+
+                        if sessionMode == .melody {
+                            melodySteps.append(MelodyStep(noteName: result.noteName, harmonyNames: harmonyNames))
+                        } else if let harmonyNames {
+                            harmonyText = "화음 제안: \(harmonyNames)"
                         }
                     }
                 }
@@ -421,6 +492,8 @@ struct ContentView: View {
         hasCapturedNote = false
         pendingPitchClass = nil
         pendingStreak = 0
+        lastCapturedPitchClass = nil
+        melodySteps = []
         keyText = ""
         harmonyText = ""
         statusText = "..."
