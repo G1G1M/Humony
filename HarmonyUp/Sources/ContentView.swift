@@ -65,7 +65,14 @@ struct ContentView: View {
     // 그걸 피치 시프트해서 재생하는 방식으로 바꿨다.
     @State private var recentVoiceBuffer: [Float] = []
     @State private var recentVoiceSampleRate: Double = 44100
-    private let recentVoiceBufferMaxDuration: Double = 1.5 // 초 — 이보다 오래된 소리는 버린다
+    // 단음 모드는 음 하나만 담으면 되니 짧게(1.5초) 유지한다. 멜로디 모드는 "도미솔"처럼
+    // 여러 음을 이어 부른 걸 전부 화음으로 옮겨 듣고 싶어하므로, 노래 한 프레이즈가
+    // 통째로 잘리지 않도록 훨씬 넉넉하게(30초) 잡는다 — 무제한으로 두면 캡처를 오래
+    // 켜둔 채 침묵/딴짓을 해도 버퍼가 끝없이 커질 수 있어(단, VAD를 통과한 프레임만
+    // 쌓이므로 실제로는 "부른 시간"만큼만 늘어난다) 상한선은 남겨둔다.
+    private var recentVoiceBufferMaxDuration: Double {
+        sessionMode == .melody ? 30.0 : 1.5
+    }
     private let voiceClipPlayer = VoiceClipPlayer()
 
     // 노이즈성 프레임 하나로 잘못 확정되지 않도록, 같은 pitch class가 이만큼
@@ -661,15 +668,22 @@ struct ContentView: View {
         let recorded = recentVoiceBuffer
         let rate = recentVoiceSampleRate
         let rootFrequency = melodySession.lastNote?.frequency
+        let mode = sessionMode
         statusText = "화음 만드는 중…"
 
         Task {
-            // 롤링 버퍼는 음이 바뀌어도 무조건 최근 1.5초를 담고 있어서, 지금 기준 음과
-            // 상관없는 예전 음/숨소리가 앞쪽에 섞여있을 수 있다. 그걸 그대로 옮기면 재생했을
-            // 때 화음의 음정이 왔다갔다하는 것처럼 들려서, 최근의 안정된 구간만 골라낸다.
-            let stableSegment = rootFrequency.map {
-                VoiceSegmentTrimmer.trimToStableSegment(samples: recorded, sampleRate: rate, targetFrequency: $0)
-            } ?? recorded
+            // 단음 모드에서만 트리밍한다 — 롤링 버퍼가 음이 바뀌어도 무조건 최근 시간을
+            // 담고 있어서, 지금 기준 음과 상관없는 예전 음/숨소리가 앞쪽에 섞여있을 수 있고
+            // 그걸 그대로 옮기면 음정이 왔다갔다하는 것처럼 들린다. 멜로디 모드는 반대로
+            // "도미솔"처럼 여러 음을 이어 부른 전체를 그대로 옮겨 듣고 싶어하는 경우라,
+            // 여기서 마지막 음 기준으로 트리밍해버리면 뒷부분(마지막 음)만 남고 나머지가
+            // 잘려나가는 문제가 생긴다 — 그래서 멜로디 모드는 버퍼 전체를 그대로 쓴다.
+            let stableSegment: [Float]
+            if mode == .single, let rootFrequency {
+                stableSegment = VoiceSegmentTrimmer.trimToStableSegment(samples: recorded, sampleRate: rate, targetFrequency: rootFrequency)
+            } else {
+                stableSegment = recorded
+            }
             let shifted = PitchShifter.shift(samples: stableSegment, pitchRatio: ratio, sampleRate: rate, expectedFrequency: rootFrequency)
             // 마이크로 녹음한 원본은 보통 피크가 한참 낮게 들어와서(합성음보다 훨씬 작게 들림),
             // 재생 전에 거의 꽉 차는 수준(0.95)까지 디지털 게인을 올려서 체감 음량을 키운다.
@@ -711,15 +725,19 @@ struct ContentView: View {
         let recorded = recentVoiceBuffer
         let rate = recentVoiceSampleRate
         let rootFrequency = melodySession.lastNote?.frequency
+        let mode = sessionMode
         statusText = "전체 화음 만드는 중…"
 
         Task {
-            // 롤링 버퍼 앞쪽에 섞여 있을 수 있는 이전 음/잡음을 잘라내고, 최근의 안정된
-            // 한 음 구간만 남긴다 — 세 트랙(원음+3도+5도)이 전부 같은 구간을 기준으로
-            // 만들어져야 화음의 음정이 흔들리지 않는다.
-            let stableSegment = rootFrequency.map {
-                VoiceSegmentTrimmer.trimToStableSegment(samples: recorded, sampleRate: rate, targetFrequency: $0)
-            } ?? recorded
+            // 단음 모드에서만 트리밍한다(위 recordAndHarmonizeVoice와 같은 이유) — 멜로디
+            // 모드는 부른 멜로디 전체를 그대로 옮겨야 하므로 자르지 않는다. 세 트랙
+            // (원음+3도+5도)이 전부 같은 구간을 기준으로 만들어져야 화음이 흔들리지 않는다.
+            let stableSegment: [Float]
+            if mode == .single, let rootFrequency {
+                stableSegment = VoiceSegmentTrimmer.trimToStableSegment(samples: recorded, sampleRate: rate, targetFrequency: rootFrequency)
+            } else {
+                stableSegment = recorded
+            }
 
             // 원음(비율 1.0, 시프트 없이 그대로) + 3도 + 5도로 각각 옮긴 목소리를 만든다.
             let third = PitchShifter.shift(samples: stableSegment, pitchRatio: thirdRatio, sampleRate: rate, expectedFrequency: rootFrequency)
