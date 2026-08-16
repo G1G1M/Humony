@@ -274,6 +274,8 @@ struct PracticeView: View {
                         if melodySession.suggestedHarmony != nil {
                             HarmonyCard("따라 부르기 채점", systemImage: "target") {
                                 VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                                    scoringPanel(for: .bass)
+                                    Divider()
                                     scoringPanel(for: .third)
                                     Divider()
                                     scoringPanel(for: .fifth)
@@ -350,11 +352,11 @@ struct PracticeView: View {
         }
     }
 
-    /// 3도 또는 5도 하나에 대한 채점 패널 — 목표음, 바늘 미터, 시작/중지 버튼을 묶어서 보여준다.
-    /// 두 패널이 서로 독립적이라 latestScores[interval]만 각자 참조하고, 다른 쪽 상태에 영향받지 않는다.
+    /// 성부(베이스/3도/5도) 하나에 대한 채점 패널 — 목표음, 바늘 미터, 시작/중지 버튼을 묶어서 보여준다.
+    /// 세 패널이 서로 독립적이라 latestScores[interval]만 각자 참조하고, 다른 쪽 상태에 영향받지 않는다.
     @ViewBuilder
     private func scoringPanel(for interval: ChordGenerator.Interval) -> some View {
-        let label = interval == .third ? "3도" : "5도"
+        let label = interval.koreanLabel
         let isActive = activeScoringInterval == interval
         let target = lockedScoringTargets[interval]
         let score = latestScores[interval]
@@ -837,7 +839,7 @@ struct PracticeView: View {
 
         let attempt = PracticeAttempt(
             date: Date(),
-            intervalRawValue: interval == .third ? "third" : "fifth",
+            intervalRawValue: interval.storageKey,
             targetNoteName: NoteNameConverter.convert(frequency: target.frequency)?.noteName ?? "?",
             sampleCount: aggregate.sampleCount,
             onPitchRatio: aggregate.onPitchRatio,

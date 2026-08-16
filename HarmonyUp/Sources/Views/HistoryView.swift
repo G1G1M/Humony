@@ -17,8 +17,9 @@ struct HistoryView: View {
                         HarmonyCard("정확도 요약", systemImage: "chart.bar.fill") {
                             VStack(alignment: .leading, spacing: 10) {
                                 HStack(spacing: Theme.Spacing.lg) {
-                                    intervalSummary(label: "3도", list: thirdAttempts)
-                                    intervalSummary(label: "5도", list: fifthAttempts)
+                                    ForEach(ChordGenerator.Interval.allCases, id: \.self) { interval in
+                                        intervalSummary(for: interval)
+                                    }
                                 }
 
                                 if let message = weakerIntervalMessage {
@@ -33,7 +34,7 @@ struct HistoryView: View {
                             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                                 ForEach(attempts.prefix(20), id: \.persistentModelID) { attempt in
                                     HStack {
-                                        Text("\(attempt.targetNoteName) (\(attempt.intervalRawValue == "third" ? "3도" : "5도"))")
+                                        Text("\(attempt.targetNoteName) (\(ChordGenerator.Interval.from(storageKey: attempt.intervalRawValue)?.koreanLabel ?? attempt.intervalRawValue))")
                                         Spacer()
                                         Text(String(format: "%.0f%% 정확", attempt.onPitchRatio * 100))
                                         Text(String(format: "평균 ±%.0fcent", attempt.averageAbsCentsOffset))
@@ -69,27 +70,35 @@ struct HistoryView: View {
         .padding(.top, 80)
     }
 
-    private var thirdAttempts: [PracticeAttempt] { attempts.filter { $0.intervalRawValue == "third" } }
-    private var fifthAttempts: [PracticeAttempt] { attempts.filter { $0.intervalRawValue == "fifth" } }
+    private func attempts(for interval: ChordGenerator.Interval) -> [PracticeAttempt] {
+        attempts.filter { $0.intervalRawValue == interval.storageKey }
+    }
 
     private func averageOnPitchRatio(_ list: [PracticeAttempt]) -> Double? {
         guard !list.isEmpty else { return nil }
         return list.map(\.onPitchRatio).reduce(0, +) / Double(list.count)
     }
 
-    /// 3도/5도 평균 정확도 차이가 뚜렷하면(10%p 이상) 어느 쪽에서 더 자주 벗어나는지 알려준다 —
-    /// PRD 페르소나 시나리오의 "5도 화음에서 정확도가 낮음을 확인" 같은 걸 구현한 것.
+    /// 성부(베이스/3도/5도)별 평균 정확도 중 가장 낮은 것과 가장 높은 것의 차이가 뚜렷하면
+    /// (10%p 이상) 어느 성부에서 더 자주 벗어나는지 알려준다 — PRD 페르소나 시나리오의
+    /// "5도 화음에서 정확도가 낮음을 확인" 같은 걸 구현한 것. 기록이 아직 없는 성부(예: 베이스를
+    /// 아직 한 번도 채점 안 함)는 비교 대상에서 자연히 빠진다(averageOnPitchRatio가 nil이므로).
     private var weakerIntervalMessage: String? {
-        guard let thirdAverage = averageOnPitchRatio(thirdAttempts),
-              let fifthAverage = averageOnPitchRatio(fifthAttempts),
-              abs(thirdAverage - fifthAverage) > 0.1 else { return nil }
-        return thirdAverage < fifthAverage ? "3도 화음에서 더 자주 벗어나는 편이에요" : "5도 화음에서 더 자주 벗어나는 편이에요"
+        let averages = ChordGenerator.Interval.allCases.compactMap { interval in
+            averageOnPitchRatio(attempts(for: interval)).map { (interval, $0) }
+        }
+        guard averages.count >= 2,
+              let weakest = averages.min(by: { $0.1 < $1.1 }),
+              let strongest = averages.max(by: { $0.1 < $1.1 }),
+              strongest.1 - weakest.1 > 0.1 else { return nil }
+        return "\(weakest.0.koreanLabel) 화음에서 더 자주 벗어나는 편이에요"
     }
 
     @ViewBuilder
-    private func intervalSummary(label: String, list: [PracticeAttempt]) -> some View {
+    private func intervalSummary(for interval: ChordGenerator.Interval) -> some View {
+        let list = attempts(for: interval)
         VStack(alignment: .leading, spacing: 2) {
-            Text(label).font(Theme.Typography.caption).foregroundStyle(.secondary)
+            Text(interval.koreanLabel).font(Theme.Typography.caption).foregroundStyle(.secondary)
             if let average = averageOnPitchRatio(list) {
                 Text(String(format: "%.0f%% (%d회)", average * 100, list.count))
                     .font(.system(.body, design: .monospaced))

@@ -36,6 +36,20 @@ enum ChordGenerator {
             case .fifth: return "5도"
             }
         }
+
+        // SwiftData(PracticeAttempt)에 저장할 때 쓰는 문자열 키 — enum 케이스를 직접 저장하지
+        // 않고 문자열로 격리해서, 모델 스키마가 열거형 케이스 이름/순서에 종속되지 않게 한다.
+        var storageKey: String {
+            switch self {
+            case .bass: return "bass"
+            case .third: return "third"
+            case .fifth: return "fifth"
+            }
+        }
+
+        static func from(storageKey: String) -> Interval? {
+            allCases.first { $0.storageKey == storageKey }
+        }
     }
 
     struct HarmonyNote {

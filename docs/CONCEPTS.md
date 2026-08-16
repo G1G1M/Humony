@@ -1020,3 +1020,15 @@ SwiftUI에서 `if` 조건으로 뷰가 나타나거나 사라지는 걸 애니�
 ## 44. "화음 듣기"(합성음) 순차 재생도 배열 길이만 늘리면 끝났다
 
 `toggleTonePlayback`/`playHarmonyNotesInSequence`는 애초에 `melodySession.suggestedHarmony`(또는 `melodyHarmonyLine(interval:)`)가 반환하는 배열을 그대로 `for note in harmony`로 순회하는 구조라, 배열 안에 뭐가 몇 개 들었는지 전혀 모른다 — Phase 1에서 `ChordGenerator.generateHarmony`가 2개 대신 3개(베이스 포함)를 반환하도록 바꾼 순간, 이 함수들은 코드 변경 없이 이미 베이스까지 순서대로 재생하고 있었다. 이번 단계에서 실제로 고친 건 버튼 라벨("화음 듣기 (3도→5도)" → "화음 듣기 (베이스→3도→5도)")과, 스텝별 "전체 OO 듣기" 라인 재생 버튼(`thirdLineButton`/`fifthLineButton`)을 `lineButton(for interval:)` 함수 하나로 합쳐 베이스도 같은 방식으로 추가한 것뿐이다. 순수 로직(Phase 1)과 화면(Phase 2~4)을 분리해서 단계적으로 진행한 덕에, 재생 로직 자체는 이미 "3성부 대응"이 완료돼 있었던 셈.
+
+---
+
+## 45. 채점 3패널 + 기록 집계 — `storageKey`로 SwiftData와 열거형을 계속 분리해둔다
+
+### `PracticeAttempt.intervalRawValue`는 여전히 그냥 문자열이다
+
+베이스 채점을 추가하면서 `PracticeAttempt`(SwiftData `@Model`) 자체는 전혀 손대지 않았다 — `intervalRawValue`가 처음부터 `ChordGenerator.Interval`을 직접 저장하지 않고 문자열로 격리해뒀기 때문이다(원래 주석: "모델 스키마를 열거형 케이스 이름에 종속시키지 않기 위한 최소한의 격리"). `Interval`에 `storageKey`("bass"/"third"/"fifth")와 그 역방향 `Interval.from(storageKey:)`를 추가해서, 저장할 때(`finalizeCurrentAttempt`)와 읽을 때(`HistoryView`가 기록 목록에 라벨을 붙일 때) 둘 다 이 한 쌍만 거치게 했다 — 예전 "third"/"fifth" 기록도 문자열이 그대로 유효해서 스키마 마이그레이션이 필요 없었다.
+
+### `weakerIntervalMessage`: 2개 비교에서 "가장 약한 것 찾기"로
+
+예전엔 3도/5도 딱 두 값의 평균을 빼서 비교했지만, 성부가 3개가 되면서 "어느 쌍을 비교할지"가 애매해진다. 그래서 "평균 정확도가 가장 낮은 성부"와 "가장 높은 성부"의 차이가 10%p 넘게 벌어지면 가장 낮은 쪽을 알려주는 방식으로 일반화했다 — `averages.count >= 2` 조건 덕분에, 아직 한 번도 채점 안 한 성부(예: 베이스를 아직 안 써봄)가 있어도 자연히 비교 대상에서 빠지고, 기존처럼 두 성부만 기록이 있으면 예전과 동일하게 동작한다(그 둘 중 하나가 최솟값이자 최댓값 후보가 되므로).
