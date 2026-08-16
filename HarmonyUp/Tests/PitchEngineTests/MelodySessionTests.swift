@@ -51,8 +51,11 @@ final class MelodySessionTests: XCTestCase {
         session.record(result(midiNote: 60, duration: 0.05)) // 마지막으로 부른 음 = C4
 
         let harmony = try XCTUnwrap(session.suggestedHarmony)
-        XCTAssertEqual(harmony[0].midiNote, 64) // E4
-        XCTAssertEqual(harmony[1].midiNote, 67) // G4
+        let byInterval = Dictionary(uniqueKeysWithValues: harmony.map { ($0.interval, $0) })
+        // 마지막 음(C4=60) 기준 베이스는 1옥타브 아래(C3=48), 3도/5도는 베이스와 멜로디 사이.
+        XCTAssertEqual(byInterval[.bass]?.midiNote, 48)  // C3
+        XCTAssertEqual(byInterval[.third]?.midiNote, 52) // E3
+        XCTAssertEqual(byInterval[.fifth]?.midiNote, 55) // G3
     }
 
     func testEmptySessionHasNoKeyOrHarmony() {

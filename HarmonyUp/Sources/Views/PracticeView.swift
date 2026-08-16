@@ -185,12 +185,11 @@ struct PracticeView: View {
                                                 step: step,
                                                 onCorrect: { pitchClass in correctMelodyStep(at: index, toPitchClass: pitchClass) },
                                                 onScoreThird: { startScoringMelodyStep(at: index, interval: .third) },
-                                                onScoreFifth: { startScoringMelodyStep(at: index, interval: .fifth) },
-                                                onScoreBass: { startScoringMelodyStep(at: index, interval: .bass) }
+                                                onScoreFifth: { startScoringMelodyStep(at: index, interval: .fifth) }
                                             )
                                         }
                                     }
-                                    Text("음을 눌러서 고치거나, 3도/5도/베이스로 그 스텝을 바로 채점할 수 있어요")
+                                    Text("음을 눌러서 고치거나, 3도/5도로 그 스텝을 바로 채점할 수 있어요")
                                         .font(Theme.Typography.caption2)
                                         .foregroundStyle(.secondary)
 
@@ -202,12 +201,10 @@ struct PracticeView: View {
                                         HStack {
                                             thirdLineButton
                                             fifthLineButton
-                                            bassLineButton
                                         }
                                         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                                             thirdLineButton
                                             fifthLineButton
-                                            bassLineButton
                                         }
                                     }
                                     .buttonStyle(.bordered)
@@ -216,7 +213,7 @@ struct PracticeView: View {
                                     startingNoteControls
 
                                     Button(action: toggleTonePlayback) {
-                                        Label(isPlayingTone ? "화음 정지" : "화음 듣기 (3도→5도→베이스)", systemImage: isPlayingTone ? "stop.fill" : "play.fill")
+                                        Label(isPlayingTone ? "화음 정지" : "화음 듣기 (3도→5도)", systemImage: isPlayingTone ? "stop.fill" : "play.fill")
                                     }
                                     .buttonStyle(.bordered)
                                     .disabled((melodySession.suggestedHarmony == nil && !isPlayingTone) || isPlayingStartingNote)
@@ -232,7 +229,7 @@ struct PracticeView: View {
                                 VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                                     // 버튼보다 먼저 설명을 둬서, 뭘 누르기 전에 "이게 뭘 하는 버튼인지"부터
                                     // 읽히게 한다.
-                                    Text(String(format: "방금 녹음한 노래를 그대로 3도/5도/베이스로 옮겨서 들려줘요 (확보된 목소리: %.1f초)",
+                                    Text(String(format: "방금 녹음한 노래를 그대로 3도/5도로 옮겨서 들려줘요 (확보된 목소리: %.1f초)",
                                                 Double(recentVoiceBuffer.count) / recentVoiceSampleRate))
                                         .font(Theme.Typography.caption)
                                         .foregroundStyle(.secondary)
@@ -243,13 +240,11 @@ struct PracticeView: View {
                                         HStack {
                                             voiceThirdButton
                                             voiceFifthButton
-                                            voiceBassButton
                                             voiceFullChordButton
                                         }
                                         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                                             voiceThirdButton
                                             voiceFifthButton
-                                            voiceBassButton
                                             voiceFullChordButton
                                         }
                                     }
@@ -277,8 +272,6 @@ struct PracticeView: View {
                                     scoringPanel(for: .third)
                                     Divider()
                                     scoringPanel(for: .fifth)
-                                    Divider()
-                                    scoringPanel(for: .bass)
                                 }
                             }
                             .transition(.opacity.combined(with: .move(edge: .top)))
@@ -340,14 +333,6 @@ struct PracticeView: View {
         }
     }
 
-    private var voiceBassButton: some View {
-        Button {
-            recordAndHarmonizeVoice(interval: .bass)
-        } label: {
-            Label("내 목소리로 베이스", systemImage: "waveform")
-        }
-    }
-
     private var voiceFullChordButton: some View {
         Button {
             recordAndHarmonizeFullChordWithVoice()
@@ -378,22 +363,11 @@ struct PracticeView: View {
         }
     }
 
-    private var bassLineButton: some View {
-        Button {
-            toggleMelodyLinePlayback(interval: .bass)
-        } label: {
-            Label(
-                playingMelodyLineInterval == .bass ? "베이스 라인 정지" : "전체 베이스 듣기",
-                systemImage: playingMelodyLineInterval == .bass ? "stop.fill" : "play.fill"
-            )
-        }
-    }
-
     /// 3도 또는 5도 하나에 대한 채점 패널 — 목표음, 바늘 미터, 시작/중지 버튼을 묶어서 보여준다.
     /// 두 패널이 서로 독립적이라 latestScores[interval]만 각자 참조하고, 다른 쪽 상태에 영향받지 않는다.
     @ViewBuilder
     private func scoringPanel(for interval: ChordGenerator.Interval) -> some View {
-        let label = interval.koreanLabel
+        let label = interval == .third ? "3도" : "5도"
         let isActive = activeScoringInterval == interval
         let target = lockedScoringTargets[interval]
         let score = latestScores[interval]
@@ -747,8 +721,8 @@ struct PracticeView: View {
         }
     }
 
-    /// "내 목소리로 3도"/"5도"/"베이스"는 한 음씩만 들려주는데, 이건 원음(그대로) + 3도 + 5도 +
-    /// 베이스로 옮긴 목소리를 한꺼번에 섞어서 아카펠라 4성부처럼 들려준다.
+    /// "내 목소리로 3도"/"5도"는 한 음씩만 들려주는데, 이건 원음(그대로) + 3도로 옮긴 목소리 +
+    /// 5도로 옮긴 목소리를 한꺼번에 섞어서 진짜 3화음처럼 들려준다.
     private func recordAndHarmonizeFullChordWithVoice() {
         guard !isPlaybackBusy else {
             statusText = "다른 소리가 재생 중이에요 — 끝난 뒤 다시 눌러주세요"
@@ -759,8 +733,7 @@ struct PracticeView: View {
             return
         }
         guard let thirdRatio = pitchRatio(toInterval: .third),
-              let fifthRatio = pitchRatio(toInterval: .fifth),
-              let bassRatio = pitchRatio(toInterval: .bass) else {
+              let fifthRatio = pitchRatio(toInterval: .fifth) else {
             statusText = "목표음을 계산하지 못했어요"
             return
         }
@@ -775,15 +748,12 @@ struct PracticeView: View {
         statusText = "전체 화음 만드는 중…"
 
         Task {
-            // 원음(비율 1.0, 시프트 없이 그대로) + 3도 + 5도 + 베이스(한 옥타브 아래, 비율 < 1)로
-            // 각각 옮긴 목소리를 만든다. PitchShifter.shift는 비율이 1보다 작아도(음을 낮출 때도)
-            // 그대로 동작하는 양방향 WSOLA라 베이스만 따로 다른 처리가 필요 없다.
+            // 원음(비율 1.0, 시프트 없이 그대로) + 3도 + 5도로 각각 옮긴 목소리를 만든다.
             let third = PitchShifter.shift(samples: recorded, pitchRatio: thirdRatio, sampleRate: rate, expectedFrequency: rootFrequency)
             let fifth = PitchShifter.shift(samples: recorded, pitchRatio: fifthRatio, sampleRate: rate, expectedFrequency: rootFrequency)
-            let bass = PitchShifter.shift(samples: recorded, pitchRatio: bassRatio, sampleRate: rate, expectedFrequency: rootFrequency)
-            // 네 트랙을 섞으면 각자보다 커지므로, mixAndNormalize가 합친 뒤 다시 피크 기준으로
-            // 정규화해서 서로 다른 음 개수에 상관없이 항상 비슷한 체감 음량이 되게 한다.
-            let mixed = AudioGain.mixAndNormalize([recorded, third, fifth, bass])
+            // 세 트랙을 섞으면 각자보다 커지므로, mixAndNormalize가 합친 뒤 다시 피크 기준으로
+            // 정규화해서 서로 다른 음 개수(1개 vs 3개)에 상관없이 항상 비슷한 체감 음량이 되게 한다.
+            let mixed = AudioGain.mixAndNormalize([recorded, third, fifth])
             let cleaned = AudioGain.applyFadeInOut(mixed, fadeSampleCount: Int(rate * voiceClipFadeDuration))
 
             do {
@@ -880,7 +850,7 @@ struct PracticeView: View {
 
         let attempt = PracticeAttempt(
             date: Date(),
-            intervalRawValue: interval.storageKey,
+            intervalRawValue: interval == .third ? "third" : "fifth",
             targetNoteName: NoteNameConverter.convert(frequency: target.frequency)?.noteName ?? "?",
             sampleCount: aggregate.sampleCount,
             onPitchRatio: aggregate.onPitchRatio,
