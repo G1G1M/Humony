@@ -5,15 +5,11 @@ final class PitchShifterTests: XCTestCase {
 
     private let sampleRate: Double = 44100.0
 
-    private func sineWave(frequency: Double, sampleCount: Int) -> [Float] {
-        (0..<sampleCount).map { i in
-            Float(sin(2.0 * Double.pi * frequency * Double(i) / sampleRate))
-        }
-    }
-
     /// 배음이 풍부한 합성 신호(처음 8개 배음을 1/n 진폭으로 더한 톱니파에 가까운 파형) —
-    /// 사람 목소리의 성문(글로티스) 파형처럼 배음이 풍부한 신호를 흉내낸다. 순음(사인파)과
-    /// 달리 이게 필요한 이유가 있다 — 아래 `testShiftDownByOctaveLowersDetectedPitch` 주석 참고.
+    /// 사람 목소리의 성문(글로티스) 파형처럼 배음이 풍부한 신호를 흉내낸다. 순음(사인파)이
+    /// 아니라 이걸 쓰는 이유: WORLD 이전에 직접 구현했던 PSOLA 버전(47절)에서, 순음은
+    /// 배음이 없어 겹쳐 더한 그레인들이 선형 중첩 원리상 원래 주파수로 되돌아가는 문제가
+    /// 있었다 — 실제 목소리를 흉내낸 신호로 검증하는 습관을 그대로 유지한다.
     private func voiceLikeWave(frequency: Double, sampleCount: Int) -> [Float] {
         (0..<sampleCount).map { i in
             var value = 0.0
@@ -32,34 +28,28 @@ final class PitchShifterTests: XCTestCase {
 
     // PitchShifter를 검증하는 가장 확실한 방법은 이미 만들어둔 YINPitchDetector로
     // "실제로 원하는 주파수만큼 올라갔는지" 되짚어 재는 것이다 — 두 컴포넌트가 서로를 검증해준다.
-    // (v2, 46절: 내부를 리샘플링 방식에서 피치 동기 재합성으로 바꿨지만, 이 공개 계약
+    // (v3, 48절: 내부를 직접 구현한 PSOLA에서 WORLD로 바꿨지만, 이 공개 계약
     // "shift(pitchRatio:)를 걸면 그만큼 피치가 바뀐다"는 그대로 유지돼야 한다.)
-    //
-    // 순음(사인파) 대신 `voiceLikeWave`(배음 있는 신호)를 쓰는 이유: 순음은 이 알고리즘에는
-    // 수학적으로 부적절한 시험 신호였다 — 겹쳐 더한 그레인이 전부 "같은 순음의 이동한 조각"일
-    // 뿐이라, 중첩(superposition)만으로는 새 주파수의 순음이 나올 수 없는 경우가 실제로
-    // 있었다(특히 피치를 크게 낮출 때, 유닛테스트로 발견). 목소리는 배음이 풍부해서 이 문제가
-    // 훨씬 덜하고, 실제 사용 대상(목소리)에도 더 가깝다.
     func testShiftUpByMajorThirdRaisesDetectedPitch() throws {
-        let input = voiceLikeWave(frequency: 440.0, sampleCount: 8192)
+        let input = voiceLikeWave(frequency: 440.0, sampleCount: 16384)
         let ratio = pow(2.0, 4.0 / 12.0) // 장3도 위
 
         let shifted = PitchShifter.shift(samples: input, pitchRatio: ratio, sampleRate: sampleRate)
+        XCTAssertEqual(shifted.count, input.count)
 
-        // 버퍼 맨 앞/끝은 그레인이 충분히 안 겹치는 경계라 진폭/위상이 불안정할 수 있어서
-        // (실제 재생에서는 짧은 페이드인/아웃처럼 들려 크게 문제되지 않지만) 피치 검증은
-        // 안정된 가운데 구간으로 한다.
+        // 버퍼 맨 앞/끝은 WORLD의 프레임 경계 처리 특성상 불안정할 수 있어서 안정된
+        // 가운데 구간으로 검증한다.
         let middle = middleSegment(of: shifted, length: 4096)
         let candidates = YINPitchDetector.detectPitch(samples: middle, sampleRate: sampleRate)
         let detected = try XCTUnwrap(candidates.first)
 
         let expectedFrequency = 440.0 * ratio
         let cents = 1200.0 * log2(detected.frequency / expectedFrequency)
-        XCTAssertEqual(cents, 0, accuracy: 50) // 그레인 배치 특성상 정밀 검출보다는 여유를 둠
+        XCTAssertEqual(cents, 0, accuracy: 50)
     }
 
     func testShiftDownByPerfectFifthLowersDetectedPitch() throws {
-        let input = voiceLikeWave(frequency: 440.0, sampleCount: 8192)
+        let input = voiceLikeWave(frequency: 440.0, sampleCount: 16384)
         let ratio = pow(2.0, -7.0 / 12.0) // 완전5도 아래
 
         let shifted = PitchShifter.shift(samples: input, pitchRatio: ratio, sampleRate: sampleRate)
@@ -74,13 +64,9 @@ final class PitchShifterTests: XCTestCase {
     }
 
     func testShiftDownByOctaveLowersDetectedPitch() throws {
-        // 베이스 성부(1옥타브 아래, pitchRatio=0.5)는 지금까지 테스트한 것 중 가장 큰 비율
-        // 변화라 별도로 검증한다. 이 케이스에서 순음 입력으로는 절대 피치가 안 바뀌는 걸
-        // 발견했다 — 순음은 배음이 없어서, 겹쳐 더한 그레인들이 전부 "같은 순음의 이동한
-        // 조각"일 뿐이라 중첩 원리상 원래 주파수의 순음으로 되돌아갈 수밖에 없었다(그레인을
-        // 아무리 다시 배치해도). 배음이 있는 신호(`voiceLikeWave`)로 바꾸니 정확히 shift됨을
-        // 확인했다 — 실제 목소리는 원래 배음이 풍부해서 이 문제를 겪지 않는다.
-        let input = voiceLikeWave(frequency: 440.0, sampleCount: 8192)
+        // 베이스 성부(1옥타브 아래, pitchRatio=0.5)는 지금까지 테스트한 것 중 가장 큰
+        // 비율 변화라 별도로 검증한다 — 47절에서 직접 구현한 PSOLA가 가장 애먹었던 케이스.
+        let input = voiceLikeWave(frequency: 440.0, sampleCount: 16384)
         let ratio = 0.5
 
         let shifted = PitchShifter.shift(samples: input, pitchRatio: ratio, sampleRate: sampleRate)
@@ -95,7 +81,7 @@ final class PitchShifterTests: XCTestCase {
     }
 
     func testIdentityRatioPreservesPitch() throws {
-        let input = voiceLikeWave(frequency: 440.0, sampleCount: 8192)
+        let input = voiceLikeWave(frequency: 440.0, sampleCount: 16384)
         let shifted = PitchShifter.shift(samples: input, pitchRatio: 1.0, sampleRate: sampleRate)
         let middle = middleSegment(of: shifted, length: 4096)
         let candidates = YINPitchDetector.detectPitch(samples: middle, sampleRate: sampleRate)
@@ -104,9 +90,7 @@ final class PitchShifterTests: XCTestCase {
     }
 
     func testOutputLengthMatchesInput() {
-        // 리샘플링 단계가 없어졌으므로(46절) 이제 출력 길이는 pitchRatio와 무관하게 항상
-        // 입력과 정확히 같다 — 그레인을 원래 위치에 겹쳐 더하기만 하기 때문이다.
-        let input = voiceLikeWave(frequency: 440.0, sampleCount: 8192)
+        let input = voiceLikeWave(frequency: 440.0, sampleCount: 16384)
         let shifted = PitchShifter.shift(samples: input, pitchRatio: 1.26, sampleRate: sampleRate)
         XCTAssertEqual(shifted.count, input.count)
     }
@@ -115,93 +99,34 @@ final class PitchShifterTests: XCTestCase {
         XCTAssertTrue(PitchShifter.shift(samples: [], pitchRatio: 1.5, sampleRate: sampleRate).isEmpty)
     }
 
-    // expectedFrequency를 넘겨도(로컬 피치 추정이 무음/실패한 구간의 대체값으로 쓰일 뿐) 결과
-    // 피치 자체는 여전히 정확해야 한다.
-    func testShiftWithExpectedFrequencyStillShiftsPitchCorrectly() throws {
-        let input = voiceLikeWave(frequency: 220.0, sampleCount: 8192)
-        let ratio = pow(2.0, 4.0 / 12.0) // 장3도 위
-
-        let shifted = PitchShifter.shift(samples: input, pitchRatio: ratio, sampleRate: sampleRate, expectedFrequency: 220.0)
-
-        let middle = middleSegment(of: shifted, length: 4096)
-        let candidates = YINPitchDetector.detectPitch(samples: middle, sampleRate: sampleRate)
-        let detected = try XCTUnwrap(candidates.first)
-
-        let expectedFrequency = 220.0 * ratio
-        let cents = 1200.0 * log2(detected.frequency / expectedFrequency)
-        XCTAssertEqual(cents, 0, accuracy: 50)
+    func testInvalidPitchRatioReturnsInputUnchanged() {
+        let input = voiceLikeWave(frequency: 440.0, sampleCount: 4096)
+        XCTAssertEqual(PitchShifter.shift(samples: input, pitchRatio: 0, sampleRate: sampleRate), input)
+        XCTAssertEqual(PitchShifter.shift(samples: input, pitchRatio: -1, sampleRate: sampleRate), input)
     }
 
-    // MARK: - 1단계(estimateLocalPeriods) 단독 검증
-    // (피치 추정 자체는 배음 유무와 무관하게 동작해야 하므로 여기는 순음으로 충분하다.)
+    // WORLD은 순수 Swift 구현보다 훨씬 무겁다(F0 추정+스펙트럼 포락선+비주기성 분석을 전부
+    // 거친다) — "빠른 녹음"의 녹음 상한(30초, PracticeView.quickRecordMaxDuration)에 맞춰
+    // 실측해두고, 나중에 알고리즘을 더 바꿨을 때 눈에 띄게 느려지면(예: 실수로 Dio 대신
+    // Harvest로 되돌아가는 등) 이 테스트가 잡아준다. 시뮬레이터 기준 30초 클립에 Dio+
+    // StoneMask 조합으로 약 3.5초 걸렸다(Harvest 단독으로는 약 5초) — 여유를 넉넉히 두고
+    // 10초를 상한으로 잡는다("전체 화음" 버튼은 성부 3개를 순서대로 처리하므로 체감은 더
+    // 길다는 점을 감안해도, 이미 백그라운드 Task+"만드는 중…" 상태 표시로 처리 중임을
+    // 알려주고 있어 UI가 멈추진 않는다).
+    func testPerformanceStaysWithinBudgetFor30SecondClip() {
+        let count = Int(44100.0 * 30)
+        let input: [Float] = (0..<count).map { i in
+            var value = 0.0
+            for harmonic in 1...8 {
+                value += sin(2.0 * Double.pi * 220.0 * Double(harmonic) * Double(i) / 44100.0) / Double(harmonic)
+            }
+            return Float(value)
+        }
 
-    func testEstimateLocalPeriodsMatchesKnownFrequency() {
-        // 440Hz 순음의 로컬 주기는 sampleRate/440 ≈ 100.2샘플이어야 한다.
-        let input = sineWave(frequency: 440.0, sampleCount: 8192)
-        let periods = PitchShifter.estimateLocalPeriods(samples: input, sampleRate: sampleRate, fallbackFrequency: nil)
+        let start = Date()
+        _ = PitchShifter.shift(samples: input, pitchRatio: 1.5, sampleRate: 44100.0)
+        let elapsed = Date().timeIntervalSince(start)
 
-        XCTAssertEqual(periods.count, input.count)
-        let middlePeriod = periods[periods.count / 2]
-        XCTAssertEqual(middlePeriod, sampleRate / 440.0, accuracy: 2.0)
-    }
-
-    func testEstimateLocalPeriodsHoldsLastValueThroughSilence() {
-        // 순음 -> 무음으로 이어지는 버퍼: 무음 구간도 직전 유효 주기를 그대로 이어써야 한다
-        // (급격하게 fallback 값으로 끊기면 그 경계에서 그레인 배치가 들쭉날쭉해진다).
-        let tone = sineWave(frequency: 300.0, sampleCount: 8192)
-        let silence = [Float](repeating: 0, count: 4096)
-        let input = tone + silence
-
-        let periods = PitchShifter.estimateLocalPeriods(samples: input, sampleRate: sampleRate, fallbackFrequency: 500.0)
-
-        let lastPeriod = periods[periods.count - 1]
-        let toneExpectedPeriod = sampleRate / 300.0
-        // fallback(500Hz 주기)이 아니라 순음 구간의 마지막 유효 주기에 훨씬 더 가까워야 한다.
-        XCTAssertEqual(lastPeriod, toneExpectedPeriod, accuracy: toneExpectedPeriod * 0.5)
-    }
-
-    func testEstimateLocalPeriodsUsesFallbackWhenTooShortToAnalyze() {
-        let input = sineWave(frequency: 440.0, sampleCount: 100) // 분석 윈도우보다 훨씬 짧음
-        let periods = PitchShifter.estimateLocalPeriods(samples: input, sampleRate: sampleRate, fallbackFrequency: 300.0)
-
-        XCTAssertEqual(periods.count, input.count)
-        XCTAssertEqual(periods[0], sampleRate / 300.0, accuracy: 0.01)
-    }
-
-    // MARK: - 2단계(pitchSynchronousResynthesize) 단독 검증
-
-    func testPitchSynchronousResynthesizeAtRatioOneApproximatesOriginal() throws {
-        // pitchRatio 1.0(제자리)이면 그레인을 원래 위치에 원래 밀도로 다시 겹쳐 더하는
-        // 것뿐이라, 결과 피치가 원본과 같아야 한다(진폭/미세 위상은 100% 동일하진 않을 수 있음).
-        let input = voiceLikeWave(frequency: 440.0, sampleCount: 8192)
-        let periods = PitchShifter.estimateLocalPeriods(samples: input, sampleRate: sampleRate, fallbackFrequency: nil)
-        let output = PitchShifter.pitchSynchronousResynthesize(samples: input, periods: periods, pitchRatio: 1.0)
-
-        XCTAssertEqual(output.count, input.count)
-        let middle = middleSegment(of: output, length: 4096)
-        let candidates = YINPitchDetector.detectPitch(samples: middle, sampleRate: sampleRate)
-        let detected = try XCTUnwrap(candidates.first)
-        XCTAssertEqual(detected.frequency, 440.0, accuracy: 20)
-    }
-
-    func testPitchSynchronousResynthesizeOnEmptyInputReturnsEmpty() {
-        XCTAssertTrue(PitchShifter.pitchSynchronousResynthesize(samples: [], periods: [], pitchRatio: 1.2).isEmpty)
-    }
-
-    func testPitchSynchronousResynthesizeMostlyAvoidsSilentGapsWhenLoweringPitch() {
-        // 그레인 반경을 "원본 주기 1개"로 좁게 잡았기 때문에(위 testShiftDownByOctaveLowers...
-        // 주석 참고), 피치를 크게 내릴 때(step > 원래 주기)는 그레인 사이에 아주 짧게(수 샘플)
-        // 커버되지 않는 지점이 드문드문 생길 수 있다 — 완전히 없애려면 그레인을 넓혀야 하는데,
-        // 그러면 정작 피치가 안 바뀌는 문제가 생겨서(위 참고) 이 정도 트레이드오프를 받아들였다.
-        // 여기서는 "거의 없다"(전체의 5% 미만)까지만 확인한다 — 재생 시 클릭음으로 들릴 만큼
-        // 크진 않은 수준.
-        let input = voiceLikeWave(frequency: 440.0, sampleCount: 8192)
-        let periods = PitchShifter.estimateLocalPeriods(samples: input, sampleRate: sampleRate, fallbackFrequency: nil)
-        let output = PitchShifter.pitchSynchronousResynthesize(samples: input, periods: periods, pitchRatio: 0.5)
-
-        // 맨 앞/끝(그레인이 버퍼 경계에 걸려 부분적으로만 덮이는 구간) 제외하고 가운데를 본다.
-        let middle = middleSegment(of: output, length: 4096)
-        let nearSilentCount = middle.filter { abs($0) < 0.0001 }.count
-        XCTAssertLessThan(Double(nearSilentCount) / Double(middle.count), 0.05)
+        XCTAssertLessThan(elapsed, 10.0)
     }
 }

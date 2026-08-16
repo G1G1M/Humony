@@ -1088,3 +1088,40 @@ RMS 목표치(0.25)와 이동평균 필터의 탭 개수 공식 둘 다 "이 정
 ### 검증 방법과 한계
 
 `PitchShifterTests`는 이제 순음이 아니라 `voiceLikeWave`로 "shift 후 YIN으로 되짚어 검증"한다(장3도/완전5도/1옥타브 세 방향 모두). 다만 이 모든 튜닝은 **합성 신호 + YIN 재검출**이라는 간접적인 지표로 이뤄졌다 — "피치가 숫자로 맞다"와 "실제로 자연스럽게 들린다"는 다른 질문이라, 실기기에서 직접 들어보는 확인이 여전히 필요하다.
+
+---
+
+## 48. 직접 구현을 포기하고 WORLD 보코더를 들여오다
+
+### 47절의 결말 — "숫자는 맞는데 여전히 이상하게 들린다"
+
+47절에서 만든 PSOLA는 유닛테스트(배음 있는 합성 신호+YIN 재검출)를 전부 통과했지만, 실기기에서 직접 들어본 사용자 피드백은 "전체 화음이 전보다 더 이상하게 들린다"였다. 합성 신호로 아무리 정교하게 튜닝해도 실제 목소리(자음, 숨소리, 비브라토, 시간에 따라 변하는 스펙트럼)에 대한 일반화는 보장되지 않는다는 걸 보여준 사례다 — 소규모로 몇 시간 안에 처음부터 구현한 음성 분석/합성 알고리즘이 프로덕션 품질에 이르긴 어려웠다.
+
+### WORLD란
+
+[WORLD](https://github.com/mmorise/World)는 Masanori Morise가 만든 고품질 음성 분석/변형/합성 라이브러리(C++, 수정 BSD 라이선스 — 상업적 이용 포함 완전 무료, 저작권 표시만 유지하면 됨)다. 많은 노래 합성/보이스 컨버전 연구 시스템의 기반으로 널리 쓰인다. 핵심 아이디어: 음성 신호를 세 가지로 **분해**해서 분석한다 —
+- **F0(기본주파수)**: `Dio`(빠른 초기 추정) + `StoneMask`(그 추정치를 정제)로 구한다.
+- **스펙트럼 포락선(spectral envelope)**: `CheapTrick`으로 구한다 — 이게 바로 포먼트(목소리 정체성)를 담고 있는 부분이다.
+- **비주기성(aperiodicity)**: `D4C`로 구한다 — 숨소리처럼 주기적이지 않은 성분의 비율.
+
+이 세 가지를 다시 합치는 게 `Synthesis`다. **피치만 바꾸고 싶으면 F0 배열만 원하는 비율로 스케일한 뒤, 스펙트럼 포락선과 비주기성은 원본 그대로 Synthesis에 넘기면 된다** — 포먼트를 건드리지 않았으니 목소리 정체성이 그대로 유지된채 음높이만 바뀐다. 이게 정확히 이 앱이 필요로 하던 것이다.
+
+### 왜 직접 구현(PSOLA) 대신 지금 WORLD로 바꿨는가
+
+이 프로젝트는 "학습 목적상 직접 구현" 원칙(서드파티 **피치 검출** 라이브러리 금지)이 있었지만, 포먼트를 보존하는 음성 분석/합성은 그 자체로 독립된 연구 분야이고(47절에서 실제로 겪었듯) 몇 시간 안에 처음부터 프로덕션 품질로 재현하기엔 무리가 있었다. 사용자가 직접 "WORLD Vocoder(BSD)"를 조사해서 제안했고, 라이선스도 확인했다(BSD — 상업 앱에 그대로 써도 비용 없음, GPL인 Rubber Band 같은 대안과 달리 앱스토어 유료 출시에도 문제 없음). 이번엔 서드파티 라이브러리를 들이는 게 맞는 선택이라고 판단했다.
+
+### Swift에서 C++ 라이브러리를 부르는 법 — "얇은 C 브리지"
+
+WORLD는 C++로 구현돼 있지만, 공개 API 헤더들이 전부 `WORLD_BEGIN_C_DECLS`/`WORLD_END_C_DECLS`(내부적으로 `extern "C"`)로 감싸여 있어서 **C 링키지**로 노출된다 — Swift가 Objective-C++ 래퍼 클래스 없이도 C 함수처럼 직접 부를 수 있다는 뜻이다. 그래서:
+- `HarmonyUp/ThirdParty/World/`에 필요한 소스(`dio`/`stonemask`/`cheaptrick`/`d4c`/`synthesis`/`common`/`matlabfunctions`/`fft`)만 가져왔다(WORLD 전체가 아니라 이 앱에 필요한 것만 — 압축/코덱, 실시간 스트리밍용 API는 뺐다).
+- `HarmonyUpWorldBridge.h`/`.cpp` — 위 5단계(Dio→StoneMask→CheapTrick→D4C→F0 스케일→Synthesis)를 한데 묶어서, `HarmonyUpWorldPitchShift(input, length, sampleRate, pitchRatio, output)`라는 함수 하나로 노출하는 얇은 래퍼. Swift 쪽에서 여러 단계를 조율할 필요 없이 이 함수 하나만 부르면 된다.
+- `HarmonyUp-Bridging-Header.h`(새 파일, `project.yml`의 `SWIFT_OBJC_BRIDGING_HEADER`로 지정)가 이 헤더를 Swift 컴파일 대상에 노출시킨다. `PitchShifter.swift`는 `[Float]` ↔ `[Double]` 변환만 하고 나머지는 그대로 이 C 함수에 위임한다 — 공개 API(`PitchShifter.shift(samples:pitchRatio:sampleRate:expectedFrequency:)`)는 그대로라 `PracticeView.swift` 등 호출부는 한 글자도 안 바뀌었다.
+- `project.yml`에 `HEADER_SEARCH_PATHS`(WORLD 헤더의 `#include "world/xxx.h"`가 찾아지도록)와 `CLANG_CXX_LANGUAGE_STANDARD: gnu++17`을 추가했다.
+
+### Harvest보다 Dio+StoneMask — 속도 때문에 바꾼 결정
+
+처음엔 WORLD에서 가장 정확하다고 알려진 F0 추정기 `Harvest`를 썼는데, 30초짜리 합성 클립 하나를 처리하는 데 시뮬레이터 기준 약 5.1초가 걸렸다(직접 만든 PSOLA는 이보다 훨씬 빨랐다 — 품질과 맞바꾼 셈). "전체 화음" 버튼은 베이스/3도/5도 세 번을 순서대로 처리하니 체감은 그 3배에 가까울 수 있다. `Dio`(빠른 초기 추정) + `StoneMask`(그 결과를 정제)로 바꾸니 약 3.6초로 줄었다 — 극적인 차이는 아니었는데(전체 시간의 상당 부분이 스펙트럼 포락선(`CheapTrick`)/비주기성(`D4C`) 분석에 쓰이지, F0 추정 자체는 일부라서), 그래도 유의미한 개선이고 정확도(유닛테스트)는 그대로 유지됐다. 이미 백그라운드 `Task`+"화음 만드는 중…" 상태 표시로 처리되고 있어서 UI가 멈추진 않지만, 녹음 상한(30초)에 맞춰 성능 회귀 테스트(`testPerformanceStaysWithinBudgetFor30SecondClip`, 10초 상한)를 추가해뒀다.
+
+### 확인이 더 필요한 부분
+
+이번엔 유닛테스트(피치 정확도 + 처리 시간)까지는 전부 통과하고 arm64 실기기용 컴파일도 확인했지만, **실제로 자연스럽게 들리는지는 아직 확인 전이다** — 47절의 교훈("숫자는 맞는데 이상하게 들렸다")을 생각하면 이번에도 실제 청취 확인이 꼭 필요하다. 다만 WORLD는 검증된 연구/프로덕션 라이브러리라, 직접 만든 PSOLA보다는 훨씬 나을 가능성이 높다.

@@ -10,17 +10,26 @@ targets:
     platform: iOS
     sources:
       - path: HarmonyUp/Sources
+      # WORLD(고품질 음성 분석/합성 라이브러리, BSD 라이선스) — 포먼트를 보존하는
+      # 피치시프트를 직접 구현(PSOLA)했던 것보다 훨씬 검증된 방식으로 하기 위해 도입.
+      # HarmonyUpWorldBridge.h/.cpp가 Swift에서 부를 수 있는 C 링키지 진입점이다.
+      - path: HarmonyUp/ThirdParty/World
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.kimjiwon.HarmonyUp
         DEVELOPMENT_TEAM: C5P7V9S6NT
         CODE_SIGN_STYLE: Automatic
+        SWIFT_OBJC_BRIDGING_HEADER: HarmonyUp/Sources/HarmonyUp-Bridging-Header.h
+        HEADER_SEARCH_PATHS: HarmonyUp/ThirdParty/World
+        CLANG_CXX_LANGUAGE_STANDARD: "gnu++17"
       configs:
         # 기본 Debug 빌드(-Onone)는 WSOLA처럼 그레인마다 상관관계를 계산하는 무거운
         # 신호처리 루프가 실기기에서도 눈에 띄게 느려진다(디버깅용 최적화 해제가 원인).
         # 이 프로젝트는 실기기 성능 확인이 항상 필요하니, Debug에서도 최적화 컴파일을 켠다.
+        # WORLD(C++, Harvest 등 연산량이 큰 분석)도 같은 이유로 GCC_OPTIMIZATION_LEVEL을 켠다.
         Debug:
           SWIFT_OPTIMIZATION_LEVEL: "-O"
+          GCC_OPTIMIZATION_LEVEL: "s"
     info:
       path: HarmonyUp/Sources/Info.plist
       properties:
