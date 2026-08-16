@@ -53,7 +53,7 @@ struct PracticeView: View {
     @State private var playingMelodyLineInterval: ChordGenerator.Interval?
     @State private var melodyLineTask: Task<Void, Never>?
 
-    // "내 목소리로 화음 만들기" — 합성음(TonePlayer) 대신 사용자 목소리를 그대로 3도/5도 위로
+    // "내 목소리로 화음 만들기" — 합성음(TonePlayer) 대신 사용자 목소리를 그대로 베이스/3도/5도로
     // 옮겨서 재생한다. 빠른 녹음이 끝나면 녹음 전체가 그대로 여기 채워진다(applyQuickRecordResult).
     @State private var recentVoiceBuffer: [Float] = []
     @State private var recentVoiceSampleRate: Double = 44100
@@ -230,22 +230,24 @@ struct PracticeView: View {
                                 VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                                     // 버튼보다 먼저 설명을 둬서, 뭘 누르기 전에 "이게 뭘 하는 버튼인지"부터
                                     // 읽히게 한다.
-                                    Text(String(format: "방금 녹음한 노래를 그대로 3도/5도로 옮겨서 들려줘요 (확보된 목소리: %.1f초)",
+                                    Text(String(format: "방금 녹음한 노래를 그대로 베이스/3도/5도로 옮겨서 들려줘요 (확보된 목소리: %.1f초)",
                                                 Double(recentVoiceBuffer.count) / recentVoiceSampleRate))
                                         .font(Theme.Typography.caption)
                                         .foregroundStyle(.secondary)
 
-                                    // ViewThatFits: 버튼 3개가 한 줄에 안 들어갈 만큼 글자가 커지면
+                                    // ViewThatFits: 버튼 4개가 한 줄에 안 들어갈 만큼 글자가 커지면
                                     // 세로 배치로 자동 전환된다.
                                     ViewThatFits {
                                         HStack {
-                                            voiceThirdButton
-                                            voiceFifthButton
+                                            voiceButton(for: .bass)
+                                            voiceButton(for: .third)
+                                            voiceButton(for: .fifth)
                                             voiceFullChordButton
                                         }
                                         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                                            voiceThirdButton
-                                            voiceFifthButton
+                                            voiceButton(for: .bass)
+                                            voiceButton(for: .third)
+                                            voiceButton(for: .fifth)
                                             voiceFullChordButton
                                         }
                                     }
@@ -318,19 +320,11 @@ struct PracticeView: View {
         }
     }
 
-    private var voiceThirdButton: some View {
+    private func voiceButton(for interval: ChordGenerator.Interval) -> some View {
         Button {
-            recordAndHarmonizeVoice(interval: .third)
+            recordAndHarmonizeVoice(interval: interval)
         } label: {
-            Label("내 목소리로 3도", systemImage: "waveform")
-        }
-    }
-
-    private var voiceFifthButton: some View {
-        Button {
-            recordAndHarmonizeVoice(interval: .fifth)
-        } label: {
-            Label("내 목소리로 5도", systemImage: "waveform")
+            Label("내 목소리로 \(interval.koreanLabel)", systemImage: "waveform")
         }
     }
 
@@ -662,7 +656,7 @@ struct PracticeView: View {
         return target.frequency / lastFrequency
     }
 
-    /// "내 목소리로 화음 만들기" — 방금 녹음한 소리(recentVoiceBuffer)를 3도/5도 위로
+    /// "내 목소리로 화음 만들기" — 방금 녹음한 소리(recentVoiceBuffer)를 베이스/3도/5도로
     /// 피치 시프트해서, 합성음이 아니라 사용자 자신의 목소리 톤으로 화음을 즉시 들려준다.
     private func recordAndHarmonizeVoice(interval: ChordGenerator.Interval) {
         // 버튼을 눌렀는데 아무 것도 안 바뀌는 것처럼 보이는 문제를 막기 위해, 막힌 이유를
@@ -718,8 +712,8 @@ struct PracticeView: View {
         }
     }
 
-    /// "내 목소리로 3도"/"5도"는 한 음씩만 들려주는데, 이건 원음(그대로) + 3도로 옮긴 목소리 +
-    /// 5도로 옮긴 목소리를 한꺼번에 섞어서 진짜 3화음처럼 들려준다.
+    /// "내 목소리로 베이스"/"3도"/"5도"는 한 음씩만 들려주는데, 이건 원음(리드 멜로디, 그대로) +
+    /// 베이스 + 3도 + 5도로 옮긴 목소리를 한꺼번에 섞어서 아카펠라 4성부처럼 들려준다.
     private func recordAndHarmonizeFullChordWithVoice() {
         guard !isPlaybackBusy else {
             statusText = "다른 소리가 재생 중이에요 — 끝난 뒤 다시 눌러주세요"
@@ -729,7 +723,8 @@ struct PracticeView: View {
             statusText = "아직 화음이 없어요 — 먼저 녹음해주세요"
             return
         }
-        guard let thirdRatio = pitchRatio(toInterval: .third),
+        guard let bassRatio = pitchRatio(toInterval: .bass),
+              let thirdRatio = pitchRatio(toInterval: .third),
               let fifthRatio = pitchRatio(toInterval: .fifth) else {
             statusText = "목표음을 계산하지 못했어요"
             return
@@ -745,12 +740,15 @@ struct PracticeView: View {
         statusText = "전체 화음 만드는 중…"
 
         Task {
-            // 원음(비율 1.0, 시프트 없이 그대로) + 3도 + 5도로 각각 옮긴 목소리를 만든다.
+            // 원음(비율 1.0, 시프트 없이 그대로, 리드 멜로디) + 베이스(한 옥타브 아래, 비율 < 1) +
+            // 3도 + 5도로 각각 옮긴 목소리를 만든다. PitchShifter.shift는 비율이 1보다 작아도
+            // (음을 낮출 때도) 그대로 동작하는 양방향 WSOLA라 베이스만 따로 다른 처리가 필요 없다.
+            let bass = PitchShifter.shift(samples: recorded, pitchRatio: bassRatio, sampleRate: rate, expectedFrequency: rootFrequency)
             let third = PitchShifter.shift(samples: recorded, pitchRatio: thirdRatio, sampleRate: rate, expectedFrequency: rootFrequency)
             let fifth = PitchShifter.shift(samples: recorded, pitchRatio: fifthRatio, sampleRate: rate, expectedFrequency: rootFrequency)
-            // 세 트랙을 섞으면 각자보다 커지므로, mixAndNormalize가 합친 뒤 다시 피크 기준으로
-            // 정규화해서 서로 다른 음 개수(1개 vs 3개)에 상관없이 항상 비슷한 체감 음량이 되게 한다.
-            let mixed = AudioGain.mixAndNormalize([recorded, third, fifth])
+            // 네 트랙을 섞으면 각자보다 커지므로, mixAndNormalize가 합친 뒤 다시 피크 기준으로
+            // 정규화해서 서로 다른 음 개수에 상관없이 항상 비슷한 체감 음량이 되게 한다.
+            let mixed = AudioGain.mixAndNormalize([recorded, bass, third, fifth])
             let cleaned = AudioGain.applyFadeInOut(mixed, fadeSampleCount: Int(rate * voiceClipFadeDuration))
 
             do {
