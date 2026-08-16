@@ -114,9 +114,11 @@ struct PracticeView: View {
         .pickerStyle(.menu)
         .disabled(isPlaybackBusy)
 
-        let listenButton = Button(isPlayingStartingNote ? "재생 중…" : "시작음 듣기", action: playStartingNote)
-            .buttonStyle(.bordered)
-            .disabled(isPlaybackBusy)
+        let listenButton = Button(action: playStartingNote) {
+            Label(isPlayingStartingNote ? "재생 중…" : "시작음 듣기", systemImage: isPlayingStartingNote ? "waveform" : "play.circle")
+        }
+        .buttonStyle(.bordered)
+        .disabled(isPlaybackBusy)
 
         // 글자 크기를 크게 키우면(Dynamic Type) 가로로 나란히 두 컨트롤을 넣을 공간이 부족해져서
         // 버튼 텍스트가 줄바꿈되며 알약 모양이 찌그러지는 문제가 있었다 — ViewThatFits로 한 줄에
@@ -139,9 +141,11 @@ struct PracticeView: View {
             Text("설정에서 마이크 권한을 허용하면 바로 시작할 수 있어요")
                 .font(Theme.Typography.caption)
                 .foregroundStyle(.secondary)
-            Button("설정 열기") {
+            Button {
                 guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
                 UIApplication.shared.open(url)
+            } label: {
+                Label("설정 열기", systemImage: "gear")
             }
             .buttonStyle(.borderedProminent)
         }
@@ -174,8 +178,10 @@ struct PracticeView: View {
                             micPermissionDeniedContent
                         } else {
                             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                                Button(isCapturing ? "측정 중지" : "측정 시작", action: toggleCapture)
-                                    .buttonStyle(.borderedProminent)
+                                Button(action: toggleCapture) {
+                                    Label(isCapturing ? "측정 중지" : "측정 시작", systemImage: isCapturing ? "stop.fill" : "mic.fill")
+                                }
+                                .buttonStyle(.borderedProminent)
 
                                 if isCapturing {
                                     // 지금 마이크가 실제로 소리를 듣고 있다는 걸 텍스트보다 훨씬
@@ -242,20 +248,12 @@ struct PracticeView: View {
                                         // 안 들어가서 자동으로 세로 배치로 바뀐다.
                                         ViewThatFits {
                                             HStack {
-                                                Button(playingMelodyLineInterval == .third ? "3도 라인 정지" : "전체 3도 듣기") {
-                                                    toggleMelodyLinePlayback(interval: .third)
-                                                }
-                                                Button(playingMelodyLineInterval == .fifth ? "5도 라인 정지" : "전체 5도 듣기") {
-                                                    toggleMelodyLinePlayback(interval: .fifth)
-                                                }
+                                                thirdLineButton
+                                                fifthLineButton
                                             }
                                             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                                                Button(playingMelodyLineInterval == .third ? "3도 라인 정지" : "전체 3도 듣기") {
-                                                    toggleMelodyLinePlayback(interval: .third)
-                                                }
-                                                Button(playingMelodyLineInterval == .fifth ? "5도 라인 정지" : "전체 5도 듣기") {
-                                                    toggleMelodyLinePlayback(interval: .fifth)
-                                                }
+                                                thirdLineButton
+                                                fifthLineButton
                                             }
                                         }
                                         .buttonStyle(.bordered)
@@ -268,9 +266,11 @@ struct PracticeView: View {
 
                                 startingNoteControls
 
-                                Button(isPlayingTone ? "화음 정지" : "화음 듣기 (3도→5도)", action: toggleTonePlayback)
-                                    .buttonStyle(.bordered)
-                                    .disabled((melodySession.suggestedHarmony == nil && !isPlayingTone) || isPlayingStartingNote)
+                                Button(action: toggleTonePlayback) {
+                                    Label(isPlayingTone ? "화음 정지" : "화음 듣기 (3도→5도)", systemImage: isPlayingTone ? "stop.fill" : "play.fill")
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled((melodySession.suggestedHarmony == nil && !isPlayingTone) || isPlayingStartingNote)
                             }
                         }
                     }
@@ -292,26 +292,14 @@ struct PracticeView: View {
                                 // 세로 배치로 자동 전환된다(가로 배치가 압축되며 깨지는 것 방지).
                                 ViewThatFits {
                                     HStack {
-                                        Button("내 목소리로 3도") {
-                                            recordAndHarmonizeVoice(interval: .third)
-                                        }
-                                        Button("내 목소리로 5도") {
-                                            recordAndHarmonizeVoice(interval: .fifth)
-                                        }
-                                        Button("내 목소리로 전체 화음") {
-                                            recordAndHarmonizeFullChordWithVoice()
-                                        }
+                                        voiceThirdButton
+                                        voiceFifthButton
+                                        voiceFullChordButton
                                     }
                                     VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                                        Button("내 목소리로 3도") {
-                                            recordAndHarmonizeVoice(interval: .third)
-                                        }
-                                        Button("내 목소리로 5도") {
-                                            recordAndHarmonizeVoice(interval: .fifth)
-                                        }
-                                        Button("내 목소리로 전체 화음") {
-                                            recordAndHarmonizeFullChordWithVoice()
-                                        }
+                                        voiceThirdButton
+                                        voiceFifthButton
+                                        voiceFullChordButton
                                     }
                                 }
                                 .buttonStyle(.bordered)
@@ -334,9 +322,11 @@ struct PracticeView: View {
                         }
                     }
 
-                    Button("다시 시작", role: .destructive, action: resetSession)
-                        .buttonStyle(.borderedProminent)
-                        .frame(maxWidth: .infinity)
+                    Button(role: .destructive, action: resetSession) {
+                        Label("다시 시작", systemImage: "arrow.counterclockwise")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .frame(maxWidth: .infinity)
                 }
                 .padding()
             }
@@ -357,6 +347,52 @@ struct PracticeView: View {
             tonePlayer.stop()
             voiceClipPlayer.stop()
             isPlayingVoiceClip = false
+        }
+    }
+
+    private var voiceThirdButton: some View {
+        Button {
+            recordAndHarmonizeVoice(interval: .third)
+        } label: {
+            Label("내 목소리로 3도", systemImage: "waveform")
+        }
+    }
+
+    private var voiceFifthButton: some View {
+        Button {
+            recordAndHarmonizeVoice(interval: .fifth)
+        } label: {
+            Label("내 목소리로 5도", systemImage: "waveform")
+        }
+    }
+
+    private var voiceFullChordButton: some View {
+        Button {
+            recordAndHarmonizeFullChordWithVoice()
+        } label: {
+            Label("내 목소리로 전체 화음", systemImage: "waveform")
+        }
+    }
+
+    private var thirdLineButton: some View {
+        Button {
+            toggleMelodyLinePlayback(interval: .third)
+        } label: {
+            Label(
+                playingMelodyLineInterval == .third ? "3도 라인 정지" : "전체 3도 듣기",
+                systemImage: playingMelodyLineInterval == .third ? "stop.fill" : "play.fill"
+            )
+        }
+    }
+
+    private var fifthLineButton: some View {
+        Button {
+            toggleMelodyLinePlayback(interval: .fifth)
+        } label: {
+            Label(
+                playingMelodyLineInterval == .fifth ? "5도 라인 정지" : "전체 5도 듣기",
+                systemImage: playingMelodyLineInterval == .fifth ? "stop.fill" : "play.fill"
+            )
         }
     }
 
@@ -390,9 +426,13 @@ struct PracticeView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button(isActive ? "중지" : "채점", action: { toggleScoring(interval: interval) })
-                    .buttonStyle(.bordered)
-                    .disabled(!isActive && melodySession.suggestedHarmony == nil)
+                Button {
+                    toggleScoring(interval: interval)
+                } label: {
+                    Label(isActive ? "중지" : "채점", systemImage: isActive ? "stop.fill" : "target")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!isActive && melodySession.suggestedHarmony == nil)
             }
 
             if score == nil && target == nil {
