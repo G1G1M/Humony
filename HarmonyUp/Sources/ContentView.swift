@@ -9,7 +9,8 @@ struct ContentView: View {
     @State private var isPlayingStartingNote = false
     @State private var startingNoteTask: Task<Void, Never>?
     @State private var scoringTarget: ChordGenerator.HarmonyNote?
-    @State private var scoreText = ""
+    @State private var scoringTargetNoteName = ""
+    @State private var currentScore: PitchScorer.Score?
 
     private let audioCapture = AudioCapture()
     private let melodySession = MelodySession()
@@ -64,9 +65,28 @@ struct ContentView: View {
                 // 4. 목표음을 따라 불러서 채점 — 네 번째 단계(PitchScorer)
                 flowSection(step: 4, title: "따라 부르기 채점") {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text(scoreText.isEmpty ? "채점 대기 중" : scoreText)
-                            .font(.system(.body, design: .monospaced))
-                            .foregroundStyle(scoreText.isEmpty ? .secondary : .primary)
+                        if scoringTarget == nil {
+                            Text("채점 대기 중 — 화음을 들은 뒤 채점을 시작하세요")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("목표음: \(scoringTargetNoteName)")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+
+                            // 튜너 앱처럼 바늘이 좌우로 움직이는 시각적 피드백 —
+                            // "몇 cent 벗어남"이라는 숫자보다 낮은지/높은지/거의 맞는지가 한눈에 들어온다.
+                            PitchMeterView(
+                                centsOffset: currentScore?.centsOffset,
+                                isOnPitch: currentScore?.isOnPitch ?? false,
+                                toleranceCents: PitchScorer.onPitchToleranceCents
+                            )
+
+                            if let score = currentScore {
+                                Text(String(format: "%+.0f cent  %@", score.centsOffset, score.isOnPitch ? "✅ 정확" : "벗어남"))
+                                    .font(.system(.body, design: .monospaced))
+                                    .foregroundStyle(score.isOnPitch ? .green : .secondary)
+                            }
+                        }
 
                         Button(scoringTarget == nil ? "채점 시작 (3도 기준)" : "채점 중지", action: toggleScoring)
                             .buttonStyle(.bordered)
@@ -138,13 +158,8 @@ struct ContentView: View {
                     harmonyText = ""
                 }
 
-                if let target = scoringTarget,
-                   let score = PitchScorer.score(sungFrequency: result.frequency, targetFrequency: target.frequency) {
-                    let targetName = NoteNameConverter.convert(frequency: target.frequency)?.noteName ?? "?"
-                    scoreText = String(
-                        format: "목표 %@ 대비 %+.0f cent  %@",
-                        targetName, score.centsOffset, score.isOnPitch ? "✅ 정확" : "❌ 벗어남"
-                    )
+                if let target = scoringTarget {
+                    currentScore = PitchScorer.score(sungFrequency: result.frequency, targetFrequency: target.frequency)
                 }
             }
         } catch {
@@ -215,13 +230,15 @@ struct ContentView: View {
     private func toggleScoring() {
         if scoringTarget != nil {
             scoringTarget = nil
-            scoreText = ""
+            scoringTargetNoteName = ""
+            currentScore = nil
             return
         }
 
         guard let harmony = melodySession.suggestedHarmony,
               let third = harmony.first(where: { $0.interval == .third }) else { return }
         scoringTarget = third
+        scoringTargetNoteName = NoteNameConverter.convert(frequency: third.frequency)?.noteName ?? "?"
     }
 
     private func resetSession() {
@@ -233,10 +250,11 @@ struct ContentView: View {
         isPlayingTone = false
         isPlayingStartingNote = false
         scoringTarget = nil
+        scoringTargetNoteName = ""
+        currentScore = nil
         melodySession.reset()
         keyText = ""
         harmonyText = ""
-        scoreText = ""
         statusText = "..."
     }
 }
