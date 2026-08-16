@@ -650,12 +650,23 @@ struct ContentView: View {
             return
         }
 
-        let shifted = PitchShifter.shift(samples: recentVoiceBuffer, pitchRatio: ratio, sampleRate: recentVoiceSampleRate)
-        do {
-            try voiceClipPlayer.play(samples: shifted, sampleRate: recentVoiceSampleRate)
-            statusText = "내 목소리로 만든 화음을 재생합니다"
-        } catch {
-            statusText = "재생 실패: \(error.localizedDescription)"
+        // PitchShifter.shift는 그레인마다 상관관계를 계산하는 WSOLA라 가볍지 않다 — 버튼을 누른
+        // 그 자리에서(메인 스레드) 바로 돌리면 그동안 화면이 멈춰서, 실기기에서 "제스처 게이트
+        // 타임아웃"(시스템이 터치 응답을 못 받아 경고) 로그와 함께 버튼이 안 눌리는 것처럼
+        // 보이는 문제가 있었다. Task로 감싸서 백그라운드로 미루고, 계산이 끝난 뒤에만
+        // 화면(statusText)과 오디오 재생을 갱신한다.
+        let recorded = recentVoiceBuffer
+        let rate = recentVoiceSampleRate
+        statusText = "화음 만드는 중…"
+
+        Task {
+            let shifted = PitchShifter.shift(samples: recorded, pitchRatio: ratio, sampleRate: rate)
+            do {
+                try voiceClipPlayer.play(samples: shifted, sampleRate: rate)
+                statusText = "내 목소리로 만든 화음을 재생합니다"
+            } catch {
+                statusText = "재생 실패: \(error.localizedDescription)"
+            }
         }
     }
 
