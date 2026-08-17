@@ -9,9 +9,12 @@ import SwiftUI
 struct PitchHighwayView: View {
     let steps: [MelodyStep]
 
-    private let pixelsPerSecond: CGFloat = 70
-    private let pixelsPerSemitone: CGFloat = 10
-    private let barHeight: CGFloat = 16
+    private let pixelsPerSecond: CGFloat = 90
+    private let pixelsPerSemitone: CGFloat = 12
+    private let barHeight: CGFloat = 18
+    // 음 하나가 아무리 짧아도(빠르게 지나가는 음절) 음이름 글자가 들어갈 최소 폭 — 실제
+    // 길이(duration)만 그대로 쓰면 짧은 음은 몇 픽셀짜리 선이 돼서 라벨을 넣을 수 없다.
+    private let minimumBarWidth: CGFloat = 34
     private let leadingLabelWidth: CGFloat = 36
 
     private let melodyColor = Theme.tint
@@ -121,22 +124,36 @@ struct PitchHighwayView: View {
     @ViewBuilder
     private func stepBars(_ step: MelodyStep, range: ClosedRange<Int>) -> some View {
         if let onset = step.onsetTime, let duration = step.duration {
-            let barWidth = max(x(duration), 6)
+            let barWidth = max(x(duration), minimumBarWidth)
             let barX = x(onset) + leadingLabelWidth
 
             if let harmony = step.harmony {
                 ForEach(harmony, id: \.interval) { note in
-                    RoundedRectangle(cornerRadius: 3, style: .continuous)
-                        .fill(color(for: note.interval).opacity(0.85))
-                        .frame(width: barWidth, height: barHeight)
+                    noteBar(name: noteName(note.midiNote), color: color(for: note.interval).opacity(0.9), width: barWidth)
                         .position(x: barX + barWidth / 2, y: y(note.midiNote, range: range) + barHeight / 2)
                 }
             }
 
-            RoundedRectangle(cornerRadius: 3, style: .continuous)
-                .fill(melodyColor)
-                .frame(width: barWidth, height: barHeight)
+            noteBar(name: step.noteName, color: melodyColor, width: barWidth)
                 .position(x: barX + barWidth / 2, y: y(step.midiNote, range: range) + barHeight / 2)
         }
+    }
+
+    // 색만 보고 "무슨 음인지" 짐작하게 하는 대신, 음이름을 막대 위에 직접 적는다 — 이게
+    // 진짜 악보의 핵심 기능(무슨 음인지 바로 알 수 있어야 함)이라 색상/위치만으로는 부족하다는
+    // 피드백을 반영했다(docs/CONCEPTS.md 55절).
+    private func noteBar(name: String, color: Color, width: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: 4, style: .continuous)
+            .fill(color)
+            .frame(width: width, height: barHeight)
+            .overlay {
+                Text(name)
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.35), radius: 0.5)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .padding(.horizontal, 2)
+            }
     }
 }
