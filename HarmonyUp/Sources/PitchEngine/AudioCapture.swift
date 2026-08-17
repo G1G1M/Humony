@@ -40,7 +40,14 @@ final class AudioCapture {
         // .measurement 모드는 AGC(자동 게인 조절)나 시스템 음성 향상 처리를 최소화해서
         // 원본 파형에 가까운 신호를 얻는다 — 피치 검출 정확도에 중요하다.
         // .defaultToSpeaker: 목표음이 리시버(귀에 대는 작은 스피커)가 아니라 기기 스피커로 나오게 한다.
-        try session.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker])
+        // .allowBluetooth/.allowBluetoothA2DP: 이 둘이 빠져 있으면 이 세션이 활성화되는 순간
+        // iOS가 블루투스 이어폰을 이 세션에 유효한 입출력 경로로 취급하지 않는다 — 세션 활성화
+        // 시점에 블루투스 연결이 끊기거나 강제로 스피커/내장 마이크로 라우팅되는 것처럼 보이는
+        // 버그의 원인이었다("이어폰 착용하면 연결이 끊긴다" 실사용 피드백). allowBluetooth는
+        // 블루투스로 마이크 입력(HFP)까지 받을 수 있게 하고, allowBluetoothA2DP는 마이크가 안
+        // 쓰이는 순간(예: TonePlayer 재생만 할 때) 더 고음질 스테레오 경로(A2DP)를 쓸 수 있게
+        // 한다 — 시스템이 상황에 맞게 알아서 고른다.
+        try session.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
         try session.setActive(true)
 
         let inputNode = engine.inputNode
