@@ -52,6 +52,16 @@ struct PracticeView: View {
     @State private var quickRecordSampleRate: Double = 44100
     // WSOLA 피치시프트 비용(다중 음 화음 만들 때)과 결과 악보의 가로 스크롤 UX를 고려한 상한.
     private let quickRecordMaxDuration: Double = 30.0
+    // 녹음 중 마이크 헤일로 애니메이션용 실시간 음량(0~1로 정규화). VoiceActivityDetector와 같은
+    // 방식(제곱평균제곱근)으로 매 프레임 계산해서 QuickRecordView에 넘긴다.
+    @State private var recordingLevel: Float = 0
+    // 정상적으로 노래할 때 나올 법한 RMS 상한 — 이걸로 나눠서 0~1로 정규화한다. 아이패드
+    // 실기기에서 가까이 대고 불러도 최대 진폭(peak)이 0.01 안팎으로 실측됐다(stopQuickRecording
+    // 참고, "노래 인식 안 됨" 진단 과정에서 추측 아닌 실측으로 확인됨) — RMS는 보통 peak보다
+    // 낮으므로(사인파 기준 peak/√2, 실제 발성은 더 낮음) 그보다 한 자릿수 작게 잡았다. 기기별
+    // 마이크 게인 차이가 있을 수 있어 여전히 시작점 — 헤일로가 너무 안 커지거나 바로 최대치로
+    // 붙어버리면 이 값을 조정하면 된다.
+    private let recordingLevelNormalization: Float = 0.006
 
     // 마이크가 지금 실제로 열려 있는지(오디오 엔진이 돌고 있는지)만 추적하는 내부 플래그다 —
     // beginCapturingIfNeeded()의 중복 시작 방지용일 뿐, UI 활성/비활성 판단에는 쓰지 않는다.
@@ -160,7 +170,7 @@ struct PracticeView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
-                        captureHero
+                        captureHero(prominent: false)
                             .id("captureCard")
 
                         // 악보(VexFlow 오선보) — 첫 녹음 분석이 끝나기 전엔 보여줄 게 없다.
@@ -206,41 +216,113 @@ struct PracticeView: View {
         }
     }
 
-    // MARK: - 아이패드(레귤러) 레이아웃 — 왼쪽 녹음/재생/채점, 오른쪽 악보(상시 큼) 두 열
+    // MARK: - 아이패드(레귤러) 레이아웃 — 2단계 상태 구조
+    //
+    // 1단계(대기/녹음 중, hasCapturedNote == false): 화면 중앙에 대형 히어로 마이크 버튼+파형만
+    // 보이는 1컬럼. 2단계(분석 완료 후): 왼쪽(녹음 상태 요약+재생+채점)/오른쪽(악보, 상시 큼)
+    // 2컬럼 스플릿으로 전환. 상단 툴바에 "홈으로"(완전 리셋, 1컬럼 대기 화면으로)와 "다시
+    // 녹음"(기존 좌측 맥락은 유지한 채 즉시 마이크 재가동, 우측 악보만 분석 완료 시 갱신)을 분리.
 
     private var regularLayout: some View {
         NavigationStack {
-            HStack(alignment: .top, spacing: Theme.Spacing.lg) {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
-                        captureHero
-
-                        if melodySession.suggestedHarmony != nil {
-                            voiceHarmonyPanel
-                            scoringCard
-                        }
-                    }
-                    .padding()
-                    .animation(.easeOut(duration: 0.3), value: hasHarmony)
+            Group {
+                if hasCapturedNote {
+                    regularSplitStage
+                } else {
+                    regularHeroStage
                 }
-                // 아이폰 카드 폭과 비슷하게 고정 — QuickRecordView 등 기존 서브뷰가 이 폭에서
-                // 이미 잘 보이도록 만들어져 있어서(컴팩트 레이아웃과 같은 폭), 그대로 재사용해도
-                // 어색하지 않다.
-                .frame(width: 380)
-
-                Group {
-                    if hasCapturedNote {
-                        sheetMusicPanel(fillAvailable: true)
-                    } else {
-                        sheetMusicEmptyState
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .padding()
             .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle("연습")
+            .toolbar {
+                if hasCapturedNote {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            resetSession()
+                        } label: {
+                            Label("홈으로", systemImage: "chevron.left")
+                        }
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            // 다시 녹음: 세션 컨텍스트(악보/믹서/채점 기록)는 그대로 두고 마이크만
+                            // 즉시 재가동한다 — startQuickRecording()이 hasCapturedNote/melodySteps를
+                            // 건드리지 않아서, 새 분석이 끝나야(applyQuickRecordResult) 우측 악보가
+                            // 그때 가서 자연스럽게 갱신된다("홈으로"의 완전 리셋과 다른 지점).
+                            startQuickRecording()
+                        } label: {
+                            Label("다시 녹음", systemImage: "arrow.counterclockwise")
+                        }
+                        .disabled(quickRecordPhase == .recording || quickRecordPhase == .analyzing)
+                    }
+                }
+            }
         }
+    }
+
+    /// 1단계 — 아직 아무것도 캡처하기 전. 다른 패널 없이 화면 중앙에 큰 히어로 버튼+파형만 둬서
+    /// "여기서 시작하면 된다"는 게 한눈에 보이게 한다(컴팩트 레이아웃의 카드형과 달리, 넓은
+    /// 화면을 살려 더 크게).
+    private var regularHeroStage: some View {
+        VStack {
+            Spacer()
+            captureHero(prominent: true)
+                .frame(maxWidth: 560)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
+    }
+
+    /// 2단계 — 왼쪽(녹음 상태+내 목소리로 화음+채점)/오른쪽(악보, 상시 큼) 두 열.
+    private var regularSplitStage: some View {
+        HStack(alignment: .top, spacing: Theme.Spacing.lg) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                    // showsInlineRetry: false — "다시 녹음"은 이제 툴바가 전담한다. 이 카드 안에도
+                    // 같은 이름의 버튼을 남겨두면 툴바 버전과 의미가 갈려서(하나는 컨텍스트 유지,
+                    // 하나는 완전 리셋) 헷갈린다.
+                    captureHero(prominent: false, showsInlineRetry: false)
+
+                    if melodySession.suggestedHarmony != nil {
+                        voiceHarmonyPanel
+                        scoringCard
+                    }
+                }
+                .padding()
+                .animation(.easeOut(duration: 0.3), value: hasHarmony)
+            }
+            // 아이폰 카드 폭과 비슷하게 고정 — QuickRecordView 등 기존 서브뷰가 이 폭에서
+            // 이미 잘 보이도록 만들어져 있어서(컴팩트 레이아웃과 같은 폭), 그대로 재사용해도
+            // 어색하지 않다.
+            .frame(width: 380)
+
+            rightPanel
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .padding()
+    }
+
+    /// "다시 녹음" 중(우측 악보는 새 분석이 끝날 때까지 대기 상태)이면 진행 표시를, 아니면
+    /// 실제 악보를 보여준다 — 이전 녹음의 악보를 그대로 둔 채 새로 녹음하면 "지금 보이는 게
+    /// 방금 부른 거냐, 예전 거냐" 헷갈릴 수 있어서 명확히 구분했다.
+    @ViewBuilder
+    private var rightPanel: some View {
+        if quickRecordPhase == .recording || quickRecordPhase == .analyzing {
+            sheetMusicRerecordingPlaceholder
+        } else {
+            sheetMusicPanel(fillAvailable: true)
+        }
+    }
+
+    private var sheetMusicRerecordingPlaceholder: some View {
+        VStack(spacing: Theme.Spacing.sm) {
+            ProgressView()
+            Text(quickRecordPhase == .analyzing ? "새로 부른 노래를 분석하는 중이에요" : "다시 녹음하는 중이에요")
+                .font(Theme.Typography.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - 두 레이아웃이 공유하는 섹션
@@ -248,8 +330,12 @@ struct PracticeView: View {
     /// 캡처 영역 — 여기서부터 흐름이 시작된다. 빠른 녹음이 연습의 유일한 진입점이라 카드
     /// 크롬(제목바/테두리) 없이 화면의 주인공이 되는 히어로 레이아웃을 쓴다(QuickRecordView가
     /// 스스로 대기/녹음 중 상태를 꾸민다).
+    /// - Parameters:
+    ///   - prominent: 아이패드 1단계 대기 화면처럼 이 뷰가 화면의 유일한 주인공일 때 크게.
+    ///   - showsInlineRetry: 결과/에러 상태의 "다시 녹음" 인라인 버튼 노출 여부(기본 true, 아이폰은
+    ///     항상 유지). 아이패드 2단계에서만 false로 꺼서 툴바의 "다시 녹음"과 의미가 안 겹치게 한다.
     @ViewBuilder
-    private var captureHero: some View {
+    private func captureHero(prominent: Bool, showsInlineRetry: Bool = true) -> some View {
         if micPermissionDenied {
             micPermissionDeniedContent
         } else {
@@ -261,7 +347,10 @@ struct PracticeView: View {
                 onStart: startQuickRecording,
                 onStop: stopQuickRecording,
                 onCancel: cancelQuickRecording,
-                onReset: resetSession
+                onReset: resetSession,
+                prominent: prominent,
+                currentLevel: recordingLevel,
+                showsInlineRetry: showsInlineRetry
             )
         }
     }
@@ -291,20 +380,6 @@ struct PracticeView: View {
             .frame(maxWidth: .infinity, maxHeight: fillAvailable ? .infinity : nil, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: fillAvailable ? .infinity : nil)
-    }
-
-    /// 아직 녹음이 없을 때 아이패드 오른쪽 패널에 보여주는 빈 상태 — 애플 앱들의 디테일
-    /// 패널(선택된 항목이 없을 때) 관례와 같다.
-    private var sheetMusicEmptyState: some View {
-        VStack(spacing: Theme.Spacing.sm) {
-            Image(systemName: "pianokeys")
-                .font(.system(size: 40))
-                .foregroundStyle(.tertiary)
-            Text("녹음이 완료되면 여기에 악보가 나와요")
-                .font(Theme.Typography.subheadline)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var voiceHarmonyPanel: some View {
@@ -483,6 +558,13 @@ struct PracticeView: View {
                 if quickRecordPhase == .recording {
                     quickRecordBuffer.append(contentsOf: rawSamples)
                     quickRecordSampleRate = rawSampleRate
+                    // 헤일로 애니메이션용 실시간 음량 — VoiceActivityDetector와 같은 방식(제곱
+                    // 평균제곱근)으로 이번 프레임만의 순간 음량을 계산한다(누적 버퍼 전체가 아니라
+                    // rawSamples만 봐야 "지금 이 순간"이 반영된다).
+                    if !rawSamples.isEmpty {
+                        let meanSquare = rawSamples.reduce(Float(0)) { $0 + $1 * $1 } / Float(rawSamples.count)
+                        recordingLevel = min(1, sqrt(meanSquare) / recordingLevelNormalization)
+                    }
                     if Double(quickRecordBuffer.count) / rawSampleRate >= quickRecordMaxDuration {
                         stopQuickRecording()
                     }
@@ -525,6 +607,7 @@ struct PracticeView: View {
         audioCapture.stop()
         isCapturing = false
         quickRecordPhase = .analyzing
+        recordingLevel = 0
 
         // 마이크 원본 신호의 크기가 기기마다 크게 다를 수 있다 — `.measurement` 모드는 AGC를
         // 꺼서 원본 게인이 그대로 드러나는데, 아이패드 실기기에서 가까이 대고 불러도 최대
@@ -549,6 +632,7 @@ struct PracticeView: View {
         isCapturing = false
         quickRecordBuffer = []
         quickRecordPhase = .idle
+        recordingLevel = 0
     }
 
     /// RecordingAnalyzer의 배치 분석 결과를, 기존 UI가 그대로 소비할 수 있는 상태로 반영한다.
@@ -780,5 +864,6 @@ struct PracticeView: View {
         statusText = ""
         quickRecordPhase = .idle
         quickRecordBuffer = []
+        recordingLevel = 0
     }
 }

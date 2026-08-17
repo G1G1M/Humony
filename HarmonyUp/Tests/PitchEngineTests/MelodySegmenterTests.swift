@@ -96,4 +96,77 @@ final class MelodySegmenterTests: XCTestCase {
         let samples = sineWave(midiNote: 69, sampleCount: 512)
         XCTAssertTrue(MelodySegmenter.segment(samples: samples, sampleRate: sampleRate).isEmpty)
     }
+
+    // MARK: - 중앙값 필터(medianFiltered)
+
+    func testMedianFilterSmoothsSingleFrameOutlier() {
+        // 순간적으로 옥타브 위로 튄 프레임 하나(비브라토/옥타브 오검출을 흉내) — 앞뒤 값에
+        // 묻혀서 사라져야 한다.
+        let notes: [Int?] = [60, 60, 72, 60, 60]
+        XCTAssertEqual(MelodySegmenter.medianFiltered(midiNotes: notes, radius: 1), [60, 60, 60, 60, 60])
+    }
+
+    func testMedianFilterPreservesSilenceGaps() {
+        // 무음(nil) 자리는 이웃 음의 중앙값 계산에 섞이지 않고 그대로 nil로 남아야 한다 —
+        // 안 그러면 음 경계가 무뎌진다.
+        let notes: [Int?] = [60, 60, nil, nil, 64, 64]
+        let filtered = MelodySegmenter.medianFiltered(midiNotes: notes, radius: 1)
+        XCTAssertNil(filtered[2])
+        XCTAssertNil(filtered[3])
+        XCTAssertEqual(filtered[0], 60)
+        XCTAssertEqual(filtered[5], 64)
+    }
+
+    func testMedianFilterWithZeroRadiusReturnsUnchanged() {
+        let notes: [Int?] = [60, 72, 60]
+        XCTAssertEqual(MelodySegmenter.medianFiltered(midiNotes: notes, radius: 0), notes)
+    }
+
+    func testMedianFilterOnEmptyArrayReturnsEmpty() {
+        XCTAssertTrue(MelodySegmenter.medianFiltered(midiNotes: [], radius: 1).isEmpty)
+    }
+
+    func testMedianFilterAtBoundaryUsesAvailableNeighborsOnly() {
+        // 배열 맨 앞이라 왼쪽 이웃이 없는 경우 — 있는 이웃(자신+오른쪽)만으로 중앙값을 내야 하고,
+        // 범위를 벗어나 크래시가 나면 안 된다. 정렬한 [60, 72]는 원소가 짝수 개라 뒤쪽(index 1)인
+        // 72가 중앙값이 된다(medianFiltered 구현이 뒤쪽을 택하는 것과 일치).
+        let notes: [Int?] = [72, 60, 60]
+        let filtered = MelodySegmenter.medianFiltered(midiNotes: notes, radius: 1)
+        XCTAssertEqual(filtered[0], 72)
+    }
+
+    // MARK: - 통합: MelodySegmenter -> RhythmQuantizer/ChordGenerator로 이어지는지
+
+    func testFilteredNoteSequenceFlowsIntoRhythmQuantizerAndChordGenerator() {
+        // 무음 간격을 두고 C-D-E-F(온음계 순차 진행)를 부른 것을 흉내낸다.
+        let melodyMIDINotes = [60, 62, 64, 65]
+        var samples: [Float] = []
+        for midiNote in melodyMIDINotes {
+            samples += sineWave(midiNote: midiNote, sampleCount: 8192)
+            samples += silence(sampleCount: 2048)
+        }
+
+        let segmented = MelodySegmenter.segment(samples: samples, sampleRate: sampleRate)
+        XCTAssertEqual(segmented.map(\.midiNote), melodyMIDINotes)
+
+        // RhythmQuantizer로 실제 길이(초)가 그대로 전달되는지 — 개수가 어긋나면 이후 성부별
+        // 정렬(measureBreaks 공유)이 깨진다.
+        let quantized = RhythmQuantizer.quantize(durations: segmented.map(\.duration))
+        XCTAssertEqual(quantized.count, segmented.count)
+
+        // KeyDetector -> ChordGenerator로 화음까지 이어지는지.
+        let weightedNotes = segmented.map {
+            KeyDetector.WeightedNote(pitchClass: $0.midiNote % 12, duration: $0.duration)
+        }
+        guard let key = KeyDetector.detectKey(notes: weightedNotes) else {
+            XCTFail("조성 판별 실패")
+            return
+        }
+        let harmonized = ChordGenerator.harmonizeSequence(
+            melodyNotes: segmented.map { ($0.midiNote, $0.duration) },
+            key: key
+        )
+        XCTAssertEqual(harmonized.count, segmented.count)
+        XCTAssertNotNil(harmonized.first ?? nil) // 첫 음(도, 근음)엔 화음이 배정돼야 한다
+    }
 }

@@ -27,10 +27,22 @@ struct QuickRecordView: View {
     let onStop: () -> Void
     let onCancel: () -> Void
     let onReset: () -> Void
+    // 아이패드처럼 이 뷰가 화면의 유일한 주인공으로 넓게 놓일 때 큰 화면에 맞춰 살짝 키운다 —
+    // 아이폰(컴팩트 레이아웃)에서는 기존 크기를 그대로 유지해서 회귀가 없게 한다.
+    var prominent: Bool = false
+    // 녹음 중 실시간 음량(0~1로 정규화, `AudioCapture` 콜백에서 매 프레임 계산) — 마이크가
+    // 지금 실제로 소리를 듣고 있다는 걸 헤일로 링이 목소리 크기에 맞춰 부드럽게 커지는 것으로
+    // 보여준다. 파형(WaveformView)과 상호보완적: 파형은 "지금까지의 모양", 헤일로는 "지금 이 순간".
+    var currentLevel: Float = 0
+    // 결과/에러 카드의 인라인 "다시 녹음" 버튼 노출 여부. 아이패드 2단계 스플릿에서는 같은
+    // 이름의 다른 동작(컨텍스트 유지 재녹음)을 상단 툴바가 전담해서 false로 끈다 — 나머지
+    // 모든 경우(아이폰 포함)는 기본값 true로 기존 동작 그대로.
+    var showsInlineRetry: Bool = true
 
-    private let heroButtonDiameter: CGFloat = 128
-    private let stopButtonDiameter: CGFloat = 88
-    private let cancelButtonDiameter: CGFloat = 56
+    private var heroButtonDiameter: CGFloat { prominent ? 168 : 128 }
+    private var stopButtonDiameter: CGFloat { prominent ? 108 : 88 }
+    private var cancelButtonDiameter: CGFloat { prominent ? 64 : 56 }
+    private var waveformHeight: CGFloat { prominent ? 200 : 140 }
 
     var body: some View {
         Group {
@@ -53,7 +65,7 @@ struct QuickRecordView: View {
     // MARK: - 대기
 
     private var idleContent: some View {
-        VStack(spacing: Theme.Spacing.xl) {
+        VStack(spacing: prominent ? Theme.Spacing.xl * 1.4 : Theme.Spacing.xl) {
             VStack(spacing: Theme.Spacing.sm) {
                 Text("노래 한 소절을 녹음해보세요")
                     .font(Theme.Typography.largeTitleBold)
@@ -90,7 +102,7 @@ struct QuickRecordView: View {
         VStack(spacing: Theme.Spacing.lg) {
             ZStack(alignment: .bottomTrailing) {
                 WaveformView(samples: waveformSamples)
-                    .frame(height: 140)
+                    .frame(height: waveformHeight)
                     .padding(Theme.Spacing.md)
                     .frame(maxWidth: .infinity)
                     .background(
@@ -126,6 +138,15 @@ struct QuickRecordView: View {
 
                 Button(action: onStop) {
                     ZStack {
+                        // 마이크가 지금 듣고 있는 음량에 맞춰 부드럽게 커지는 헤일로 — 값이 튈 때마다
+                        // 뚝뚝 끊기지 않도록 짧은 애니메이션을 건다(WaveformView의 0.08초 관례와 동일).
+                        Circle()
+                            .fill(Color.red.opacity(0.16 + Double(currentLevel) * 0.22))
+                            .frame(
+                                width: stopButtonDiameter + 20 + CGFloat(currentLevel) * 44,
+                                height: stopButtonDiameter + 20 + CGFloat(currentLevel) * 44
+                            )
+                            .animation(.easeOut(duration: 0.08), value: currentLevel)
                         Circle()
                             .fill(Color.red)
                             .frame(width: stopButtonDiameter, height: stopButtonDiameter)
@@ -168,10 +189,12 @@ struct QuickRecordView: View {
                 .font(Theme.Typography.subheadlineBold)
                 .foregroundStyle(Theme.pitchGood)
 
-            Button(action: onReset) {
-                Label("다시 녹음", systemImage: "arrow.counterclockwise")
+            if showsInlineRetry {
+                Button(action: onReset) {
+                    Label("다시 녹음", systemImage: "arrow.counterclockwise")
+                }
+                .buttonStyle(.bordered)
             }
-            .buttonStyle(.bordered)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(Theme.Spacing.md)
@@ -187,10 +210,12 @@ struct QuickRecordView: View {
                 .font(Theme.Typography.subheadline)
                 .foregroundStyle(.orange)
 
-            Button(action: onReset) {
-                Label("다시 녹음", systemImage: "arrow.counterclockwise")
+            if showsInlineRetry {
+                Button(action: onReset) {
+                    Label("다시 녹음", systemImage: "arrow.counterclockwise")
+                }
+                .buttonStyle(.bordered)
             }
-            .buttonStyle(.bordered)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(Theme.Spacing.md)

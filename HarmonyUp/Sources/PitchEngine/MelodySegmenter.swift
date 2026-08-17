@@ -27,6 +27,11 @@ enum MelodySegmenter {
         var streakRequired: Int = 3
         // 이보다 짧게 지속된 구간은 숨소리/발음 전환 같은 잡음으로 보고 버린다(초 단위).
         var minimumNoteDuration: Double = 0.08
+        // 중앙값 필터의 반경 — 1이면 앞뒤 1윈도우씩 총 3윈도우, 2면 5윈도우를 보고 중앙값을 낸다.
+        // 순간적인 옥타브 도약이나 비브라토가 반음 경계를 살짝 넘나들며 반올림 MIDI 노트가
+        // 프레임 하나짜리로 튀는 잔떨림을 완만하게 다듬는 목적. 너무 크게 잡으면(예: 4~5) 실제로
+        // 짧게 지나가는 음까지 뭉갤 수 있어서 기본값은 보수적으로 3윈도우(약 35ms)로 잡았다.
+        var medianFilterRadius: Int = 1
         var yinConfiguration: YINPitchDetector.Configuration = .default
         var vadConfiguration: VoiceActivityDetector.Configuration = .default
 
@@ -39,9 +44,11 @@ enum MelodySegmenter {
         let windows = analyzeWindows(samples: samples, sampleRate: sampleRate, configuration: configuration)
         guard !windows.isEmpty else { return [] }
 
-        // 디바운스 -> 런랭스 인코딩, 두 단계로 나누면("이 값이 확정됐는지"와 "확정된 값들을 구간으로
-        // 묶기"를 분리) 한 번에 다 처리하는 것보다 각 단계를 따로 검증하기 쉽다.
-        let debounced = debounce(windows.map(\.midiNote), streakRequired: configuration.streakRequired)
+        // 중앙값 필터 -> 디바운스 -> 런랭스 인코딩, 세 단계로 나누면 각 단계를 따로 검증하기 쉽다.
+        // 중앙값 필터를 디바운스보다 먼저 적용하는 이유: 디바운스는 "연속으로 같은 값"만 확정하므로,
+        // 중앙값 필터가 먼저 튀는 프레임을 눌러줘야 디바운스가 볼 스트릭이 애초에 더 깨끗해진다.
+        let smoothed = medianFiltered(midiNotes: windows.map(\.midiNote), radius: configuration.medianFilterRadius)
+        let debounced = debounce(smoothed, streakRequired: configuration.streakRequired)
 
         return runLengthEncode(
             debounced,
@@ -80,7 +87,26 @@ enum MelodySegmenter {
         return results
     }
 
-    // MARK: - 2단계: 디바운스
+    // MARK: - 2단계: 중앙값 필터
+
+    /// 반올림된 MIDI 노트 스트림에서, 순간적으로 튀는 값(옥타브 도약 잔여 오류, 비브라토가
+    /// 반음 경계를 살짝 넘나드는 잔떨림)을 주변 프레임들의 중앙값으로 완화한다. nil(무음/미검출)인
+    /// 자리는 그대로 nil로 둔다 — 무음 구간을 이웃 음의 중앙값 계산에 섞으면 음 경계가 무뎌지므로,
+    /// 값이 있는 이웃끼리만 모아서 중앙값을 낸다.
+    static func medianFiltered(midiNotes: [Int?], radius: Int) -> [Int?] {
+        guard radius > 0, !midiNotes.isEmpty else { return midiNotes }
+
+        return midiNotes.indices.map { i -> Int? in
+            guard midiNotes[i] != nil else { return nil }
+            let lowerBound = max(0, i - radius)
+            let upperBound = min(midiNotes.count - 1, i + radius)
+            let neighborhood = midiNotes[lowerBound...upperBound].compactMap { $0 }.sorted()
+            guard !neighborhood.isEmpty else { return midiNotes[i] }
+            return neighborhood[neighborhood.count / 2]
+        }
+    }
+
+    // MARK: - 3단계: 디바운스
 
     /// 같은 값이 `streakRequired`번 연속 나와야 "확정"되고, 그 전까지는(스트릭이 덜 찼거나 값이
     /// 막 바뀐 과도구간) 미확정(nil)으로 취급한다. 비브라토처럼 반음 근처에서 살짝살짝 흔들리는
@@ -109,7 +135,7 @@ enum MelodySegmenter {
         return result
     }
 
-    // MARK: - 3단계: 런랭스 인코딩 -> SegmentedNote
+    // MARK: - 4단계: 런랭스 인코딩 -> SegmentedNote
 
     private static func runLengthEncode(
         _ debouncedNotes: [Int?],
