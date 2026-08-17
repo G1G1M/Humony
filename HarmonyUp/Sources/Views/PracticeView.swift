@@ -712,8 +712,15 @@ struct PracticeView: View {
         // 인식되지 않았어요"로 이어졌다. "내 목소리로 화음" 재생 직전에 쓰던 것과 같은
         // `AudioGain.normalizeLoudness`를 분석 직전에도 적용해서, 이후 파이프라인(VAD/YIN)이
         // 기기별 원본 게인 차이에 휘둘리지 않게 한다.
+        let rawPeak = quickRecordBuffer.map { abs($0) }.max() ?? 0
         let samples = AudioGain.normalizeLoudness(quickRecordBuffer)
         let rate = quickRecordSampleRate
+        #if DEBUG
+        // 입력 자체(정규화 전 원본 최대 진폭 + 녹음 길이)를 먼저 찍어서, 이후 MelodySegmenter의
+        // 단계별 로그(원본 -> 중앙값 필터 -> 디바운스 -> 최종 음표)와 대조해 "부른 음보다 악보에
+        // 음표가 더 많이 나온다" 같은 문제를 어느 단계에서 조사할지 좁힐 수 있게 한다.
+        print("[PracticeView] 녹음 종료 — 길이 \(String(format: "%.2fs", Double(quickRecordBuffer.count) / rate)), 원본 최대 진폭 \(String(format: "%.5f", rawPeak))")
+        #endif
         Task {
             let analyzed = RecordingAnalyzer.analyze(recordingSamples: samples, sampleRate: rate)
             applyQuickRecordResult(analyzed)

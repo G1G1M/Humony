@@ -135,6 +135,109 @@ final class MelodySegmenterTests: XCTestCase {
         XCTAssertEqual(filtered[0], 72)
     }
 
+    // MARK: - 짧은 과도구간 흡수(absorbShortRuns) — 실기기 로그로 실측한 실제 패턴 기반
+
+    func testAbsorbShortRunsMergesPortamentoIntoEquidistantPreviousNeighbor() {
+        // 실기기 로그 실측: "도 레 미 파 솔"을 불렀을 때 레(D3)에서 미(E3)로 넘어가는 사이
+        // 반음 위(D#3) 슬라이드가 0.09초나 지속돼 중앙값 필터로도 안 걸러지고 독립된 음표로
+        // 남았다. D#3는 D3/E3 양쪽에서 정확히 반음씩 떨어져 있어(거리 동률) 이전 음(D3)으로
+        // 합쳐져야 한다.
+        let notes = [
+            MelodySegmenter.SegmentedNote(midiNote: 62, onsetTime: 0.0, duration: 0.43, averageConfidence: 0.9),   // D3
+            MelodySegmenter.SegmentedNote(midiNote: 63, onsetTime: 0.43, duration: 0.09, averageConfidence: 0.5),  // D#3, 과도구간
+            MelodySegmenter.SegmentedNote(midiNote: 64, onsetTime: 0.52, duration: 0.33, averageConfidence: 0.9)   // E3
+        ]
+
+        let result = MelodySegmenter.absorbShortRuns(notes, minimumDuration: 0.18)
+
+        XCTAssertEqual(result.map(\.midiNote), [62, 64])
+        // D3가 D#3의 구간까지 흡수해서 늘어나야 한다(끝이 원래 D#3의 끝과 같아짐).
+        XCTAssertEqual(result[0].duration, 0.52, accuracy: 0.001)
+        XCTAssertEqual(result[0].onsetTime, 0.0, accuracy: 0.001)
+    }
+
+    func testAbsorbShortRunsCascadesFlickeringNeighborsIntoOneNote() {
+        // 실기기 로그 실측: 솔(G3)을 길게 부를 때 반음 경계(G3/G#3) 바로 근처라 YIN 반올림이
+        // 여러 번 왔다갔다(G3 G#3 G3 G#3 G3...)해서 짧은 음표 여러 개로 쪼개졌다. 전부 하나의
+        // 음(G3 계열)으로 수렴해야 한다 — 반복적으로 가장 짧은 후보부터 흡수해나가는 게 이걸
+        // 처리할 수 있는지 확인.
+        let notes = [
+            MelodySegmenter.SegmentedNote(midiNote: 55, onsetTime: 0.0, duration: 0.10, averageConfidence: 0.6),  // G3
+            MelodySegmenter.SegmentedNote(midiNote: 56, onsetTime: 0.10, duration: 0.09, averageConfidence: 0.5), // G#3
+            MelodySegmenter.SegmentedNote(midiNote: 55, onsetTime: 0.19, duration: 0.10, averageConfidence: 0.6), // G3
+            MelodySegmenter.SegmentedNote(midiNote: 55, onsetTime: 0.29, duration: 0.12, averageConfidence: 0.6), // G3
+            MelodySegmenter.SegmentedNote(midiNote: 56, onsetTime: 0.41, duration: 0.15, averageConfidence: 0.5)  // G#3
+        ]
+
+        let result = MelodySegmenter.absorbShortRuns(notes, minimumDuration: 0.18)
+
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result[0].onsetTime, 0.0, accuracy: 0.001)
+        XCTAssertEqual(result[0].duration, 0.56, accuracy: 0.001) // 전체 구간(0.0~0.56)을 다 흡수
+    }
+
+    func testAbsorbShortRunsDropsOrphanNoteWithNoNeighbors() {
+        // 녹음 전체가 짧은 음 하나뿐이면(흡수할 이웃이 없음) 버리는 수밖에 없다.
+        let notes = [MelodySegmenter.SegmentedNote(midiNote: 64, onsetTime: 0.0, duration: 0.05, averageConfidence: 0.5)]
+
+        XCTAssertTrue(MelodySegmenter.absorbShortRuns(notes, minimumDuration: 0.18).isEmpty)
+    }
+
+    func testAbsorbShortRunsKeepsNotesAlreadyAboveThreshold() {
+        let notes = [
+            MelodySegmenter.SegmentedNote(midiNote: 60, onsetTime: 0.0, duration: 0.3, averageConfidence: 0.9),
+            MelodySegmenter.SegmentedNote(midiNote: 62, onsetTime: 0.3, duration: 0.3, averageConfidence: 0.9)
+        ]
+
+        XCTAssertEqual(MelodySegmenter.absorbShortRuns(notes, minimumDuration: 0.18), notes)
+    }
+
+    // MARK: - 흡수 이후 동일 음높이 병합(mergeAdjacentSamePitch)
+
+    func testMergeAdjacentSamePitchCombinesTwins() {
+        let notes = [
+            MelodySegmenter.SegmentedNote(midiNote: 48, onsetTime: 0.0, duration: 0.3, averageConfidence: 0.8),
+            MelodySegmenter.SegmentedNote(midiNote: 48, onsetTime: 0.3, duration: 0.25, averageConfidence: 0.8)
+        ]
+
+        let result = MelodySegmenter.mergeAdjacentSamePitch(notes)
+
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result[0].midiNote, 48)
+        XCTAssertEqual(result[0].onsetTime, 0.0, accuracy: 0.001)
+        XCTAssertEqual(result[0].duration, 0.55, accuracy: 0.001)
+    }
+
+    func testMergeAdjacentSamePitchLeavesDifferentPitchesAlone() {
+        let notes = [
+            MelodySegmenter.SegmentedNote(midiNote: 48, onsetTime: 0.0, duration: 0.3, averageConfidence: 0.8),
+            MelodySegmenter.SegmentedNote(midiNote: 50, onsetTime: 0.3, duration: 0.3, averageConfidence: 0.8)
+        ]
+
+        XCTAssertEqual(MelodySegmenter.mergeAdjacentSamePitch(notes), notes)
+    }
+
+    func testAbsorbThenMergeReproducesRealWorldGlitchInsideSustainedNote() {
+        // 실기기 로그 실측: "도"(C3)를 부르는 도중 순간적으로 옥타브 아래(B2)로 3윈도우(~0.07초)
+        // 튀었다가 다시 C3로 돌아온 경우 — "C3, B2(짧음), C3" 세 후보가 만들어지는데, B2를
+        // 앞쪽 C3로 흡수하고 나면 "C3, C3"가 나란히 남는다. 이걸 다시 하나로 합쳐야 사용자가
+        // 실제로 부른 "도 하나"와 결과가 일치한다.
+        let candidates = [
+            MelodySegmenter.SegmentedNote(midiNote: 48, onsetTime: 0.0, duration: 0.30, averageConfidence: 0.8),  // C3
+            MelodySegmenter.SegmentedNote(midiNote: 47, onsetTime: 0.30, duration: 0.07, averageConfidence: 0.4), // B2, 잡음
+            MelodySegmenter.SegmentedNote(midiNote: 48, onsetTime: 0.37, duration: 0.30, averageConfidence: 0.8)  // C3
+        ]
+
+        let result = MelodySegmenter.mergeAdjacentSamePitch(
+            MelodySegmenter.absorbShortRuns(candidates, minimumDuration: 0.18)
+        )
+
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result[0].midiNote, 48)
+        XCTAssertEqual(result[0].onsetTime, 0.0, accuracy: 0.001)
+        XCTAssertEqual(result[0].duration, 0.67, accuracy: 0.001)
+    }
+
     // MARK: - 통합: MelodySegmenter -> RhythmQuantizer/ChordGenerator로 이어지는지
 
     func testFilteredNoteSequenceFlowsIntoRhythmQuantizerAndChordGenerator() {
