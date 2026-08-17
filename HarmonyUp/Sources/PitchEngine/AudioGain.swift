@@ -34,29 +34,6 @@ enum AudioGain {
         return samples.map { $0 * gain }
     }
 
-    /// 여러 트랙(예: 원음 + 베이스 + 3도 + 5도로 각각 피치 시프트한 목소리)을 하나로 합친다.
-    /// 트랙마다 길이가 살짝 다를 수 있어서(피치 시프트 특성상) 가장 짧은 길이에 맞춘다.
-    ///
-    /// 합치기 "전에" 각 트랙을 같은 체감 음량(RMS)으로 맞춘다 — 안 그러면 어떤 트랙(예: 피치를
-    /// 적게 옮긴 성부)은 원본 진폭을 거의 그대로 유지하고, 다른 트랙은 WSOLA 처리로 진폭 특성이
-    /// 달라져서, 합친 소리를 피크 기준으로 한 번만 정규화했을 때 성부마다 체감 음량이 들쭉날쭉해질
-    /// 수 있다(우연히 순간적으로 큰 피크를 낸 트랙 하나가 전체 게인을 결정해버림). 합친 뒤엔
-    /// 클리핑 방지용으로만 피크를 다시 낮춘다(체감 음량은 이미 위 단계에서 맞춰졌으므로).
-    static func mixAndNormalize(_ tracks: [[Float]], targetPeak: Float = 0.95) -> [Float] {
-        let nonEmptyTracks = tracks.filter { !$0.isEmpty }
-        guard let minLength = nonEmptyTracks.map(\.count).min(), minLength > 0 else { return [] }
-
-        let balancedTracks = nonEmptyTracks.map { normalizeLoudness($0) }
-
-        var mixed = [Float](repeating: 0, count: minLength)
-        for track in balancedTracks {
-            for i in 0..<minLength {
-                mixed[i] += track[i]
-            }
-        }
-        return normalize(mixed, targetPeak: targetPeak)
-    }
-
     /// 버퍼의 맨 앞과 맨 뒤를 짧게 선형으로 0까지 줄인다("페이드 인/아웃") — 재생 시작/끝에서
     /// 나는 "뚝" 하는 클릭음을 없앤다. 녹음 버퍼는 원본 파형의 임의 지점에서 시작/끝나기 때문에,
     /// 그 경계에서 값이 0이 아닌 채로 갑자기 시작되거나 끊기면 스피커에서 그 불연속 자체가

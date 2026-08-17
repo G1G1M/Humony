@@ -786,15 +786,28 @@ struct PracticeView: View {
             let bass = VoiceDoubler.apply(to: bassShifted, sampleRate: rate, interval: .bass)
             let third = VoiceDoubler.apply(to: thirdShifted, sampleRate: rate, interval: .third)
             let fifth = VoiceDoubler.apply(to: fifthShifted, sampleRate: rate, interval: .fifth)
-            let tracks = includeMelody ? [recorded, bass, third, fifth] : [bass, third, fifth]
-            // 트랙들을 섞으면 각자보다 커지므로, mixAndNormalize가 합친 뒤 다시 피크 기준으로
-            // 정규화해서 트랙 개수에 상관없이 항상 비슷한 체감 음량이 되게 한다.
-            let mixed = AudioGain.mixAndNormalize(tracks)
-            let cleaned = AudioGain.applyFadeInOut(mixed, fadeSampleCount: Int(rate * voiceClipFadeDuration))
+
+            // 예전엔 트랙들을 Swift 배열 단계에서 미리 하나로 합쳐서(AudioGain.mixAndNormalize)
+            // 재생했는데, 그러면 4성부가 전부 같은 위치(모노)에서만 나와서 서로 뭉개져 들렸다.
+            // 이제 각 트랙을 자기 체감 음량으로만 맞추고(합치지 않음) VoiceClipPlayer.playTracks로
+            // 넘겨서, 각 성부가 실제로 다른 좌우 위치에서 동시에 나오게 한다(docs/CONCEPTS.md 52절).
+            let fadeCount = Int(rate * voiceClipFadeDuration)
+            func prepare(_ samples: [Float]) -> [Float] {
+                AudioGain.applyFadeInOut(AudioGain.normalizeLoudness(samples), fadeSampleCount: fadeCount)
+            }
+
+            var tracks: [(samples: [Float], pan: Float)] = [
+                (prepare(bass), ChordGenerator.Interval.bass.pan),
+                (prepare(third), ChordGenerator.Interval.third.pan),
+                (prepare(fifth), ChordGenerator.Interval.fifth.pan)
+            ]
+            if includeMelody {
+                tracks.append((prepare(recorded), 0.0)) // 리드 멜로디는 중앙
+            }
 
             do {
                 isPlayingVoiceClip = true
-                try voiceClipPlayer.play(samples: cleaned, sampleRate: rate) {
+                try voiceClipPlayer.playTracks(tracks, sampleRate: rate) {
                     isPlayingVoiceClip = false
                 }
                 statusText = includeMelody ? "내 목소리로 만든 전체 화음을 재생합니다" : "멜로디를 뺀 화음만 재생합니다"

@@ -1,80 +1,126 @@
 import AVFoundation
 
-/// 이미 만들어진 오디오 데이터([Float] 배열, 예: 피치 시프트된 사용자 목소리)를 한 번 재생한다.
+/// 이미 만들어진 오디오 데이터([Float] 배열, 예: 피치 시프트된 사용자 목소리)를 재생한다.
 /// TonePlayer가 매 샘플을 실시간으로 계산해서 합성하는 반면, 이건 완성된 파형을 그대로 재생만 한다.
+///
+/// 여러 성부를 "동시에, 각자 다른 좌우 위치(pan)로" 재생할 수 있다(docs/CONCEPTS.md 52절) —
+/// 리버브(`AVAudioUnitReverb`)는 입력을 하나만 받을 수 있어서, 성부 개수만큼의
+/// `AVAudioPlayerNode`를 중간 믹서(`voiceMixer`)로 먼저 합친 뒤 리버브로 보낸다:
+/// `player[0..3] → voiceMixer → reverb → mainMixerNode`.
 final class VoiceClipPlayer {
 
     private let engine = AVAudioEngine()
-    private let player = AVAudioPlayerNode()
+    // 이 앱에서 동시에 재생하는 성부는 최대 4개(리드 멜로디+베이스+3도+5도)라, 그만큼만
+    // 미리 만들어 재사용한다 — 호출마다 노드를 새로 attach/detach하면 그래프를 매번 바꿔야
+    // 해서 더 위험하다.
+    private let players: [AVAudioPlayerNode] = (0..<4).map { _ in AVAudioPlayerNode() }
+    private let voiceMixer = AVAudioMixerNode()
     private let reverb = AVAudioUnitReverb()
     private var isAttached = false
     // 재생 그래프가 지금 어떤 샘플레이트로 연결돼 있는지 — "다시 녹음"처럼 마이크 세션이
     // 재구성될 때마다 실제 하드웨어 샘플레이트가 달라질 수 있어서, 이 값이 바뀌면 연결을
-    // 다시 맺어야 한다(아래 설명 참고).
+    // 다시 맺어야 한다(docs/CONCEPTS.md 49절에서 겪은 버그, 여기서도 동일하게 적용).
     private var configuredSampleRate: Double?
 
-    /// - Parameter onFinished: 재생이 실제로 스피커까지 다 끝난 뒤 메인 스레드에서 호출된다.
-    ///   호출한 쪽이 "지금 화음이 재생 중이다"라는 상태를 정확히 켜고 끌 수 있게 해준다 —
-    ///   이게 없으면(예전 버전) 재생이 언제 끝나는지 알 방법이 없어서, 재생 중에도 마이크가
-    ///   계속 켜진 채로 남아있는 문제가 있었다(자세한 이유는 `docs/CONCEPTS.md` 26절 참고).
+    /// - Parameter onFinished: 재생이 실제로 스피커까지 다 끝난 뒤(재생한 트랙 전부) 메인
+    ///   스레드에서 한 번 호출된다.
     func play(samples: [Float], sampleRate: Double, onFinished: (() -> Void)? = nil) throws {
-        guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1) else { return }
+        try playTracks([(samples: samples, pan: 0.0)], sampleRate: sampleRate, onFinished: onFinished)
+    }
+
+    /// 여러 트랙을 동시에, 각자 지정한 pan(-1~1)으로 재생한다. 트랙 길이가 서로 달라도(피치
+    /// 시프트 특성상 흔함) 각자 자기 길이만큼만 재생되고 끝난다 — 예전(`AudioGain.mixAndNormalize`)
+    /// 처럼 Swift 배열 단계에서 미리 합칠 때만 필요했던 "가장 짧은 길이에 맞추기"가 더는
+    /// 필요 없다(하드웨어 믹서가 알아서 겹쳐 재생하므로).
+    /// - Parameter onFinished: 트랙 전부가 재생을 마친 뒤(가장 늦게 끝나는 트랙 기준) 메인
+    ///   스레드에서 한 번만 호출된다.
+    func playTracks(_ tracks: [(samples: [Float], pan: Float)], sampleRate: Double, onFinished: (() -> Void)? = nil) throws {
+        guard !tracks.isEmpty, tracks.count <= players.count else { return }
+        // 버퍼 자체는 모노(실제 녹음/합성 데이터 그대로)지만, 연결 포맷은 스테레오여야
+        // AVAudioPlayerNode의 pan이 실제로 좌우에 반영된다 — 모노 버퍼를 스테레오 연결에
+        // 흘려보내는 건 pan을 쓰기 위한 정석적인 방법이다.
+        guard let monoFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1),
+              let stereoFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2) else { return }
 
         if !isAttached {
-            engine.attach(player)
+            for player in players {
+                engine.attach(player)
+            }
+            engine.attach(voiceMixer)
             engine.attach(reverb)
             // 화음 성부들이 다 같은 공간에서 함께 부르는 듯한 일체감을 주는 공유 리버브
-            // (docs/CONCEPTS.md 49절) — 세게 걸면 오히려 성부 구분이 흐려지고 "울림 통에서
-            // 녹음한 것" 같아지므로, 은은하게(18%)만 섞어서 WORLD 합성의 미세한 기계음 느낌을
-            // 가리는 정도로만 쓴다.
+            // (docs/CONCEPTS.md 49절) — 세게 걸면 오히려 성부 구분이 흐려지므로 은은하게(18%)만.
             reverb.loadFactoryPreset(.mediumRoom)
             reverb.wetDryMix = 18
             isAttached = true
         }
 
-        // 연결 포맷을 최초 한 번만 고정해뒀더니, "다시 녹음"으로 마이크 세션이 재시작되면서
-        // 실제 하드웨어 샘플레이트가 이전 녹음과 달라진 경우(AudioCapture가 매 녹음마다
-        // setCategory/setActive를 다시 호출해 세션을 재구성함, docs/CONCEPTS.md 49절) 재생
-        // 그래프는 여전히 옛 샘플레이트로 연결돼 있어서 새 버퍼와 어긋나 조용히 재생이 실패하는
-        // 버그가 있었다. 요청받은 sampleRate가 지금 연결된 것과 다르면 매번 다시 연결한다 —
-        // 엔진이 돌고 있으면 먼저 멈춘 뒤에(재생 중 그래프를 바꾸면 안 되므로).
         if configuredSampleRate != sampleRate {
             if engine.isRunning {
                 engine.stop()
             }
-            engine.connect(player, to: reverb, format: format)
-            engine.connect(reverb, to: engine.mainMixerNode, format: format)
+            for player in players {
+                engine.connect(player, to: voiceMixer, format: stereoFormat)
+            }
+            engine.connect(voiceMixer, to: reverb, format: stereoFormat)
+            engine.connect(reverb, to: engine.mainMixerNode, format: stereoFormat)
             configuredSampleRate = sampleRate
         }
 
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)) else {
-            return
-        }
-
-        buffer.frameLength = AVAudioFrameCount(samples.count)
-        samples.withUnsafeBufferPointer { source in
-            guard let baseAddress = source.baseAddress else { return }
-            buffer.floatChannelData?[0].update(from: baseAddress, count: samples.count)
-        }
+        // 트랙을 여러 개 동시에 재생하면 하드웨어 믹서에서 그대로 더해져서 트랙 수만큼
+        // 커질 수 있다 — "동시에 울리는 신호를 합칠 때 진폭이 아니라 에너지가 더해진다"는
+        // 가정 하에 흔히 쓰는 등에너지(equal-power) 보정(1/√N)으로 대략적인 헤드룸을 둔다.
+        engine.mainMixerNode.outputVolume = Float(1.0 / Double(tracks.count).squareRoot())
 
         if !engine.isRunning {
             engine.prepare()
             try engine.start()
         }
 
-        // completionCallbackType을 .dataPlayedBack으로 지정해야 "버퍼를 재생 큐에 넘겼다"가
-        // 아니라 "실제로 스피커에서 소리가 다 나갔다" 시점에 콜백이 온다. 콜백 자체는 오디오
-        // 스레드에서 오므로, SwiftUI 상태를 건드리려면 메인 큐로 넘겨야 한다.
-        player.scheduleBuffer(buffer, at: nil, options: [], completionCallbackType: .dataPlayedBack) { _ in
+        // 트랙 전부가 끝나야 onFinished를 딱 한 번만 부른다.
+        var remaining = tracks.count
+        let onTrackFinished: () -> Void = {
             DispatchQueue.main.async {
-                onFinished?()
+                remaining -= 1
+                if remaining == 0 {
+                    onFinished?()
+                }
             }
         }
-        player.play()
+
+        for (index, track) in tracks.enumerated() {
+            let player = players[index]
+            player.pan = track.pan
+
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: monoFormat, frameCapacity: AVAudioFrameCount(track.samples.count)) else {
+                onTrackFinished()
+                continue
+            }
+            buffer.frameLength = AVAudioFrameCount(track.samples.count)
+            track.samples.withUnsafeBufferPointer { source in
+                guard let baseAddress = source.baseAddress else { return }
+                buffer.floatChannelData?[0].update(from: baseAddress, count: track.samples.count)
+            }
+
+            // completionCallbackType을 .dataPlayedBack으로 지정해야 "버퍼를 재생 큐에 넘겼다"가
+            // 아니라 "실제로 스피커에서 소리가 다 나갔다" 시점에 콜백이 온다.
+            player.scheduleBuffer(buffer, at: nil, options: [], completionCallbackType: .dataPlayedBack) { _ in
+                onTrackFinished()
+            }
+        }
+
+        // 여러 노드를 정확히 같은 샘플에서 시작시키는 건(AVAudioTime 기반) 이 용도(4개 성부를
+        // 몇 ms 오차 안에 함께 재생)엔 과한 정교함이라, 단순하게 바로 이어서 play()를 부른다 —
+        // Swift 메서드 호출 간격은 마이크로초 단위라 사람 귀로는 사실상 동시로 들린다.
+        for index in 0..<tracks.count {
+            players[index].play()
+        }
     }
 
     func stop() {
-        player.stop()
+        for player in players {
+            player.stop()
+        }
         if engine.isRunning {
             engine.stop()
         }

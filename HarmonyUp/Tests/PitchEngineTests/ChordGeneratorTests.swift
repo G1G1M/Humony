@@ -11,6 +11,14 @@ final class ChordGeneratorTests: XCTestCase {
         Dictionary(uniqueKeysWithValues: harmony.map { ($0.interval, $0) })
     }
 
+    // 여러 성부를 동시에 재생할 때(VoiceClipPlayer.playTracks) 실제로 좌우로 갈라지는지의
+    // 근거가 되는 값 — 3도는 왼쪽, 5도는 오른쪽, 베이스는 중앙이어야 한다.
+    func testPanSpreadsThirdAndFifthToOppositeSides() {
+        XCTAssertEqual(ChordGenerator.Interval.bass.pan, 0.0)
+        XCTAssertLessThan(ChordGenerator.Interval.third.pan, 0)
+        XCTAssertGreaterThan(ChordGenerator.Interval.fifth.pan, 0)
+    }
+
     func testEmptyInputReturnsEmpty() {
         XCTAssertTrue(ChordGenerator.harmonizeSequence(melodyNotes: [], key: key(tonic: 0, mode: .major)).isEmpty)
     }

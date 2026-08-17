@@ -49,49 +49,6 @@ final class AudioGainTests: XCTestCase {
         XCTAssertEqual(AudioGain.normalizeLoudness(samples), samples)
     }
 
-    func testMixAndNormalizeBalancesTracksOfVeryDifferentAmplitude() {
-        // 한 트랙은 원래 진폭이 훨씬 작다(예: 다른 방식으로 처리된 성부) — 합치기 전에
-        // 체감 음량(RMS)을 맞추지 않으면 이 트랙은 믹스에서 거의 안 들리게 묻힌다.
-        let loud: [Float] = Array(repeating: Float(0.5), count: 100)
-        let quiet: [Float] = Array(repeating: Float(0.02), count: 100)
-
-        let mixed = AudioGain.mixAndNormalize([loud, quiet], targetPeak: 0.95)
-
-        // 두 트랙이 동일한 상수 값이라 RMS 정규화 후 크기가 같아지고, 합치면 그 두 배(부호가
-        // 같으므로) — 즉 원래 25배 차이 나던 두 트랙이 믹스에는 "똑같은 비중"으로 들어가야 한다.
-        // 이걸 직접 검증하는 대신, mixAndNormalize([quiet, quiet])와 mixAndNormalize([loud, loud])가
-        // (둘 다 내부적으로 같은 값으로 맞춰지므로) 같은 결과가 나오는지로 확인한다.
-        let quietOnly = AudioGain.mixAndNormalize([quiet, quiet], targetPeak: 0.95)
-        let loudOnly = AudioGain.mixAndNormalize([loud, loud], targetPeak: 0.95)
-        for (a, b) in zip(mixed, quietOnly) {
-            XCTAssertEqual(a, b, accuracy: 0.001)
-        }
-        for (a, b) in zip(mixed, loudOnly) {
-            XCTAssertEqual(a, b, accuracy: 0.001)
-        }
-    }
-
-    func testMixAndNormalizeSumsTracksToShortestLength() {
-        let a: [Float] = [0.1, 0.1, 0.1, 0.1]
-        let b: [Float] = [0.1, 0.1, 0.1] // 더 짧음
-
-        let mixed = AudioGain.mixAndNormalize([a, b], targetPeak: 0.9)
-
-        XCTAssertEqual(mixed.count, 3) // 짧은 쪽 길이에 맞춰짐
-        let peak = mixed.map { abs($0) }.max() ?? 0
-        XCTAssertEqual(peak, 0.9, accuracy: 0.001)
-    }
-
-    func testMixAndNormalizeIgnoresEmptyTracks() {
-        let a: [Float] = [0.2, -0.2]
-        let mixed = AudioGain.mixAndNormalize([a, []], targetPeak: 0.8)
-        XCTAssertEqual(mixed.count, 2)
-    }
-
-    func testMixAndNormalizeAllEmptyReturnsEmpty() {
-        XCTAssertTrue(AudioGain.mixAndNormalize([[], []]).isEmpty)
-    }
-
     func testApplyFadeInOutStartsAndEndsAtZero() {
         let samples: [Float] = Array(repeating: 1.0, count: 100)
         let faded = AudioGain.applyFadeInOut(samples, fadeSampleCount: 10)
