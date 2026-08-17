@@ -52,7 +52,8 @@
 - [x] **베이스 리듬 독립화 — 화음이 "뻣뻣하다"는 피드백 대응**: 화성학(SATB voice leading, 병행/반진행)·아카펠라 편곡 리서치로 원인 진단(멜로디 음을 그대로 근음 삼는 구조 → 병행 진행 + 화성 리듬이 멜로디 리듬과 동일 + 베이스가 멜로디 리듬을 그대로 복사). 그중 지금 구조를 거의 안 건드리고 적용 가능한 "베이스 리듬 독립화"부터 착수 — `NoteSequenceGrouper`(신규, 순수 함수) 추가해 "전체 베이스/3도/5도 듣기" 재생이 연속된 같은 음을 매번 재트리거하지 않고 하나의 지속음으로 묶도록 수정(총 재생 길이는 그대로 유지). 유닛테스트 92개 통과, 실기기(Ian) 설치+실행 완료
 - [x] **화음 생성을 "근음=멜로디 음" 모델에서 실제 코드 진행(HMM+Viterbi)으로 교체**: 화음이 뻣뻣한 나머지 원인(병행 진행, 화성 리듬=멜로디 리듬)은 화성 모델 자체를 바꿔야 해결됨을 확인 — 기성 API/라이브러리는 없어서(반대 방향 문제이거나 ML 필요), ML 없이 화성학 규칙만으로 구현 가능한 HMM+Viterbi로 직접 구현(plan mode로 설계 확정 후 진행). `ChordGenerator.harmonizeSequence(melodyNotes:key:)`(배치 API)가 조성의 다이어토닉 코드 7개(I~vii°) 중 방출 점수(코드 구성음 적합도, 길이 가중)+전이 점수(같은 코드 유지 최우선, 근음 강한 진행 선호, T→S→D→T 순환 반영)로 최적 코드 진행을 Viterbi로 찾아 베이스/3도/5도를 배정 — 경과음 위에서 화음이 안 바뀌고 유지될 수 있게 됨. 기존 단일 노트 API(`generateHarmony`)는 완전히 제거하고 `RecordingAnalyzer`/`MelodySession`/`PracticeView`(채점·재생·수정 로직) 전부 배치 API로 전환, `MelodyStep`에 원본 화음 데이터(`harmony`) 필드 추가. 유닛테스트 94개 통과, 실기기(Ian) 빌드+설치 완료 — 실기기 청취 결과 "자연스럽게 잘 나옴" 긍정 확인 받음
 - [x] **성부 스테레오 패닝**: 지금까지 모든 성부가 모노(정중앙)로만 나오던 것을 좌우로 벌림 — `VoiceClipPlayer`를 단일 버퍼 재생에서 여러 트랙 동시 재생(`playTracks`)으로 재구성, 노드 풀(4개) + 중간 `AVAudioMixerNode`(리버브가 다중 입력을 못 받아서 필수) + 공유 리버브 구조. `ChordGenerator.Interval.pan` 추가(베이스 0/3도 -0.5/5도 +0.5), 멜로디는 중앙(0.0). `recordAndHarmonizeFullChordWithVoice`가 `AudioGain.mixAndNormalize`(재생 전 미리 합치기) 대신 `playTracks`로 전환 — 트랙 길이를 맞출 필요도 없어짐. `mixAndNormalize`는 완전히 안 쓰이게 돼 삭제. 도입 직후 재생 크래시 발견·수정(버퍼는 모노인데 패닝용 연결은 스테레오라 채널 수 불일치 — 버퍼 자체를 스테레오로 만들어 해결). 유닛테스트 91개 통과, 실기기(Ian) 빌드+설치+실행 완료 — 사용자 청취 확인 결과 "잘 나온다" 긍정 확인
-- [x] **로드맵 Phase 4 — 성부별 뮤트 토글**: "내 목소리로 전체 화음"/"화음만 듣기" 두 버튼을, 멜로디+베이스+3도+5도를 자유롭게 켜고 끌 수 있는 토글(`PlaybackVoice`, `mutedVoices`)로 일반화 — 52절에서 만든 `VoiceClipPlayer.playTracks`(다중 트랙 동시 재생)가 이미 기반이라 자연스럽게 이어짐. 꺼진 성부는 WORLD 분석 자체를 건너뛰어 연산 절약, 전부 꺼진 채로 재생하면 이유 안내. 유닛테스트 91개 통과, 실기기(Ian) 빌드+설치+실행 완료 — 청취 확인 대기 중
+- [x] **로드맵 Phase 4 — 성부별 뮤트 토글**: "내 목소리로 전체 화음"/"화음만 듣기" 두 버튼을, 멜로디+베이스+3도+5도를 자유롭게 켜고 끌 수 있는 토글(`PlaybackVoice`, `mutedVoices`)로 일반화 — 52절에서 만든 `VoiceClipPlayer.playTracks`(다중 트랙 동시 재생)가 이미 기반이라 자연스럽게 이어짐. 꺼진 성부는 WORLD 분석 자체를 건너뛰어 연산 절약, 전부 꺼진 채로 재생하면 이유 안내. 유닛테스트 91개 통과, 실기기(Ian) 빌드+설치+실행 완료
+- [x] **"조성과 화음" 카드 제거 + "내 목소리로 화음" 카드 다듬기**: 프로토타입 완성 목표에 맞춰 곡 전체를 텍스트 목록으로 보여주던 "조성과 화음" 카드를 제거(다음 단계인 악보 렌더링이 대신할 예정, `melodySteps` 데이터 자체는 계속 계산해서 보관) — 그 카드에서만 쓰이던 멜로디 스텝 수정/개별 채점(`MelodyStepRow`), 합성음 화음 미리듣기(화음 듣기/전체 라인 듣기, `NoteSequenceGrouper` 포함), 시작음(피치 파이프) 기능도 함께 정리. "내 목소리로 화음" 카드는 성부별 단독 미리듣기 버튼(토글+재생과 결과가 같아져 중복)을 없애고 재생 버튼을 `.borderedProminent`로 키워 단순화. 유닛테스트 84개(91→84) 통과, 실기기(Ian) 빌드+설치 완료
 - [ ] **로드맵 Phase 5~9**: 악보 렌더링(`StaffGeometry`/`SheetMusicView`), 성부 표시/재생 공유 토글, 카라오케 재생헤드 동기화, 연습 탭 최종 통합, 다듬기
 
 ## 구성 요소 (`HarmonyUp/Sources/PitchEngine/`)
@@ -66,7 +67,7 @@
 | `KeyDetector` | pitch-class 히스토그램 기반 조성 판별 (Temperley 1999 key profile) |
 | `ChordGenerator` | 멜로디 노트 시퀀스 전체에 HMM+Viterbi로 다이어토닉 코드 진행을 붙여 베이스/3도/5도 생성 |
 | `MelodySession` | 프레임별 감지 결과를 누적해 KeyDetector/ChordGenerator에 연결 |
-| `TonePlayer` | 지정 주파수 톤 재생(배음+envelope) — 제안된 화음/시작음을 귀로 확인 |
+| `TonePlayer` | 지정 주파수 톤 재생(배음+envelope) — 현재 UI에서는 미사용(54절 카드 정리로 호출부 제거, 클래스는 유지) |
 | `PitchScorer` | 목표 주파수 대비 사용자 음정의 cent 편차 채점 |
 | `PitchSmoother` | MIDI 노트(로그 스케일) 기준 EMA로 비브라토·흔들림 완화 |
 | `PracticeSummary` | 채점 시도(Score 배열)를 정확도/평균편차 요약 통계로 압축 |
@@ -77,7 +78,6 @@
 | `VoiceDoubler` | 성부별 지연+미세 디튠 복사본을 섞는 보컬 더블링(ADT) |
 | `MelodySegmenter` | 녹음 전체를 배치로 분석해 음표(음높이+시작시간+길이) 목록으로 잘라내기 |
 | `RecordingAnalyzer` | `MelodySegmenter` 출력을 `KeyDetector`/`ChordGenerator`에 연결해 기존 `MelodyStep` 배열로 변환 |
-| `NoteSequenceGrouper` | 연속된 같은 음을 하나의 지속음으로 묶어 재트리거 없이 재생(베이스 리듬 독립화) |
 
 ## 개발
 
