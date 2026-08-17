@@ -74,6 +74,9 @@ struct PracticeView: View {
     // 다음 단계인 악보 렌더링에 그대로 필요한 데이터라 계속 계산해서 들고 있는다.
     @State private var hasCapturedNote = false
     @State private var melodySteps: [MelodyStep] = []
+    // 악보 카드는 다른 카드들과 나란히 있어서 고정 높이 안에 좁게 보인다 — 렌더링이 제대로
+    // 되는지 크게 확인하고 싶을 때 이 상태로 전체화면 뷰(SheetMusicFullScreenView)를 띄운다.
+    @State private var showingFullScreenScore = false
 
     // "내 목소리로 화음 만들기" — 합성음(TonePlayer) 대신 사용자 목소리를 그대로 베이스/3도/5도로
     // 옮겨서 재생한다. 빠른 녹음이 끝나면 녹음 전체가 그대로 여기 채워진다(applyQuickRecordResult).
@@ -154,8 +157,18 @@ struct PracticeView: View {
                         // 악보(VexFlow 오선보) — 첫 녹음 분석이 끝나기 전엔 보여줄 게 없다.
                         if hasCapturedNote {
                             HarmonyCard("악보", systemImage: "pianokeys") {
-                                VexFlowScoreView(steps: melodySteps, mutedVoices: $mutedVoices)
-                                    .frame(height: VexFlowScoreView.preferredHeight)
+                                VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                                    VexFlowScoreView(steps: melodySteps, mutedVoices: $mutedVoices)
+                                        .frame(height: VexFlowScoreView.preferredHeight)
+
+                                    Button {
+                                        showingFullScreenScore = true
+                                    } label: {
+                                        Label("전체화면으로 크게 보기", systemImage: "arrow.up.left.and.arrow.down.right")
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .frame(maxWidth: .infinity)
+                                }
                             }
                             .id("sheetMusicCard")
                             .transition(.opacity.combined(with: .move(edge: .top)))
@@ -256,6 +269,9 @@ struct PracticeView: View {
             audioCapture.stop()
             voiceClipPlayer.stop()
             isPlayingVoiceClip = false
+        }
+        .fullScreenCover(isPresented: $showingFullScreenScore) {
+            SheetMusicFullScreenView(steps: melodySteps, mutedVoices: $mutedVoices)
         }
     }
 
