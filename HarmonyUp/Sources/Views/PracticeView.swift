@@ -396,21 +396,28 @@ struct PracticeView: View {
     /// 아직 마이크가 켜지기 전(대기 상태)에만 노출되므로 되먹임 걱정이 없다.
     private var startingNoteControls: some View {
         HStack(spacing: Theme.Spacing.xs) {
-            Image(systemName: "tuningfork")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Picker("첫음", selection: $startingNoteMIDI) {
+            // Picker(.menu 스타일)는 눌러야 할 것처럼 안 보인다는 피드백 — 재생 버튼과 똑같이
+            // Menu를 직접 써서 harmonyButtonStyle()을 입힌다(리퀴드 글래스 버튼과 동일한
+            // 시각적 무게감을 주기 위해 Button과 같은 방식으로 스타일링).
+            Menu {
                 ForEach(Array(stride(from: 48, through: 84, by: 1)), id: \.self) { midi in
-                    Text(NoteNameConverter.convert(frequency: NoteNameConverter.frequency(forMIDINote: midi))?.noteName ?? "?")
-                        .tag(midi)
+                    Button {
+                        startingNoteMIDI = midi
+                        startingNotePlayer.setFrequency(NoteNameConverter.frequency(forMIDINote: midi))
+                    } label: {
+                        Text(NoteNameConverter.convert(frequency: NoteNameConverter.frequency(forMIDINote: midi))?.noteName ?? "?")
+                    }
                 }
+            } label: {
+                Label(
+                    NoteNameConverter.convert(frequency: NoteNameConverter.frequency(forMIDINote: startingNoteMIDI))?.noteName ?? "?",
+                    systemImage: "tuningfork"
+                )
+                .font(.caption)
             }
-            .pickerStyle(.menu)
-            .font(Theme.Typography.caption2)
-            .onChange(of: startingNoteMIDI) { _, newValue in
-                startingNotePlayer.setFrequency(NoteNameConverter.frequency(forMIDINote: newValue))
-            }
+            .harmonyButtonStyle()
+            .controlSize(.small)
+            .accessibilityLabel("첫음 선택")
 
             Button {
                 toggleStartingNotePlayback()
