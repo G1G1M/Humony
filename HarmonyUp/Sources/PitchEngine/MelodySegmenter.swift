@@ -233,6 +233,19 @@ enum MelodySegmenter {
         }
         flush(endIndexExclusive: debouncedNotes.count)
 
+        #if DEBUG
+        // "짧은 음은 다 흡수한다"는 지속시간 기준 하나로는 못 가르는 경우가 실측으로 나왔다
+        // (진짜 짧게 부른 음과 포르타멘토 과도구간의 길이가 겹치는 사례). 신뢰도(YIN
+        // 자기상관 신뢰도 평균)가 추가 단서가 되는지 확인하려고 흡수 전 후보 단계에서
+        // 지속시간과 함께 찍어본다 — 과도구간은 피치가 계속 움직여서 자기상관이 덜 뚜렷하니
+        // 신뢰도가 낮게 나올 거라는 가설.
+        let candidateList = notes.map { note -> String in
+            let name = NoteNameConverter.convert(frequency: NoteNameConverter.frequency(forMIDINote: note.midiNote))?.noteName ?? "?"
+            return "\(name)(\(String(format: "%.2fs", note.duration)), 신뢰도\(String(format: "%.2f", note.averageConfidence)))"
+        }.joined(separator: ", ")
+        print("[MelodySegmenter] 5단계 흡수 전 후보 \(notes.count)개: \(candidateList)")
+        #endif
+
         return mergeAdjacentSamePitch(absorbShortRuns(notes, minimumDuration: minimumDuration))
     }
 
