@@ -151,12 +151,12 @@ struct PracticeView: View {
                         }
                         .id("captureCard")
 
-                        // 악보(피치 하이웨이) — 첫 녹음 분석이 끝나기 전엔 보여줄 게 없다.
+                        // 악보(오선보) — 첫 녹음 분석이 끝나기 전엔 보여줄 게 없다.
                         if hasCapturedNote {
                             HarmonyCard("악보", systemImage: "pianokeys") {
-                                PitchHighwayView(steps: melodySteps)
+                                SheetMusicView(steps: melodySteps, mutedVoices: $mutedVoices)
                             }
-                            .id("pitchHighwayCard")
+                            .id("sheetMusicCard")
                             .transition(.opacity.combined(with: .move(edge: .top)))
                         }
 
