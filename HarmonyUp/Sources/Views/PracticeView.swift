@@ -58,7 +58,7 @@ struct PracticeView: View {
     // 기능이다. 예전엔 "조성과 화음" 카드 안에 있었는데(54절에서 카드째 정리) 사용자가 다시
     // 요청해서 복원한다 — 이번엔 분석 파이프라인과 완전히 분리된 채로(melodySession 등은
     // 전혀 안 건드림), 녹음 시작 전에만 보이는 별도 컨트롤로 둔다.
-    @State private var startingNoteMIDI: Int = 69 // A4, 예전 기본값과 동일(47절)
+    @State private var startingNoteMIDI: Int = 60 // C4, 항상 도로 시작하도록 고정(74절)
     @State private var isPlayingStartingNote = false
     private let startingNotePlayer = TonePlayer()
     // 녹음 중 마이크 헤일로 애니메이션용 실시간 음량(0~1로 정규화). VoiceActivityDetector와 같은

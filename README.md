@@ -71,6 +71,7 @@
 - [x] **"다시 녹음 후 아무것도 안 뜨는" 문제 — 실제 원인은 오디오 엔진 크래시**: "뷰를 왔다갔다해서 생기는 오류같다" 제보 — 실기기 콘솔 로그로 확인해보니 실제로는 두 번째 녹음 시작 직후 앱이 크래시하고 있었음(`Failed to create tap due to format mismatch`). `AudioCapture.start()`가 미리 조회한 오디오 포맷을 `installTap`에 넘기던 게 원인 — 세션을 짧은 간격으로 재시작하면 그 사이 하드웨어 라우트가 안 안정돼서 포맷이 어긋남. `installTap`에 `format: nil`을 넘겨 탭 설치 시점의 실제 포맷을 쓰도록 수정(애플 권장 방식), sampleRate도 콜백 안에서 `buffer.format.sampleRate`로 읽도록 변경. 겸사겸사 `.onDisappear`에서 `isCapturing` 리셋 누락도 함께 수정. 아이패드 실기기에서 재현 시나리오 재검증 완료
 - [x] **첫음 드롭다운도 리퀴드 글래스 버튼으로**: "드롭박스 버튼도 리퀴드 글래스 버튼으로, 눌러야 할 것처럼 안 보인다" 피드백 — 배경/테두리가 없어 플레인 텍스트처럼 보이던 `Picker(.menu 스타일)`을 `Menu { ... } label: { Label(...) }`로 교체하고 옆의 "첫음 듣기" 버튼과 같은 `.harmonyButtonStyle()` 적용. 시뮬레이터 스크린샷으로 확인
 - [x] **로드맵 Phase 7 — 카라오케 재생헤드 동기화**: "내 목소리로 화음" 재생 중 악보 위에 세로선(재생헤드)이 음 순서대로 움직이도록 추가. `MelodyStep.onsetTime`/`duration`(원본 녹음 기준 초)이 재생 경과 시간과 이미 같은 시간축을 공유한다는 점을 이용 — `PracticeView`가 50ms 타이머로 경과 시간을 스텝 인덱스로 매핑하고, `VexFlowScoreView`/`render.js`는 악보 내용이 바뀔 때만 전체를 다시 그리고 재생헤드는 저장해둔 스텝별 x좌표(`StaveNote.getAbsoluteX()`)만 재사용해 SVG 선 하나로 움직인다(매 tick 전체 재렌더 방지). 전체화면 뷰(`SheetMusicFullScreenView`)는 다음 단계로 미룸. 유닛테스트 105개 유지, 시뮬레이터 빌드+설치 확인 — 실제 재생 타이밍 정합성은 실기기 확인 필요
+- [x] **첫음 기본값을 C4(도)로 고정**: `startingNoteMIDI` 초기값을 A4(69)에서 C4(60)로 변경 — 항상 도로 시작하도록. 유닛테스트 105개 유지
 - [ ] **로드맵 Phase 8~9**: 연습 탭 최종 통합, 다듬기
 
 ## 구성 요소 (`HarmonyUp/Sources/PitchEngine/`)
