@@ -1757,3 +1757,38 @@ F3(0.16s, 신뢰도0.98), G3(0.43s, 신뢰도0.99), G#3(0.06s, 신뢰도0.95)
 ### 현재 상태로 마무리
 
 다행히 위 로그의 녹음은 지속시간 기반 흡수(`absorbShortRuns`)+동일음 재병합(`mergeAdjacentSamePitch`)만으로 11개 후보 → **정확히 5개**(C3-D3-E3-F3-G3)로 걸러졌다. 앞선 "7개" 결과는 그 특정 녹음이 유난히 애매했던 경우로 보이고, 지속시간 기준 로직 자체는 충분히 잘 작동하는 것으로 판단해서 이번 라운드는 여기서 마무리한다. 디버그 로그(`#if DEBUG`)는 다음에 비슷한 문제가 생기면 바로 실측할 수 있도록 코드에 남겨둠.
+
+---
+
+## 71. "다시 녹음 후 아무것도 안 뜨는" 문제 — 실제로는 오디오 엔진 크래시였다
+
+### 배경
+
+"처음에 녹음을 하고 나갔다가 다시 녹음하기를 누르고 완료하면 몇개의 음이 나왔는지만 뜨고 그 아래로 아무것도 안떠. 뷰를 왔다갔다해서 생기는 오류같아" 요청.
+
+### 1차 점검 — 코드 리뷰로 찾은 실제 버그(선제적 수정)
+
+`PracticeView`의 `.onDisappear`가 `audioCapture.stop()`은 부르면서 `isCapturing` `@State`는 그대로 두고 있었다 — 뷰를 나갈 때 녹음 중이었다면, 실제 엔진은 꺼지는데 앱은 "아직 켜져 있다"고 착각한 채로 남는다. `beginCapturingIfNeeded()`의 `guard !isCapturing else { return }`가 그 착각을 보고 마이크 재시작을 건너뛸 수 있는 구조라, 발견 즉시 `isCapturing = false`를 같이 넣어 고쳤다.
+
+### 2차 — 실기기 로그로 확인한 진짜 원인은 크래시였다
+
+`devicectl --console`로 재현 로그를 잡아보니(69절과 같은 방식), "아무것도 안 뜨는" 게 아니라 **두 번째 녹음 시작 직후 앱이 통째로 죽고 있었다**:
+
+```
+*** Terminating app due to uncaught exception 'com.apple.coreaudio.avfaudio',
+    reason: 'Failed to create tap due to format mismatch, <AVAudioFormat 1 ch, 48000 Hz, Float32>'
+```
+
+`AudioCapture.start()`가 `inputNode.outputFormat(forBus: 0)`을 미리 조회해서 그 값을 `installTap`에 그대로 넘기고 있었는데, 세션을 짧은 간격으로 재시작하면(녹음 시작 직후 바로 정지했다가 곧바로 다시 시작하는 등) 그 조회 시점과 실제 탭이 설치되는 시점 사이에 하드웨어 라우트가 아직 안정되지 않아 두 포맷이 어긋나면서 `AVAudioEngine`이 예외를 던지고 앱이 죽는다.
+
+### 수정
+
+`installTap`에 미리 조회한 `format`을 넘기는 대신 **`format: nil`**을 넘긴다 — 이러면 탭이 실제로 설치되는 순간의 입력 버스 포맷을 그대로 쓰기 때문에 이 경쟁 상태 자체가 없어진다(애플이 권장하는 방식). 대신 콜백 안에서 표본율(sampleRate)은 미리 캡처해둔 값이 아니라 `buffer.format.sampleRate`(그 순간 실제로 전달된 포맷)에서 읽도록 함께 고쳤다.
+
+### 진단에 쓴 로그
+
+이번에도 `#if DEBUG` 로그(`onAppear`/`onDisappear`/`beginCapturingIfNeeded`/`startQuickRecording`/`stopQuickRecording`/`applyQuickRecordResult` 각 단계)를 코드에 남겨서, 다음에 비슷한 "뭔가 안 뜬다" 류 버그가 생기면 바로 `devicectl --console`로 재현해서 추적할 수 있게 했다.
+
+### 검증
+
+유닛테스트 105개 유지(AVAudioEngine 그래프 버그라 유닛테스트로는 원천적으로 못 잡는 영역 — 26절/49절/52절과 같은 패턴, 실기기 확인이 필수). 아이패드 실기기에서 재현 시나리오(녹음 완료 → 뷰 나갔다 오기 → 다시 녹음 → 완료)를 그대로 재현해 크래시 없이 정상 동작 확인("잘되네" 확인 받음).

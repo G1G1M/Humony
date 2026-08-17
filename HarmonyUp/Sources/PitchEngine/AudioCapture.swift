@@ -50,11 +50,17 @@ final class AudioCapture {
         try session.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
         try session.setActive(true)
 
+        // format을 미리 조회해서(outputFormat(forBus:)) installTap에 그대로 넘기면, 그 조회
+        // 시점과 실제 탭이 설치되는 시점 사이에 하드웨어 라우트가 아직 안정 안 된 경우(특히
+        // 세션을 짧은 간격으로 재시작할 때) 두 포맷이 어긋나 "Failed to create tap due to
+        // format mismatch"로 앱이 즉시 크래시한다 — 실기기에서 실제로 재현·확인함(녹음을
+        // 시작하자마자 바로 정지했다가 곧바로 다시 시작하는 경우). format을 nil로 넘기면
+        // 탭이 실제로 설치되는 순간의 입력 버스 포맷을 그대로 쓰므로 이 경쟁 상태가 없다 —
+        // 애플이 권장하는 방식. 대신 콜백 안에서 sampleRate를 미리 캡처해둔 값이 아니라
+        // buffer.format.sampleRate(그 순간 실제로 전달된 포맷)에서 읽는다.
         let inputNode = engine.inputNode
-        let format = inputNode.outputFormat(forBus: 0)
-
-        inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: format) { [weak self] buffer, _ in
-            self?.process(buffer: buffer, sampleRate: format.sampleRate)
+        inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: nil) { [weak self] buffer, _ in
+            self?.process(buffer: buffer, sampleRate: buffer.format.sampleRate)
         }
 
         engine.prepare()

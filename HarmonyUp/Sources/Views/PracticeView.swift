@@ -161,10 +161,21 @@ struct PracticeView: View {
         }
         .tint(Theme.tint)
         .onAppear {
+            #if DEBUG
+            print("[PracticeView] onAppear — hasCapturedNote=\(hasCapturedNote), isCapturing=\(isCapturing), quickRecordPhase=\(quickRecordPhase)")
+            #endif
             micPermissionDenied = AVAudioApplication.shared.recordPermission == .denied
         }
         .onDisappear {
+            #if DEBUG
+            print("[PracticeView] onDisappear — hasCapturedNote=\(hasCapturedNote), isCapturing=\(isCapturing), quickRecordPhase=\(quickRecordPhase)")
+            #endif
+            // audioCapture.stop()만 부르고 isCapturing을 그대로 두면, 뷰를 나갔다 돌아와서
+            // 다시 녹음을 시작할 때 beginCapturingIfNeeded()의 "이미 켜져 있으면 무시" 가드가
+            // 실제로는 꺼진 엔진을 "아직 켜져 있다"고 착각해 마이크를 다시 안 켜는 버그가
+            // 생길 수 있다 — 뷰를 벗어날 땐 항상 false로 확실히 되돌린다.
             audioCapture.stop()
+            isCapturing = false
             voiceClipPlayer.stop()
             isPlayingVoiceClip = false
             startingNotePlayer.stop()
@@ -615,6 +626,9 @@ struct PracticeView: View {
     /// 마이크 권한을 먼저 확인한다 — 거부된 상태에서 그냥 start()를 호출하면 실패 이유가 눈에 잘
     /// 안 띄었다. 여기서 미리 걸러서 전용 UI(micPermissionDeniedContent)로 보여준다.
     private func beginCapturingIfNeeded() {
+        #if DEBUG
+        print("[PracticeView] beginCapturingIfNeeded() 호출 — isCapturing=\(isCapturing)\(isCapturing ? " (이미 켜져있다고 판단해 건너뜀)" : "")")
+        #endif
         guard !isCapturing else { return }
 
         switch AVAudioApplication.shared.recordPermission {
@@ -687,6 +701,9 @@ struct PracticeView: View {
     /// 한다. 마이크 자체는 beginCapturingIfNeeded()가 켜는 같은 audioCapture를 그대로 재사용한다 —
     /// 그 안의 클로저가 quickRecordPhase를 보고 알아서 녹음용 분기를 탄다.
     private func startQuickRecording() {
+        #if DEBUG
+        print("[PracticeView] startQuickRecording() 호출 — hasCapturedNote=\(hasCapturedNote), isCapturing=\(isCapturing)")
+        #endif
         // 참고음을 듣던 중이었다면 여기서 멈춘다 — 녹음이 시작되면 그 소리가 마이크로 되먹임될 수 있다.
         startingNotePlayer.stop()
         isPlayingStartingNote = false
@@ -699,7 +716,15 @@ struct PracticeView: View {
     /// 전체를 RecordingAnalyzer로 한 번에 분석한다. YIN을 윈도우마다 돌리는 무거운 계산이라
     /// Task로 감싸서 메인 스레드가 멈추지 않게 한다.
     private func stopQuickRecording() {
-        guard quickRecordPhase == .recording else { return }
+        #if DEBUG
+        print("[PracticeView] stopQuickRecording() 호출 — quickRecordPhase=\(quickRecordPhase), 모인 샘플=\(quickRecordBuffer.count)개")
+        #endif
+        guard quickRecordPhase == .recording else {
+            #if DEBUG
+            print("[PracticeView] stopQuickRecording() — quickRecordPhase가 .recording이 아니라서 무시됨(가드에 걸림)")
+            #endif
+            return
+        }
         audioCapture.stop()
         isCapturing = false
         quickRecordPhase = .analyzing
@@ -740,6 +765,9 @@ struct PracticeView: View {
 
     /// RecordingAnalyzer의 배치 분석 결과를, 기존 UI가 그대로 소비할 수 있는 상태로 반영한다.
     private func applyQuickRecordResult(_ analyzed: RecordingAnalyzer.AnalyzedRecording) {
+        #if DEBUG
+        print("[PracticeView] applyQuickRecordResult() 시작 — analyzed.notes=\(analyzed.notes.count)개, 이전 hasCapturedNote=\(hasCapturedNote)")
+        #endif
         guard !analyzed.notes.isEmpty else {
             // "가까이서 불러도 인식이 안 된다"는 걸 추측이 아니라 실측으로 진단하기 위해, 실제
             // 녹음된 파형의 최대 진폭을 에러 메시지에 같이 보여준다. VoiceActivityDetector의
@@ -810,6 +838,9 @@ struct PracticeView: View {
 
         hasCapturedNote = true
         quickRecordPhase = .result(noteCount: analyzed.notes.count)
+        #if DEBUG
+        print("[PracticeView] applyQuickRecordResult 완료 — hasCapturedNote=\(hasCapturedNote), melodySteps=\(melodySteps.count)개, suggestedHarmony=\(melodySession.suggestedHarmony != nil ? "있음" : "nil")")
+        #endif
     }
 
     /// 마지막으로 잡은 음을 기준으로, 목표 interval(3도/5도) 위 주파수까지의 배율(pitchRatio)을 구한다.
