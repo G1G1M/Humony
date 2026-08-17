@@ -18,8 +18,10 @@ struct VexFlowScoreView: UIViewRepresentable {
     let steps: [MelodyStep]
     @Binding var mutedVoices: Set<PlaybackVoice>
 
-    /// 카드에 줄 고정 높이 — 4성부(멜로디+3도+5도+베이스)가 전부 나와도 넉넉하게.
-    static let preferredHeight: CGFloat = 400
+    /// 카드에 줄 고정 높이 — "너무 작다"는 실기기 피드백으로 키웠다(docs/CONCEPTS.md 58절).
+    /// 4성부가 전부 나올 때 필요한 높이보다는 작을 수 있는데, `score.html`이 세로 스크롤도
+    /// 지원해서(58절) 잘리지 않고 스크롤로 볼 수 있다.
+    static let preferredHeight: CGFloat = 460
 
     // 이 앱 전체가 다크모드를 지원하지만, 악보는 항상 흰 종이 위에 그린다(실제 악보/독서
     // 앱들의 관례) — 그래서 여기 색상은 Theme의 다이나믹 컬러가 아니라 라이트 모드 값에
@@ -75,10 +77,12 @@ struct VexFlowScoreView: UIViewRepresentable {
             let color: String
             let notes: [Note]
         }
+        // 음이름 라벨(Annotation)은 v1에 있었지만 "촘촘해서 겹친다"는 피드백을 받아
+        // render.js에서 뺐다 — 이제 오선 위치 자체가 정확한 음높이라 라벨이 굳이 필요
+        // 없어졌다(docs/CONCEPTS.md 58절). 그래서 이 구조체엔 key/sharp만 남는다.
         struct Note: Encodable {
             let key: String
             let sharp: Bool
-            let label: String
         }
         let voices: [Voice]
     }
@@ -90,7 +94,7 @@ struct VexFlowScoreView: UIViewRepresentable {
             let notes = steps.compactMap { step -> Payload.Note? in
                 guard step.onsetTime != nil else { return nil }
                 let (key, sharp) = Self.vexFlowKey(forMIDINote: step.midiNote)
-                return Payload.Note(key: key, sharp: sharp, label: step.noteName)
+                return Payload.Note(key: key, sharp: sharp)
             }
             voiceRows.append(Payload.Voice(clef: "treble", color: Self.melodyColorHex, notes: notes))
         }
@@ -120,8 +124,7 @@ struct VexFlowScoreView: UIViewRepresentable {
         steps.compactMap { step -> Payload.Note? in
             guard step.onsetTime != nil, let note = step.harmony?.first(where: { $0.interval == interval }) else { return nil }
             let (key, sharp) = Self.vexFlowKey(forMIDINote: note.midiNote)
-            let label = NoteNameConverter.convert(frequency: note.frequency)?.noteName ?? "?"
-            return Payload.Note(key: key, sharp: sharp, label: label)
+            return Payload.Note(key: key, sharp: sharp)
         }
     }
 
