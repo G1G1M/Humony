@@ -171,7 +171,7 @@ struct PracticeView: View {
             isPlayingStartingNote = false
         }
         .fullScreenCover(isPresented: $showingFullScreenScore) {
-            SheetMusicFullScreenView(steps: melodySteps, mutedVoices: $mutedVoices)
+            SheetMusicFullScreenView(steps: melodySteps, mutedVoices: $mutedVoices, detectedKeyName: melodySession.detectedKey?.name)
         }
     }
 
@@ -432,6 +432,16 @@ struct PracticeView: View {
     private func sheetMusicPanel(fillAvailable: Bool) -> some View {
         HarmonyCard("악보", systemImage: "pianokeys") {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                // 감지된 조성을 악보 위에 같이 보여준다 — "단음/멜로디 부를 때 나왔던 조성을 악보에도
+                // 띄워주면 제대로 불렀는지 확인 가능할 것 같다"는 요청. 실시간 캡처와 같은 record()
+                // 경로를 그대로 타는 melodySession.detectedKey를 재사용(51절)해서 새 계산 없이 이미
+                // 있는 값을 보여주기만 한다.
+                if let key = melodySession.detectedKey {
+                    Text("감지된 조성: \(key.name)")
+                        .font(Theme.Typography.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 if fillAvailable {
                     VexFlowScoreView(steps: melodySteps, mutedVoices: $mutedVoices)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -15,16 +15,7 @@
 // 모든 성부의 음 배열 길이가 같고, `measureBreaks`(마디 구성) 하나를 전 성부가 그대로
 // 공유한다 — 그래야 성부끼리 같은 순간의 음이 화면에서 정확히 세로로 맞는다.
 //
-// duration도 실제 길이(초, RhythmQuantizer가 중앙값 대비 상대적으로 분류)를 반영한다 — 예전엔
-// 전부 4분음표로만 그려서 "인위적으로 보인다"는 피드백을 받았다(docs/CONCEPTS.md 59절). 정확한
-// 박자 표기는 여전히 불가능하지만(이 앱은 템포를 검출하지 않음), 최소한 길고 짧음은 음표
-// 모양(과 8분음표 빔 묶음)으로 보여준다 — 이게 "박자가 정확한 악보"는 아니어도 "리듬감이
-// 있는 악보"는 되게 하는 절충안이다.
-//
-// v1(1차 시도)엔 음표마다 음이름 라벨(Annotation)을 붙였는데, 실기기에서 "너무 촘촘해서
-// 겹친다"는 피드백을 받았다 — 라벨끼리 부딪히는 게 그 원인 중 하나였다. 이제는 진짜 오선
-// 위치 자체가 정확한 음높이를 나타내므로(색깔 막대 방식과 달리 위치를 "짐작"할 필요가 없음)
-// 라벨 없이 음표만 크고 단순하게 그린다 — 실제 악보가 원래 그렇듯, 위치가 곧 정보다.
+// duration도 실제 길이(초, RhythmQuantizer가 중앙값 대비 상대적으로 분류)를 반영한다(59절).
 function renderScore(data) {
   var container = document.getElementById('score');
   container.innerHTML = '';
@@ -39,16 +30,26 @@ function renderScore(data) {
     return;
   }
 
+  // 새로 그릴 때마다 스크롤 위치를 원점으로 되돌린다 — 성부를 켜고 끄면(voices.length가
+  // 바뀌면) 악보 전체 크기가 매번 달라지는데, 이전 스크롤 위치를 그대로 두면 새로 그려진
+  // (더 작아지거나 커진) 악보에서 엉뚱한 부분만 보이는 "잘림" 현상이 생긴다(66절 이후 피드백:
+  // "부분 보기 하려고 꺼버리면 악보랑 음이 잘리는 현상이 계속 발생").
+  var wrapper = document.getElementById('scoreWrapper');
+  if (wrapper) { wrapper.scrollLeft = 0; wrapper.scrollTop = 0; }
+
   // 실기기에서 "너무 작다"는 피드백을 받아, 전체를 SCALE배 확대해서 그린다 — 아래 모든 좌표
   // 계산은 그대로 "원래 크기" 단위로 하고, 마지막에 캔버스 크기와 컨텍스트만 SCALE배로
-  // 키운다(컨텍스트를 미리 확대해두면 그 이후 그리는 모든 것 — 오선/음표/음자리표 —이
-  // 비례해서 커진다).
+  // 키운다.
   var SCALE = 1.4;
-  var measureWidth = 190;
   var firstMeasureExtraWidth = 55; // 음자리표+박자표 그릴 여유
-  var staveRowHeight = 100;
+  // 100 -> 130: "악보가 서로 너무 붙어있다" 피드백으로 성부 간 세로 간격을 넓힘.
+  var staveRowHeight = 130;
   var leftPad = 4;
   var topPad = 20;
+  // 쉼표뿐이거나 음이 거의 없는 마디도 너무 좁아지지 않게 하는 하한.
+  var minMeasureWidth = 130;
+  // 마디마다 실제로 필요한 너비에 더해주는 여유 — "간격 널널하게" 피드백 반영.
+  var measurePadding = 50;
 
   // VexFlow 음표 코드 -> 박(4분음표=1박) 환산. 마디의 VF.Voice num_beats를 실제 박 합으로
   // 줘야(음표 개수가 아니라) 포매터가 8분음표/점4분음표를 제대로 배치한다.
@@ -57,8 +58,7 @@ function renderScore(data) {
   var REST_KEY = { treble: 'b/4', bass: 'd/3' };
 
   // 모든 성부가 같은 마디 구성(measureBreaks)을 공유하므로, 여기서 그 구성 그대로 잘라서
-  // 전 성부에 동일하게 적용한다 — 성부마다 따로 4개씩 자르던 예전 방식은 화음이 빠진(쉼표)
-  // 스텝이 있을 때 성부끼리 마디가 어긋나는 원인이었다.
+  // 전 성부에 동일하게 적용한다.
   function chunkByBreaks(notes, breaks) {
     var result = [];
     var index = 0;
@@ -69,10 +69,49 @@ function renderScore(data) {
     return result;
   }
 
+  // 측정(1차)과 그리기(2차) 양쪽에서 똑같이 쓴다 — VexFlow의 StaveNote/Voice는 한 번
+  // 포매팅에 쓰인 객체를 다른 컨텍스트에서 재사용하기 까다로워서, 매번 새로 만든다.
+  function buildStaveNotes(measureNotes, clef) {
+    return measureNotes.map(function (n) {
+      var isRest = !n.key;
+      var keys = isRest ? [REST_KEY[clef]] : [n.key];
+      var duration = n.duration + (isRest ? 'r' : '');
+      var note = new VF.StaveNote({ clef: clef, keys: keys, duration: duration });
+      if (!isRest && n.sharp) { note.addModifier(new VF.Accidental('#'), 0); }
+      return note;
+    });
+  }
+
+  function measureBeats(measureNotes) {
+    return measureNotes.reduce(function (sum, n) { return sum + (DURATION_BEATS[n.duration] || 1); }, 0);
+  }
+
   var voiceMeasures = voices.map(function (v) { return chunkByBreaks(v.notes, measureBreaks); });
   var measureCount = measureBreaks.length;
 
-  var totalWidth = leftPad + firstMeasureExtraWidth + measureCount * measureWidth + 30;
+  // 1차: 마디마다 실제로 필요한 너비를 계산한다 — 예전엔 마디 폭이 고정(190px)이라, 음이 적은
+  // 마디는 억지로 늘어나 음표가 비정상적으로 길게 보이고("원래 음표가 저렇게 길게 표현되지
+  // 않을텐데" 피드백의 원인), 음이 많은 마디는 반대로 촘촘해졌다. VexFlow의
+  // preCalculateMinTotalWidth로 각 성부가 그 마디에 실제로 필요로 하는 최소 너비를 구하고,
+  // 성부 중 가장 넓게 필요로 하는 값을 그 마디의 너비로 쓴다(모든 성부가 같은 마디 구성을
+  // 공유해서 마디선이 세로로 맞아야 하니, 성부마다 다른 폭을 줄 수는 없다).
+  var measureWidths = [];
+  for (var m = 0; m < measureCount; m++) {
+    var widest = 0;
+    voices.forEach(function (voiceData, rowIndex) {
+      var measureNotes = voiceMeasures[rowIndex][m] || [];
+      if (measureNotes.length === 0) return;
+      var notes = buildStaveNotes(measureNotes, voiceData.clef);
+      var vfVoice = new VF.Voice({ num_beats: measureBeats(measureNotes), beat_value: 4 });
+      vfVoice.setStrict(false);
+      vfVoice.addTickables(notes);
+      var needed = new VF.Formatter().preCalculateMinTotalWidth([vfVoice]);
+      widest = Math.max(widest, needed);
+    });
+    measureWidths.push(Math.max(minMeasureWidth, widest + measurePadding));
+  }
+
+  var totalWidth = leftPad + firstMeasureExtraWidth + measureWidths.reduce(function (a, b) { return a + b; }, 0) + 30;
   var totalHeight = topPad + voices.length * staveRowHeight + 20;
 
   container.style.width = (totalWidth * SCALE) + 'px';
@@ -83,6 +122,7 @@ function renderScore(data) {
   var context = renderer.getContext();
   context.scale(SCALE, SCALE);
 
+  // 2차: 실제로 그린다 — 이번엔 1차에서 계산한 마디별 너비(measureWidths)를 그대로 쓴다.
   voices.forEach(function (voiceData, rowIndex) {
     var y = topPad + rowIndex * staveRowHeight;
     var measures = voiceMeasures[rowIndex];
@@ -90,7 +130,7 @@ function renderScore(data) {
 
     for (var i = 0; i < measureCount; i++) {
       var isFirst = i === 0;
-      var width = isFirst ? measureWidth + firstMeasureExtraWidth : measureWidth;
+      var width = measureWidths[i] + (isFirst ? firstMeasureExtraWidth : 0);
       var stave = new VF.Stave(x, y, width);
       if (isFirst) {
         stave.addClef(voiceData.clef);
@@ -100,22 +140,12 @@ function renderScore(data) {
 
       var measureNotes = measures[i] || [];
       if (measureNotes.length > 0) {
-        var staveNotes = measureNotes.map(function (n) {
-          var isRest = !n.key;
-          var keys = isRest ? [REST_KEY[voiceData.clef]] : [n.key];
-          var duration = n.duration + (isRest ? 'r' : '');
-          var note = new VF.StaveNote({ clef: voiceData.clef, keys: keys, duration: duration });
-          if (!isRest && n.sharp) {
-            note.addModifier(new VF.Accidental('#'), 0);
-          }
+        var staveNotes = buildStaveNotes(measureNotes, voiceData.clef);
+        staveNotes.forEach(function (note) {
           note.setStyle({ fillStyle: voiceData.color, strokeStyle: voiceData.color });
-          return note;
         });
 
-        var totalBeats = measureNotes.reduce(function (sum, n) {
-          return sum + (DURATION_BEATS[n.duration] || 1);
-        }, 0);
-        var vfVoice = new VF.Voice({ num_beats: totalBeats, beat_value: 4 });
+        var vfVoice = new VF.Voice({ num_beats: measureBeats(measureNotes), beat_value: 4 });
         vfVoice.setStrict(false);
         vfVoice.addTickables(staveNotes);
         var formatWidth = width - (isFirst ? firstMeasureExtraWidth + 20 : 20);
@@ -123,8 +153,7 @@ function renderScore(data) {
         vfVoice.draw(context, stave);
 
         // 8분음표가 연달아 나오면 빔(beam)으로 이어 그려서 실제 악보처럼 묶어 보여준다 —
-        // 쉼표나 다른 길이의 음표를 만나면 자동으로 끊긴다(레퍼런스 악보의 이어진 음표 묶음과
-        // 같은 관례, docs/CONCEPTS.md 59절).
+        // 쉼표나 다른 길이의 음표를 만나면 자동으로 끊긴다(59절).
         var beams = VF.Beam.generateBeams(staveNotes, { beam_rests: false });
         beams.forEach(function (beam) { beam.setContext(context).draw(); });
       }

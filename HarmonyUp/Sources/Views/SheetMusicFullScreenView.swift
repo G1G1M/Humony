@@ -10,6 +10,9 @@ import SwiftUI
 struct SheetMusicFullScreenView: View {
     let steps: [MelodyStep]
     @Binding var mutedVoices: Set<PlaybackVoice>
+    // "악보" 카드와 같은 감지된 조성 표시(66절 이후 요청) — 여기서도 같은 정보를 보여줘서
+    // 전체화면에서도 제대로 불렀는지 확인할 수 있게 한다.
+    var detectedKeyName: String?
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -18,6 +21,15 @@ struct SheetMusicFullScreenView: View {
                 voiceToggleRow
                     .padding(.horizontal)
                     .padding(.top, Theme.Spacing.sm)
+
+                if let detectedKeyName {
+                    Text("감지된 조성: \(detectedKeyName)")
+                        .font(Theme.Typography.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal)
+                        .padding(.top, Theme.Spacing.xs)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
 
                 // 프레임을 따로 안 주면 NavigationStack의 남은 세로 공간을 그대로 받는다 —
                 // score.html 내부가 이미 overflow:auto라, 여기서 넘치는 내용은 웹뷰 안에서
