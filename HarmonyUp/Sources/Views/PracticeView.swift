@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 import AVFAudio
 import UIKit
+import Combine
 
 /// "내 목소리로 화음" 재생에서 켜고 끌 수 있는 성부 — `ChordGenerator.Interval`(베이스/3도/5도)
 /// 3개에 리드 멜로디(원음)를 더한 4가지. 멜로디는 화음 성부가 아니라서 `Interval`에는 없지만,
@@ -146,6 +147,17 @@ struct PracticeView: View {
     }
     @State private var isPlayingVoiceClip = false
 
+    // 카라오케 재생헤드(Phase 7) — "내 목소리로 화음" 재생이 시작된 실제 시각을 기록해두고,
+    // 50ms마다 경과 시간을 melodySteps의 onsetTime/duration(원본 녹음 기준 초)과 비교해서
+    // 지금 재생 중인 스텝의 인덱스를 찾는다. 새 타이밍 계산이 필요 없는 이유: PitchShifter.shift는
+    // 피치만 바꾸고 길이는 그대로라, 재생 경과 시간과 원본 녹음 타임라인이 그대로 일치한다.
+    @State private var voiceClipPlaybackStartedAt: Date?
+    @State private var activePlaybackStepIndex: Int?
+    // .autoconnect()로 뷰가 살아있는 동안 항상 흐르지만, updatePlaybackStepIndex()가
+    // voiceClipPlaybackStartedAt이 nil이면 즉시 return하므로 재생 중이 아닐 땐 사실상 아무 일도
+    // 안 한다 — 재생 시작/종료마다 타이머를 새로 만들고 해제하는 생명주기 관리보다 단순하다.
+    private let playheadTimer = Timer.publish(every: 0.05, on: .main, in: .common).autoconnect()
+
     // 화음이 나오는 순간(카드 2개가 한꺼번에 등장) 새로 나타난 카드로 자동 스크롤하기 위한 판정.
     // melodySession.suggestedHarmony(Optional 배열) 자체는 Equatable이 아니라서, onChange/애니메이션
     // 트리거로 쓰기 쉬운 단순 Bool로 한 번 감싼다.
@@ -160,6 +172,9 @@ struct PracticeView: View {
             }
         }
         .tint(Theme.tint)
+        .onReceive(playheadTimer) { _ in
+            updatePlaybackStepIndex()
+        }
         .onAppear {
             #if DEBUG
             print("[PracticeView] onAppear — hasCapturedNote=\(hasCapturedNote), isCapturing=\(isCapturing), quickRecordPhase=\(quickRecordPhase)")
@@ -178,6 +193,8 @@ struct PracticeView: View {
             isCapturing = false
             voiceClipPlayer.stop()
             isPlayingVoiceClip = false
+            voiceClipPlaybackStartedAt = nil
+            activePlaybackStepIndex = nil
             startingNotePlayer.stop()
             isPlayingStartingNote = false
         }
@@ -473,10 +490,10 @@ struct PracticeView: View {
                 }
 
                 if fillAvailable {
-                    VexFlowScoreView(steps: melodySteps, mutedVoices: $mutedVoices)
+                    VexFlowScoreView(steps: melodySteps, mutedVoices: $mutedVoices, activeStepIndex: activePlaybackStepIndex)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    VexFlowScoreView(steps: melodySteps, mutedVoices: $mutedVoices)
+                    VexFlowScoreView(steps: melodySteps, mutedVoices: $mutedVoices, activeStepIndex: activePlaybackStepIndex)
                         .frame(height: VexFlowScoreView.preferredHeight)
 
                     Button {
@@ -927,14 +944,32 @@ struct PracticeView: View {
 
             do {
                 isPlayingVoiceClip = true
+                voiceClipPlaybackStartedAt = Date()
                 try voiceClipPlayer.playTracks(tracks, sampleRate: rate) {
                     isPlayingVoiceClip = false
+                    voiceClipPlaybackStartedAt = nil
+                    activePlaybackStepIndex = nil
                 }
                 statusText = "내 목소리로 만든 화음을 재생합니다"
             } catch {
                 isPlayingVoiceClip = false
+                voiceClipPlaybackStartedAt = nil
+                activePlaybackStepIndex = nil
                 statusText = "재생 실패: \(error.localizedDescription)"
             }
+        }
+    }
+
+    /// 재생헤드 타이머(playheadTimer)가 50ms마다 부른다 — 재생 중이 아니면(voiceClipPlaybackStartedAt이
+    /// nil) 즉시 return. 재생 경과 시간이 melodySteps의 어느 스텝 구간(onsetTime~onsetTime+duration)에
+    /// 속하는지 찾아서 activePlaybackStepIndex에 반영하면, VexFlowScoreView가 그 인덱스를 받아
+    /// 재생헤드 세로선을 옮긴다.
+    private func updatePlaybackStepIndex() {
+        guard let startedAt = voiceClipPlaybackStartedAt else { return }
+        let elapsed = Date().timeIntervalSince(startedAt)
+        activePlaybackStepIndex = melodySteps.firstIndex { step in
+            guard let onset = step.onsetTime, let duration = step.duration else { return false }
+            return elapsed >= onset && elapsed < onset + duration
         }
     }
 
@@ -992,6 +1027,8 @@ struct PracticeView: View {
 
         voiceClipPlayer.stop()
         isPlayingVoiceClip = false
+        voiceClipPlaybackStartedAt = nil
+        activePlaybackStepIndex = nil
         recentVoiceBuffer = []
         mutedVoices = []
         activeScoringInterval = nil

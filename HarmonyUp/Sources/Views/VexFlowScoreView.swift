@@ -17,6 +17,11 @@ import WebKit
 struct VexFlowScoreView: UIViewRepresentable {
     let steps: [MelodyStep]
     @Binding var mutedVoices: Set<PlaybackVoice>
+    /// 카라오케 재생헤드가 지금 가리키는 스텝(`steps`의 인덱스, `nil`이면 표시 안 함) — Phase 7.
+    /// 재생 중 50ms마다 바뀌는 값이라, `updateUIView`가 이 값 하나 바뀔 때마다 악보 전체를
+    /// 다시 그리면 낭비고 스크롤 위치도 리셋된다(render.js 상단 주석과 같은 이유) — 그래서
+    /// `Coordinator`가 페이로드(악보 내용) 변경과 이 값 변경을 구분해서 다르게 처리한다.
+    let activeStepIndex: Int?
 
     /// 카드에 줄 고정 높이 — "너무 작다"는 실기기 피드백으로 키웠다(docs/CONCEPTS.md 58절).
     /// 4성부가 전부 나올 때 필요한 높이보다는 작을 수 있는데, `score.html`이 세로 스크롤도
@@ -48,6 +53,7 @@ struct VexFlowScoreView: UIViewRepresentable {
 
     func updateUIView(_ webView: WKWebView, context: Context) {
         context.coordinator.pendingPayload = buildPayload()
+        context.coordinator.pendingStepIndex = activeStepIndex
         context.coordinator.renderIfReady()
     }
 
@@ -56,7 +62,11 @@ struct VexFlowScoreView: UIViewRepresentable {
     final class Coordinator: NSObject, WKNavigationDelegate {
         weak var webView: WKWebView?
         var pendingPayload: String?
+        var pendingStepIndex: Int?
         private var isPageLoaded = false
+        // 마지막으로 실제 renderScore를 호출한 페이로드 — 이 값이 그대로면(재생헤드만 움직인
+        // 경우) 악보를 다시 그리지 않고 setPlayheadStep만 부른다.
+        private var lastRenderedPayload: String?
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             isPageLoaded = true
@@ -65,7 +75,12 @@ struct VexFlowScoreView: UIViewRepresentable {
 
         func renderIfReady() {
             guard isPageLoaded, let webView, let payload = pendingPayload else { return }
-            webView.evaluateJavaScript("renderScore(\(payload));")
+            if payload != lastRenderedPayload {
+                webView.evaluateJavaScript("renderScore(\(payload));")
+                lastRenderedPayload = payload
+            }
+            let stepArgument = pendingStepIndex.map(String.init) ?? "null"
+            webView.evaluateJavaScript("setPlayheadStep(\(stepArgument));")
         }
     }
 

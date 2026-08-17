@@ -43,7 +43,7 @@ struct SheetMusicFullScreenView: View {
                 // 프레임을 따로 안 주면 NavigationStack의 남은 세로 공간을 그대로 받는다 —
                 // score.html 내부가 이미 overflow:auto라, 여기서 넘치는 내용은 웹뷰 안에서
                 // 스크롤된다(바깥에 SwiftUI ScrollView를 또 두면 스크롤이 중첩돼 오히려 헷갈림).
-                VexFlowScoreView(steps: steps, mutedVoices: $mutedVoices)
+                VexFlowScoreView(steps: steps, mutedVoices: $mutedVoices, activeStepIndex: nil)
             }
             .background(Color.white)
             .navigationTitle("악보")

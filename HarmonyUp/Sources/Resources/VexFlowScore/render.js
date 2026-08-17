@@ -16,9 +16,49 @@
 // 공유한다 — 그래야 성부끼리 같은 순간의 음이 화면에서 정확히 세로로 맞는다.
 //
 // duration도 실제 길이(초, RhythmQuantizer가 중앙값 대비 상대적으로 분류)를 반영한다(59절).
+// 재생헤드(카라오케처럼 재생 중인 음 위에 세로선)가 재사용하는 값들 — renderScore가 새로
+// 그릴 때마다 갱신되고, setPlayheadStep(index)는 이 값들만 읽어서 전체를 다시 그리지 않고
+// 선 하나만 움직인다. 매 50ms 재생 타이머 tick마다 renderScore 전체를 다시 부르면 낭비고,
+// scoreWrapper 스크롤 위치도 원점으로 리셋돼버린다(35~38행에서 이미 겪은 문제와 같은 종류).
+var playheadState = {
+  svg: null,           // renderer가 그린 실제 <svg> 엘리먼트
+  scale: 1,
+  topY: 0,
+  bottomY: 0,
+  stepX: []            // 스텝 인덱스 -> x좌표(원래 크기 단위, scale 곱하기 전)
+};
+
+function clearPlayhead() {
+  if (!playheadState.svg) return;
+  var existing = playheadState.svg.querySelector('#playhead');
+  if (existing) existing.remove();
+}
+
+// index가 가리키는 스텝의 x좌표에 세로선을 그린다. renderScore가 마지막으로 그린 악보
+// 기준이므로, 악보가 다시 그려지지 않은 채 곡이 바뀌면(이론상 없음) 좌표가 어긋날 수 있는데
+// 실제로는 새 녹음마다 항상 renderScore부터 다시 불리니 문제되지 않는다.
+function setPlayheadStep(index) {
+  clearPlayhead();
+  if (index === null || index === undefined) return;
+  if (!playheadState.svg || index < 0 || index >= playheadState.stepX.length) return;
+
+  var x = playheadState.stepX[index] * playheadState.scale;
+  var line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  line.setAttribute('id', 'playhead');
+  line.setAttribute('x1', x);
+  line.setAttribute('x2', x);
+  line.setAttribute('y1', playheadState.topY * playheadState.scale);
+  line.setAttribute('y2', playheadState.bottomY * playheadState.scale);
+  line.setAttribute('stroke', '#FF5A36');
+  line.setAttribute('stroke-width', 2);
+  line.setAttribute('pointer-events', 'none');
+  playheadState.svg.appendChild(line);
+}
+
 function renderScore(data) {
   var container = document.getElementById('score');
   container.innerHTML = '';
+  playheadState = { svg: null, scale: 1, topY: 0, bottomY: 0, stepX: [] };
 
   var VF = Vex.Flow;
   var voices = (data.voices || []).filter(function (v) { return v.notes.length > 0; });
@@ -127,6 +167,10 @@ function renderScore(data) {
     var y = topPad + rowIndex * staveRowHeight;
     var measures = voiceMeasures[rowIndex];
     var x = leftPad;
+    // 재생헤드는 성부 하나(rowIndex 0, 항상 존재)의 x좌표만 기준으로 삼는다 — 모든 성부가
+    // 같은 measureBreaks를 공유해서 같은 스텝 인덱스는 어느 성부에서 재도 같은 x에 있다(위
+    // buildPayload 쪽 주석과 동일한 전제).
+    var globalStepIndex = 0;
 
     for (var i = 0; i < measureCount; i++) {
       var isFirst = i === 0;
@@ -156,11 +200,26 @@ function renderScore(data) {
         // 쉼표나 다른 길이의 음표를 만나면 자동으로 끊긴다(59절).
         var beams = VF.Beam.generateBeams(staveNotes, { beam_rests: false });
         beams.forEach(function (beam) { beam.setContext(context).draw(); });
+
+        if (rowIndex === 0) {
+          staveNotes.forEach(function (note) {
+            playheadState.stepX[globalStepIndex] = note.getAbsoluteX();
+            globalStepIndex++;
+          });
+        }
+      } else if (rowIndex === 0) {
+        globalStepIndex += measureBreaks[i];
       }
 
       x += width;
     }
   });
+
+  playheadState.svg = context.svg || null;
+  playheadState.scale = SCALE;
+  playheadState.topY = topPad - 15;
+  playheadState.bottomY = topPad + voices.length * staveRowHeight - 20;
 }
 
 window.renderScore = renderScore;
+window.setPlayheadStep = setPlayheadStep;

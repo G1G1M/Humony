@@ -1798,3 +1798,33 @@ F3(0.16s, 신뢰도0.98), G3(0.43s, 신뢰도0.99), G#3(0.06s, 신뢰도0.95)
 ## 72. 첫음 드롭다운도 리퀴드 글래스 버튼으로
 
 "드롭박스 버튼도 리퀴드 글래스 버튼으로 만들어줄래? 뭔가 눌러야할 것처럼 보이지 않아서" 요청 — `Picker(.menu 스타일)`은 배경/테두리가 없어서 플레인 텍스트처럼 보였다. `Menu { ... } label: { Label(...) }`로 바꿔서 옆의 "첫음 듣기" 버튼과 똑같이 `.harmonyButtonStyle()`을 입혔다 — Menu도 Button과 같은 방식으로 버튼 스타일을 상속받아서, 두 컨트롤이 나란히 같은 알약 모양(리퀴드 글래스) 배경을 갖게 됨. 시뮬레이터 스크린샷으로 확인.
+
+---
+
+## 73. Phase 7 — 카라오케 재생헤드 동기화
+
+### 배경
+
+"내 목소리로 화음" 재생(`recordAndHarmonizeFullChordWithVoice()`)이 소리만 나가고 악보는 가만히 있었다. "이후에 카라오케 기능 단계로 넘어가자" 요청에 따라, 재생 중인 음 위에 세로선(재생헤드)이 실시간으로 움직이도록 만들었다.
+
+### 핵심 전제 — 새 타이밍 계산이 필요 없는 이유
+
+`MelodyStep.onsetTime`/`duration`은 빠른 녹음(`RecordingAnalyzer`) 경로에서 원본 녹음 시작 기준 초 단위로 이미 채워져 있다. `recordAndHarmonizeFullChordWithVoice()`가 재생하는 것도 그 원본 녹음(`recentVoiceBuffer`)을 `PitchShifter.shift`로 피치만 바꾼 것 — 길이는 그대로 유지된다(멜로디 트랙은 시프트조차 하지 않음). 그래서 "재생 시작으로부터 경과한 시간"과 "`melodySteps`의 onset/duration"은 이미 같은 시간축을 공유한다.
+
+### 경과 시간 → 스텝 인덱스 (PracticeView)
+
+`Timer.publish(every: 0.05, on: .main, in: .common).autoconnect()`를 뷰가 살아있는 동안 항상 구독해두고(`.onReceive`), 재생 중이 아니면(`voiceClipPlaybackStartedAt`이 `nil`) `updatePlaybackStepIndex()`가 즉시 return한다 — 재생 시작/종료마다 타이머를 새로 만들고 해제하는 생명주기 관리보다 단순하다. 재생이 시작되는 시점(`isPlayingVoiceClip = true`와 함께)에 `voiceClipPlaybackStartedAt = Date()`를 기록하고, 종료되는 모든 경로(정상 완료, catch, `resetSession()`, `.onDisappear`)에서 같이 `nil`로 되돌린다. 매 tick마다 `Date().timeIntervalSince(startedAt)`을 구해서 `onsetTime <= elapsed < onsetTime + duration`을 만족하는 스텝을 찾아 `activePlaybackStepIndex`에 반영한다.
+
+### 전체 재렌더 대신 좌표만 재사용 (VexFlowScoreView + render.js)
+
+재생헤드가 50ms마다 움직이는데, 그때마다 `renderScore()` 전체를 다시 부르면 낭비고 `scoreWrapper`의 스크롤 위치도 매번 원점으로 리셋된다(57절/66절에서 이미 겪은 문제와 같은 종류). 그래서 `VexFlowScoreView.Coordinator`가 "악보 내용(payload)이 바뀌었을 때만 `renderScore` 재호출 + 매번 `setPlayheadStep`만 호출"로 두 가지를 분리했다.
+
+`render.js`는 `renderScore()`가 그릴 때마다 첫 번째 성부(rowIndex 0 — 모든 성부가 같은 `measureBreaks`를 공유하므로 어느 성부를 기준 삼아도 같은 스텝은 같은 x좌표)의 `StaveNote.getAbsoluteX()`를 스텝 인덱스별로 `playheadState.stepX` 배열에 저장해둔다. `setPlayheadStep(index)`는 이 저장된 값만 읽어서 SVG `<line>` 하나(`id="playhead"`)를 지우고 새 위치에 다시 그린다 — VexFlow API를 새로 배울 필요 없이 `context.svg`(SVGContext가 감싸는 실제 `<svg>` DOM 엘리먼트, 벤더링된 라이브러리 소스로 직접 확인)에 SVG 엘리먼트를 직접 append하는 가장 단순한 방식.
+
+### 이번 단계에서 뺀 것
+
+`SheetMusicFullScreenView`(전체화면 악보)는 이번엔 `activeStepIndex: nil` 고정으로 두고 다음 단계로 미뤘다 — "하나씩 순서대로" 원칙(CLAUDE.md).
+
+### 검증
+
+유닛테스트 105개 그대로 통과(회귀 없음). 시뮬레이터 빌드/설치/실행으로 앱이 정상 기동하는지 확인(Timer/Combine 추가로 인한 크래시 없음). 재생헤드가 실제 재생과 청감상 맞는지는 실제 노래를 부르는 실기기 확인이 필요 — 다음 세션에서 사용자가 직접 재생해보고 확인 예정.
