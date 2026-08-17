@@ -109,16 +109,26 @@ struct VexFlowScoreView: UIViewRepresentable {
                 let (key, sharp) = Self.vexFlowKey(forMIDINote: step.midiNote)
                 return Payload.Note(key: key, sharp: sharp, duration: quantizedNote.vexFlowDuration)
             }
-            voiceRows.append(Payload.Voice(clef: "treble", color: Self.melodyColorHex, notes: notes))
+            // 예전엔 멜로디를 항상 높은음자리표로 고정했었다 — 낮은 음역(예: C3 근처)을 부르면
+            // 높은음자리표 기준으론 덧줄이 여러 개 필요해서 오선 한참 아래로 내려가 보였다
+            // ("c3인데 완전 아래에 내려가 있다" 피드백). 실제 악보처럼 그 성부가 실제로 부른
+            // 음역에 맞는 음자리표를 골라야 한다.
+            let clef = Self.clef(forMIDINotes: validSteps.map(\.midiNote))
+            voiceRows.append(Payload.Voice(clef: clef, color: Self.melodyColorHex, notes: notes))
         }
 
         // 실제 음높이 순서(멜로디 다음으로 5도가 3도보다 위)와 맞춰서 그린다 — ChordGenerator의
-        // 보이싱 규칙상 5도가 항상 3도보다 베이스에서 더 멀리(더 높이) 떨어져 있다.
+        // 보이싱 규칙상 5도가 항상 3도보다 베이스에서 더 멀리(더 높이) 떨어져 있다. 다만 이
+        // 순서는 "위에서 아래로 쌓는 순서"일 뿐, 각 성부 자기 오선의 음자리표는 멜로디와 같은
+        // 이유로 그 성부가 실제로 부르는(생성된) 음역에 맞춰 따로 고른다 — 멜로디가 낮으면
+        // 3도/5도도 덩달아 낮아지므로(베이스 기준으로 보이싱되니까) 무조건 높은음자리표로
+        // 고정하면 똑같이 덧줄 문제가 생긴다.
         for interval in [ChordGenerator.Interval.fifth, .third] {
             let voice = Self.playbackVoice(for: interval)
             guard !mutedVoices.contains(voice) else { continue }
             let notes = harmonyNotes(for: interval, steps: validSteps, quantized: quantized)
-            voiceRows.append(Payload.Voice(clef: "treble", color: Self.colorHex(for: interval), notes: notes))
+            let midiNotes = validSteps.compactMap { $0.harmony?.first(where: { $0.interval == interval })?.midiNote }
+            voiceRows.append(Payload.Voice(clef: Self.clef(forMIDINotes: midiNotes), color: Self.colorHex(for: interval), notes: notes))
         }
 
         if !mutedVoices.contains(.bass) {
@@ -178,5 +188,16 @@ struct VexFlowScoreView: UIViewRepresentable {
         }
         let below = naturalLetters.last(where: { $0.pitchClass < pitchClass })!
         return ("\(below.letter)/\(octave)", true)
+    }
+
+    /// 한 성부의 실제 음역(그 성부가 이번 녹음에서 부른/생성된 MIDI 노트들)을 보고 어느
+    /// 음자리표가 자연스러운지 고른다. MIDI 60(미들 C)을 그대로 기준 삼지 않고 조금 낮춘
+    /// 이유: 높은음자리표는 미들 C보다 아래에서도 어느 정도(첫째 줄=E4=MIDI64까지) 덧줄 없이
+    /// 표현되니, 평균이 그보다 살짝만 낮아도 굳이 낮은음자리표로 넘길 필요는 없다 — 대신
+    /// 낮은음자리표 가운데줄(D3=MIDI50)에 걸치는 지점을 기준으로 삼는다.
+    private static func clef(forMIDINotes midiNotes: [Int]) -> String {
+        guard !midiNotes.isEmpty else { return "treble" }
+        let average = midiNotes.reduce(0, +) / midiNotes.count
+        return average < 57 ? "bass" : "treble" // 57 = A3, 낮은음자리표 셋째줄 바로 위
     }
 }
