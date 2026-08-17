@@ -100,5 +100,5 @@
 ```bash
 xcodegen generate   # project.yml -> HarmonyUp.xcodeproj
 xcodebuild -project HarmonyUp.xcodeproj -scheme HarmonyUp \
-  -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5' test
+  -destination 'platform=iOS Simulator,name=iPad Air 11-inch (M3),OS=26.3.1' test
 ```
