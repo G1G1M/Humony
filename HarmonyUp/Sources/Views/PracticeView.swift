@@ -52,6 +52,14 @@ struct PracticeView: View {
     @State private var quickRecordSampleRate: Double = 44100
     // WSOLA 피치시프트 비용(다중 음 화음 만들 때)과 결과 악보의 가로 스크롤 UX를 고려한 상한.
     private let quickRecordMaxDuration: Double = 30.0
+
+    // 녹음 전 참고음(첫음) 골라 듣기 — 무반주로 노래를 시작할 때 음정을 잡기 위한 순수 참고용
+    // 기능이다. 예전엔 "조성과 화음" 카드 안에 있었는데(54절에서 카드째 정리) 사용자가 다시
+    // 요청해서 복원한다 — 이번엔 분석 파이프라인과 완전히 분리된 채로(melodySession 등은
+    // 전혀 안 건드림), 녹음 시작 전에만 보이는 별도 컨트롤로 둔다.
+    @State private var startingNoteMIDI: Int = 69 // A4, 예전 기본값과 동일(47절)
+    @State private var isPlayingStartingNote = false
+    private let startingNotePlayer = TonePlayer()
     // 녹음 중 마이크 헤일로 애니메이션용 실시간 음량(0~1로 정규화). VoiceActivityDetector와 같은
     // 방식(제곱평균제곱근)으로 매 프레임 계산해서 QuickRecordView에 넘긴다.
     @State private var recordingLevel: Float = 0
@@ -159,6 +167,8 @@ struct PracticeView: View {
             audioCapture.stop()
             voiceClipPlayer.stop()
             isPlayingVoiceClip = false
+            startingNotePlayer.stop()
+            isPlayingStartingNote = false
         }
         .fullScreenCover(isPresented: $showingFullScreenScore) {
             SheetMusicFullScreenView(steps: melodySteps, mutedVoices: $mutedVoices)
@@ -297,6 +307,11 @@ struct PracticeView: View {
             // 어색하지 않다.
             .frame(width: 380)
 
+            // 두 패널을 선으로 구분 — 프로토타입(아티팩트)에서 왼쪽/오른쪽 패널을 나누던
+            // 얇은 세로선과 같은 관례. 카드형 배경(모서리 둥근 회색 배경)만으로는 두 패널이
+            // 어디서 나뉘는지 애매했다는 피드백을 반영.
+            Divider()
+
             rightPanel
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -339,19 +354,75 @@ struct PracticeView: View {
         if micPermissionDenied {
             micPermissionDeniedContent
         } else {
-            QuickRecordView(
-                phase: quickRecordPhase,
-                elapsed: Double(quickRecordBuffer.count) / quickRecordSampleRate,
-                maxDuration: quickRecordMaxDuration,
-                waveformSamples: quickRecordBuffer,
-                onStart: startQuickRecording,
-                onStop: stopQuickRecording,
-                onCancel: cancelQuickRecording,
-                onReset: resetSession,
-                prominent: prominent,
-                currentLevel: recordingLevel,
-                showsInlineRetry: showsInlineRetry
-            )
+            VStack(spacing: Theme.Spacing.md) {
+                // 녹음이 시작되면(또는 이미 결과/에러 상태면) 참고음은 더 이상 의미가 없어서
+                // 대기 상태(.idle)일 때만 보여준다.
+                if quickRecordPhase == .idle {
+                    startingNoteControls
+                }
+                QuickRecordView(
+                    phase: quickRecordPhase,
+                    elapsed: Double(quickRecordBuffer.count) / quickRecordSampleRate,
+                    maxDuration: quickRecordMaxDuration,
+                    waveformSamples: quickRecordBuffer,
+                    onStart: startQuickRecording,
+                    onStop: stopQuickRecording,
+                    onCancel: cancelQuickRecording,
+                    onReset: resetSession,
+                    prominent: prominent,
+                    currentLevel: recordingLevel,
+                    showsInlineRetry: showsInlineRetry
+                )
+            }
+        }
+    }
+
+    /// 녹음 전 참고음(첫음)을 골라 들어보는 컨트롤 — C3~C6 범위에서 반음 단위로 고르고(예전
+    /// Stepper 범위와 동일, 47절), "듣기"를 누르면 그 음을 계속 재생해서 무반주로 노래를
+    /// 시작할 때 음정을 잡을 수 있게 한다. `TonePlayer`는 자체 오디오 엔진이라 아직 마이크가
+    /// 켜지기 전(대기 상태)에만 노출되므로 되먹임 걱정이 없다.
+    private var startingNoteControls: some View {
+        HStack(spacing: Theme.Spacing.sm) {
+            Stepper(value: $startingNoteMIDI, in: 48...84) {
+                Label {
+                    Text(NoteNameConverter.convert(frequency: NoteNameConverter.frequency(forMIDINote: startingNoteMIDI))?.noteName ?? "?")
+                        .font(.system(.subheadline, design: .monospaced))
+                        .fontWeight(.semibold)
+                } icon: {
+                    Image(systemName: "tuningfork")
+                }
+            }
+            .onChange(of: startingNoteMIDI) { _, newValue in
+                startingNotePlayer.setFrequency(NoteNameConverter.frequency(forMIDINote: newValue))
+            }
+
+            Button {
+                toggleStartingNotePlayback()
+            } label: {
+                Label(isPlayingStartingNote ? "정지" : "첫음 듣기", systemImage: isPlayingStartingNote ? "stop.fill" : "play.fill")
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(Theme.Spacing.sm)
+        .frame(maxWidth: .infinity)
+        .background(
+            Color(uiColor: .secondarySystemGroupedBackground),
+            in: RoundedRectangle(cornerRadius: Theme.cardCornerRadius, style: .continuous)
+        )
+    }
+
+    private func toggleStartingNotePlayback() {
+        if isPlayingStartingNote {
+            startingNotePlayer.stop()
+            isPlayingStartingNote = false
+            return
+        }
+        do {
+            startingNotePlayer.setFrequency(NoteNameConverter.frequency(forMIDINote: startingNoteMIDI))
+            try startingNotePlayer.start()
+            isPlayingStartingNote = true
+        } catch {
+            statusText = "첫음 재생 실패: \(error.localizedDescription)"
         }
     }
 
@@ -594,6 +665,9 @@ struct PracticeView: View {
     /// 한다. 마이크 자체는 beginCapturingIfNeeded()가 켜는 같은 audioCapture를 그대로 재사용한다 —
     /// 그 안의 클로저가 quickRecordPhase를 보고 알아서 녹음용 분기를 탄다.
     private func startQuickRecording() {
+        // 참고음을 듣던 중이었다면 여기서 멈춘다 — 녹음이 시작되면 그 소리가 마이크로 되먹임될 수 있다.
+        startingNotePlayer.stop()
+        isPlayingStartingNote = false
         quickRecordBuffer = []
         quickRecordPhase = .recording
         beginCapturingIfNeeded()
