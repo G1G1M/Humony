@@ -36,11 +36,13 @@ final class VoiceClipPlayer {
     ///   스레드에서 한 번만 호출된다.
     func playTracks(_ tracks: [(samples: [Float], pan: Float)], sampleRate: Double, onFinished: (() -> Void)? = nil) throws {
         guard !tracks.isEmpty, tracks.count <= players.count else { return }
-        // 버퍼 자체는 모노(실제 녹음/합성 데이터 그대로)지만, 연결 포맷은 스테레오여야
-        // AVAudioPlayerNode의 pan이 실제로 좌우에 반영된다 — 모노 버퍼를 스테레오 연결에
-        // 흘려보내는 건 pan을 쓰기 위한 정석적인 방법이다.
-        guard let monoFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1),
-              let stereoFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2) else { return }
+        // 버퍼 채널 수는 그 버퍼를 재생하는 노드의 "연결 포맷" 채널 수와 정확히 같아야 한다 —
+        // 다르면 scheduleBuffer 시점에 크래시가 난다(예전에 겪었던 "채널 수가 다르다" 단언
+        // 실패와 같은 종류, docs/CONCEPTS.md 26절). 그래서 원본 데이터는 모노([Float])라도,
+        // pan을 쓰려면 연결 자체가 스테레오여야 하니(모노 연결이면 pan이 갈 곳이 없어 무시됨)
+        // 버퍼도 스테레오로 만들어서 양쪽 채널에 같은 값을 채운다 — pan은 이 "완전히 가운데인
+        // 스테레오" 버퍼의 좌우 상대적 크기를 조절하는 식으로 동작한다(밸런스 컨트롤과 같은 원리).
+        guard let stereoFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2) else { return }
 
         if !isAttached {
             for player in players {
@@ -92,14 +94,17 @@ final class VoiceClipPlayer {
             let player = players[index]
             player.pan = track.pan
 
-            guard let buffer = AVAudioPCMBuffer(pcmFormat: monoFormat, frameCapacity: AVAudioFrameCount(track.samples.count)) else {
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: stereoFormat, frameCapacity: AVAudioFrameCount(track.samples.count)) else {
                 onTrackFinished()
                 continue
             }
             buffer.frameLength = AVAudioFrameCount(track.samples.count)
             track.samples.withUnsafeBufferPointer { source in
                 guard let baseAddress = source.baseAddress else { return }
+                // 왼쪽/오른쪽 채널 모두에 같은 값을 채운다("가운데" 스테레오) — pan이 여기서
+                // 두 채널의 상대적 크기를 조절해 좌우로 이동시킨다.
                 buffer.floatChannelData?[0].update(from: baseAddress, count: track.samples.count)
+                buffer.floatChannelData?[1].update(from: baseAddress, count: track.samples.count)
             }
 
             // completionCallbackType을 .dataPlayedBack으로 지정해야 "버퍼를 재생 큐에 넘겼다"가
