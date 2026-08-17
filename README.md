@@ -61,6 +61,7 @@
 - [x] **악보 전체화면 뷰**: "악보만 보이는 뷰를 따로 만들어서 보여줄래? 이게 제대로 만들어지는 건지를 모르겠다" 요청 — 기존 "악보" 카드는 다른 카드들과 나란히 고정 높이(460pt) 안에 있어 렌더링 품질 판단이 어려웠음. `SheetMusicFullScreenView`(신규) — `VexFlowScoreView`를 `fullScreenCover`로 크게 보여주고, 같은 `mutedVoices` 공유 상태로 성부 on/off 토글도 그대로 둠(여기서 바꾼 뮤트가 "내 목소리로 화음" 재생에도 반영). "악보" 카드에 "전체화면으로 크게 보기" 버튼 추가. 유닛테스트 92개 유지, 실기기(Ian) 빌드+설치+실행 완료
 - [x] **iPad 분할 레이아웃**: 시각 프로토타입(아티팩트)을 보고 "iPadOS가 맞는 것 같다"는 사용자 결정으로 실제 반영. `@Environment(\.horizontalSizeClass)`가 `.regular`일 때만(아이패드, 또는 대화면 아이폰 가로모드) 왼쪽(캡처+내 목소리로 화음+채점, 고정폭 380pt)/오른쪽(악보, `VexFlowScoreView`가 남은 공간을 꽉 채움) 두 열 `HStack`으로 분기 — `NavigationSplitView`는 사이드바 내비게이션이 필요 없는 구조라 과해서 안 씀. `.compact`(아이폰, 아이패드 Split View로 좁아진 상태)는 기존 카드 스택 그대로. 기존 4개 카드를 `@ViewBuilder`로 추출해 두 레이아웃이 공유, 로직/상태 변경 없음. 유닛테스트 92개 통과, 아이폰(Ian) 회귀 없이 설치 완료, 아이패드 시뮬레이터(iPad Air 11-inch (M3))로 분할 레이아웃 스크린샷 확인 — 아이패드 실기기는 아직 없어 시뮬레이터로만 검증
 - [x] **전 방향 회전 지원**: 매 빌드에 뜨던 "All interface orientations must be supported unless the app requires full screen" 경고 해소 — `project.yml`의 `info.properties`에 `UISupportedInterfaceOrientations`(세로/거꾸로세로/가로좌/가로우 4개) 추가. 아이패드 분할 레이아웃이 실제로 회전에 반응하니 마침 필요했던 설정. 아이패드 실기기(Ian's iPad, iPad Pro 12.9-inch)에 설치+실행 완료
+- [x] **"노래가 인식되지 않았어요" 진단용 실측값 노출**: 아이패드 실기기에서 "가까이서 불러도 인식이 안 된다"는 보고 — 마이크가 소리를 못 잡은 건지, 잡은 소리가 VAD/YIN 단계에서 걸러진 건지 추측 대신 실측으로 구분하려고 녹음 실패 에러 메시지에 실제 녹음된 파형의 최대 진폭을 그대로 노출(`"...(측정된 최대 음량: %.5f)"`). 로직 변경 없이 진단 정보만 추가
 - [ ] **로드맵 Phase 7~9**: 카라오케 재생헤드 동기화, 연습 탭 최종 통합, 다듬기
 
 ## 구성 요소 (`HarmonyUp/Sources/PitchEngine/`)

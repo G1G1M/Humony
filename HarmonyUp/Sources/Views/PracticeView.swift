@@ -547,7 +547,16 @@ struct PracticeView: View {
     /// RecordingAnalyzer의 배치 분석 결과를, 기존 UI가 그대로 소비할 수 있는 상태로 반영한다.
     private func applyQuickRecordResult(_ analyzed: RecordingAnalyzer.AnalyzedRecording) {
         guard !analyzed.notes.isEmpty else {
-            quickRecordPhase = .error("노래가 인식되지 않았어요 — 더 또렷하게 불러서 다시 녹음해주세요")
+            // "가까이서 불러도 인식이 안 된다"는 걸 추측이 아니라 실측으로 진단하기 위해, 실제
+            // 녹음된 파형의 최대 진폭을 에러 메시지에 같이 보여준다. VoiceActivityDetector의
+            // 에너지 임계값(0.0001, 평균 제곱)과 비교했을 때 이 값이 0에 가까우면 마이크가 소리를
+            // 아예 못 잡은 것(세션/권한/게인 문제)이고, 정상 발화 수준(대략 0.05 이상)인데도 음이
+            // 하나도 안 잡히면 VAD가 아니라 다른 단계(YIN 신뢰도, 디바운스 등)가 원인이라는 뜻이다.
+            let peakAmplitude = analyzed.voiceSamples.map { abs($0) }.max() ?? 0
+            quickRecordPhase = .error(String(
+                format: "노래가 인식되지 않았어요 — 더 또렷하게 불러서 다시 녹음해주세요 (측정된 최대 음량: %.5f)",
+                peakAmplitude
+            ))
             return
         }
 
