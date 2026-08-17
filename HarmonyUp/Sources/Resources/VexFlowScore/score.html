@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #ffffff; /* 악보는 앱 다크모드와 무관하게 항상 흰 종이 — docs/CONCEPTS.md 57절 */
+  }
+  #scoreWrapper {
+    overflow-x: auto;
+    overflow-y: hidden;
+    width: 100%;
+    -webkit-overflow-scrolling: touch;
+  }
+  #score {
+    display: inline-block;
+  }
+</style>
+</head>
+<body>
+<div id="scoreWrapper"><div id="score"></div></div>
+<script src="vexflow.js"></script>
+<script src="render.js"></script>
+</body>
+</html>

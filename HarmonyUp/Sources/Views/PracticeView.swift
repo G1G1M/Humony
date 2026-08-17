@@ -151,10 +151,11 @@ struct PracticeView: View {
                         }
                         .id("captureCard")
 
-                        // 악보(오선보) — 첫 녹음 분석이 끝나기 전엔 보여줄 게 없다.
+                        // 악보(VexFlow 오선보) — 첫 녹음 분석이 끝나기 전엔 보여줄 게 없다.
                         if hasCapturedNote {
                             HarmonyCard("악보", systemImage: "pianokeys") {
-                                SheetMusicView(steps: melodySteps, mutedVoices: $mutedVoices)
+                                VexFlowScoreView(steps: melodySteps, mutedVoices: $mutedVoices)
+                                    .frame(height: VexFlowScoreView.preferredHeight)
                             }
                             .id("sheetMusicCard")
                             .transition(.opacity.combined(with: .move(edge: .top)))
