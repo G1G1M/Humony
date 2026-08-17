@@ -38,6 +38,59 @@ enum Theme {
     }
 
     static let cardCornerRadius: CGFloat = 16
+
+    /// 직접 그린 원형 버튼(녹음/정지/취소처럼 `Circle`을 손으로 채우던 곳)에 iOS 26+에서는
+    /// 리퀴드 글래스 재질+색조를, 그 이전 버전에서는 기존처럼 단색 채우기를 쓴다. 배포
+    /// 타깃(17.0)을 올리지 않고도 최신 기기에서만 리퀴드 글래스를 쓰기 위한 조건부 분기 —
+    /// "이 앱의 모든 디자인 컴포넌트는 리퀴드 글래스를 쓰라"는 요청에 대응.
+    @ViewBuilder
+    static func glassCircle(tint: Color, diameter: CGFloat) -> some View {
+        if #available(iOS 26.0, *) {
+            Circle()
+                .fill(.clear)
+                .glassEffect(.regular.tint(tint).interactive(), in: Circle())
+                .frame(width: diameter, height: diameter)
+        } else {
+            Circle()
+                .fill(tint)
+                .frame(width: diameter, height: diameter)
+        }
+    }
+}
+
+extension View {
+    /// 카드형 배경(모서리 둥근 사각형)에 iOS 26+에서는 리퀴드 글래스를, 그 이전에서는 기존
+    /// 시스템 시맨틱 배경색을 쓴다.
+    @ViewBuilder
+    func harmonyGlassCard(cornerRadius: CGFloat = Theme.cardCornerRadius) -> some View {
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        } else {
+            self.background(
+                Color(uiColor: .secondarySystemGroupedBackground),
+                in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            )
+        }
+    }
+
+    /// `.bordered`/`.borderedProminent` 대신 iOS 26+에서는 리퀴드 글래스 버튼 스타일
+    /// (`.glass`/`.glassProminent`)을 쓴다 — 앱 전역 버튼에 일괄 적용하는 용도.
+    @ViewBuilder
+    func harmonyButtonStyle(prominent: Bool = false) -> some View {
+        if #available(iOS 26.0, *) {
+            if prominent {
+                self.buttonStyle(.glassProminent)
+            } else {
+                self.buttonStyle(.glass)
+            }
+        } else {
+            if prominent {
+                self.buttonStyle(.borderedProminent)
+            } else {
+                self.buttonStyle(.bordered)
+            }
+        }
+    }
 }
 
 extension Theme {
@@ -136,9 +189,6 @@ struct HarmonyCard<Content: View>: View {
         }
         .padding(Theme.Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            Color(uiColor: .secondarySystemGroupedBackground),
-            in: RoundedRectangle(cornerRadius: Theme.cardCornerRadius, style: .continuous)
-        )
+        .harmonyGlassCard()
     }
 }

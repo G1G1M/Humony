@@ -81,9 +81,7 @@ struct QuickRecordView: View {
                     Circle()
                         .fill(Theme.tint.opacity(0.15))
                         .frame(width: heroButtonDiameter + 36, height: heroButtonDiameter + 36)
-                    Circle()
-                        .fill(Theme.tint)
-                        .frame(width: heroButtonDiameter, height: heroButtonDiameter)
+                    Theme.glassCircle(tint: Theme.tint, diameter: heroButtonDiameter)
                     Image(systemName: "mic.fill")
                         .font(.system(size: 44, weight: .semibold))
                         .foregroundStyle(.white)
@@ -125,9 +123,7 @@ struct QuickRecordView: View {
             HStack(spacing: Theme.Spacing.xl) {
                 Button(action: onCancel) {
                     ZStack {
-                        Circle()
-                            .fill(Color(uiColor: .tertiarySystemFill))
-                            .frame(width: cancelButtonDiameter, height: cancelButtonDiameter)
+                        Theme.glassCircle(tint: Color(uiColor: .tertiarySystemFill), diameter: cancelButtonDiameter)
                         Image(systemName: "xmark")
                             .font(.system(size: 20, weight: .semibold))
                             .foregroundStyle(.secondary)
@@ -147,9 +143,7 @@ struct QuickRecordView: View {
                                 height: stopButtonDiameter + 20 + CGFloat(currentLevel) * 44
                             )
                             .animation(.easeOut(duration: 0.08), value: currentLevel)
-                        Circle()
-                            .fill(Color.red)
-                            .frame(width: stopButtonDiameter, height: stopButtonDiameter)
+                        Theme.glassCircle(tint: .red, diameter: stopButtonDiameter)
                         Image(systemName: "stop.fill")
                             .font(.system(size: 28, weight: .semibold))
                             .foregroundStyle(.white)
@@ -177,10 +171,7 @@ struct QuickRecordView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(Theme.Spacing.lg)
-        .background(
-            Color(uiColor: .secondarySystemGroupedBackground),
-            in: RoundedRectangle(cornerRadius: Theme.cardCornerRadius, style: .continuous)
-        )
+        .harmonyGlassCard()
     }
 
     private func resultContent(noteCount: Int) -> some View {
@@ -193,15 +184,12 @@ struct QuickRecordView: View {
                 Button(action: onReset) {
                     Label("다시 녹음", systemImage: "arrow.counterclockwise")
                 }
-                .buttonStyle(.bordered)
+                .harmonyButtonStyle()
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(Theme.Spacing.md)
-        .background(
-            Color(uiColor: .secondarySystemGroupedBackground),
-            in: RoundedRectangle(cornerRadius: Theme.cardCornerRadius, style: .continuous)
-        )
+        .harmonyGlassCard()
     }
 
     private func errorContent(message: String) -> some View {
@@ -214,14 +202,11 @@ struct QuickRecordView: View {
                 Button(action: onReset) {
                     Label("다시 녹음", systemImage: "arrow.counterclockwise")
                 }
-                .buttonStyle(.bordered)
+                .harmonyButtonStyle()
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(Theme.Spacing.md)
-        .background(
-            Color(uiColor: .secondarySystemGroupedBackground),
-            in: RoundedRectangle(cornerRadius: Theme.cardCornerRadius, style: .continuous)
-        )
+        .harmonyGlassCard()
     }
 }

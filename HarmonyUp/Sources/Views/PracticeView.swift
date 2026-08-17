@@ -135,7 +135,7 @@ struct PracticeView: View {
             } label: {
                 Label("설정 열기", systemImage: "gear")
             }
-            .buttonStyle(.borderedProminent)
+            .harmonyButtonStyle(prominent: true)
         }
     }
 
@@ -354,12 +354,7 @@ struct PracticeView: View {
         if micPermissionDenied {
             micPermissionDeniedContent
         } else {
-            VStack(spacing: Theme.Spacing.md) {
-                // 녹음이 시작되면(또는 이미 결과/에러 상태면) 참고음은 더 이상 의미가 없어서
-                // 대기 상태(.idle)일 때만 보여준다.
-                if quickRecordPhase == .idle {
-                    startingNoteControls
-                }
+            VStack(spacing: Theme.Spacing.sm) {
                 QuickRecordView(
                     phase: quickRecordPhase,
                     elapsed: Double(quickRecordBuffer.count) / quickRecordSampleRate,
@@ -373,25 +368,35 @@ struct PracticeView: View {
                     currentLevel: recordingLevel,
                     showsInlineRetry: showsInlineRetry
                 )
+
+                // 녹음 버튼 아래에 작게 — 녹음이 시작되면(또는 이미 결과/에러 상태면) 참고음은
+                // 더 이상 의미가 없어서 대기 상태(.idle)일 때만 보여준다.
+                if quickRecordPhase == .idle {
+                    startingNoteControls
+                }
             }
         }
     }
 
-    /// 녹음 전 참고음(첫음)을 골라 들어보는 컨트롤 — C3~C6 범위에서 반음 단위로 고르고(예전
-    /// Stepper 범위와 동일, 47절), "듣기"를 누르면 그 음을 계속 재생해서 무반주로 노래를
-    /// 시작할 때 음정을 잡을 수 있게 한다. `TonePlayer`는 자체 오디오 엔진이라 아직 마이크가
-    /// 켜지기 전(대기 상태)에만 노출되므로 되먹임 걱정이 없다.
+    /// 녹음 전 참고음(첫음)을 골라 들어보는 작은 컨트롤 — 드롭다운(Picker)으로 C3~C6 범위에서
+    /// 반음 단위로 고르고(예전 Stepper 범위와 동일, 47절), 재생 버튼을 누르면 그 음을 계속
+    /// 재생해서 무반주로 노래를 시작할 때 음정을 잡을 수 있게 한다. 녹음 버튼보다 시선을 끌면
+    /// 안 되는 보조 기능이라 카드 배경 없이 작게 둔다. `TonePlayer`는 자체 오디오 엔진이라
+    /// 아직 마이크가 켜지기 전(대기 상태)에만 노출되므로 되먹임 걱정이 없다.
     private var startingNoteControls: some View {
-        HStack(spacing: Theme.Spacing.sm) {
-            Stepper(value: $startingNoteMIDI, in: 48...84) {
-                Label {
-                    Text(NoteNameConverter.convert(frequency: NoteNameConverter.frequency(forMIDINote: startingNoteMIDI))?.noteName ?? "?")
-                        .font(.system(.subheadline, design: .monospaced))
-                        .fontWeight(.semibold)
-                } icon: {
-                    Image(systemName: "tuningfork")
+        HStack(spacing: Theme.Spacing.xs) {
+            Image(systemName: "tuningfork")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Picker("첫음", selection: $startingNoteMIDI) {
+                ForEach(Array(stride(from: 48, through: 84, by: 1)), id: \.self) { midi in
+                    Text(NoteNameConverter.convert(frequency: NoteNameConverter.frequency(forMIDINote: midi))?.noteName ?? "?")
+                        .tag(midi)
                 }
             }
+            .pickerStyle(.menu)
+            .font(Theme.Typography.caption2)
             .onChange(of: startingNoteMIDI) { _, newValue in
                 startingNotePlayer.setFrequency(NoteNameConverter.frequency(forMIDINote: newValue))
             }
@@ -399,16 +404,14 @@ struct PracticeView: View {
             Button {
                 toggleStartingNotePlayback()
             } label: {
-                Label(isPlayingStartingNote ? "정지" : "첫음 듣기", systemImage: isPlayingStartingNote ? "stop.fill" : "play.fill")
+                Image(systemName: isPlayingStartingNote ? "stop.fill" : "play.fill")
+                    .font(.caption)
             }
-            .buttonStyle(.bordered)
+            .harmonyButtonStyle()
+            .controlSize(.small)
+            .accessibilityLabel(isPlayingStartingNote ? "첫음 재생 정지" : "첫음 듣기")
         }
-        .padding(Theme.Spacing.sm)
-        .frame(maxWidth: .infinity)
-        .background(
-            Color(uiColor: .secondarySystemGroupedBackground),
-            in: RoundedRectangle(cornerRadius: Theme.cardCornerRadius, style: .continuous)
-        )
+        .foregroundStyle(.secondary)
     }
 
     private func toggleStartingNotePlayback() {
@@ -442,6 +445,15 @@ struct PracticeView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                // "조성 말고 각각의 음에 대한 정보"(순서대로 어떤 음이 잡혔는지) 요청 —
+                // 조성 하나로 뭉뚱그리지 않고 melodySteps에 이미 있는 노트별 이름을 그대로
+                // 나열해서, 부른 음과 악보 위치가 실제로 맞는지 눈으로 대조할 수 있게 한다.
+                if !melodySteps.isEmpty {
+                    Text("감지된 음: " + melodySteps.map(\.noteName).joined(separator: " · "))
+                        .font(Theme.Typography.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 if fillAvailable {
                     VexFlowScoreView(steps: melodySteps, mutedVoices: $mutedVoices)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -454,7 +466,7 @@ struct PracticeView: View {
                     } label: {
                         Label("전체화면으로 크게 보기", systemImage: "arrow.up.left.and.arrow.down.right")
                     }
-                    .buttonStyle(.bordered)
+                    .harmonyButtonStyle()
                     .frame(maxWidth: .infinity)
                 }
             }
@@ -490,7 +502,7 @@ struct PracticeView: View {
                 }
 
                 playEnabledVoicesButton
-                    .buttonStyle(.borderedProminent)
+                    .harmonyButtonStyle(prominent: true)
                     .frame(maxWidth: .infinity)
                     // "지금 쓸 수 있는 녹음이 있는지"만 본다 — isCapturing(마이크가 지금 열려
                     // 있는지)로 막으면, 녹음을 다 마친 뒤(=isCapturing이 이미 false) 정작 이
@@ -534,7 +546,7 @@ struct PracticeView: View {
         } label: {
             Label(voice.koreanLabel, systemImage: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
         }
-        .buttonStyle(.bordered)
+        .harmonyButtonStyle()
         .tint(isMuted ? .secondary : Theme.tint)
     }
 
@@ -572,7 +584,7 @@ struct PracticeView: View {
                 } label: {
                     Label(isActive ? "중지" : "채점", systemImage: isActive ? "stop.fill" : "target")
                 }
-                .buttonStyle(.bordered)
+                .harmonyButtonStyle()
                 .disabled(!isActive && melodySession.suggestedHarmony == nil)
             }
 

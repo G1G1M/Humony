@@ -31,6 +31,15 @@ struct SheetMusicFullScreenView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
+                if !steps.isEmpty {
+                    Text("감지된 음: " + steps.map(\.noteName).joined(separator: " · "))
+                        .font(Theme.Typography.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal)
+                        .padding(.top, Theme.Spacing.xs)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
                 // 프레임을 따로 안 주면 NavigationStack의 남은 세로 공간을 그대로 받는다 —
                 // score.html 내부가 이미 overflow:auto라, 여기서 넘치는 내용은 웹뷰 안에서
                 // 스크롤된다(바깥에 SwiftUI ScrollView를 또 두면 스크롤이 중첩돼 오히려 헷갈림).
@@ -73,7 +82,7 @@ struct SheetMusicFullScreenView: View {
         } label: {
             Label(voice.koreanLabel, systemImage: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
         }
-        .buttonStyle(.bordered)
+        .harmonyButtonStyle()
         .tint(isMuted ? .secondary : Theme.tint)
     }
 }
