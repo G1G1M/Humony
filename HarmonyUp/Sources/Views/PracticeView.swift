@@ -526,7 +526,14 @@ struct PracticeView: View {
         isCapturing = false
         quickRecordPhase = .analyzing
 
-        let samples = quickRecordBuffer
+        // 마이크 원본 신호의 크기가 기기마다 크게 다를 수 있다 — `.measurement` 모드는 AGC를
+        // 꺼서 원본 게인이 그대로 드러나는데, 아이패드 실기기에서 가까이 대고 불러도 최대
+        // 진폭이 0.01 안팎으로 확인됨(63절 진단 결과, 추측 아닌 실측). 이 정도 크기는
+        // `VoiceActivityDetector`의 에너지 임계값(0.0001, 평균 제곱)을 거의 못 넘어서 "노래가
+        // 인식되지 않았어요"로 이어졌다. "내 목소리로 화음" 재생 직전에 쓰던 것과 같은
+        // `AudioGain.normalizeLoudness`를 분석 직전에도 적용해서, 이후 파이프라인(VAD/YIN)이
+        // 기기별 원본 게인 차이에 휘둘리지 않게 한다.
+        let samples = AudioGain.normalizeLoudness(quickRecordBuffer)
         let rate = quickRecordSampleRate
         Task {
             let analyzed = RecordingAnalyzer.analyze(recordingSamples: samples, sampleRate: rate)
