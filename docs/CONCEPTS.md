@@ -1510,3 +1510,33 @@ WKWebView/JS 렌더링은 유닛테스트 대상이 아니다(그래프 연결/J
 ### 검증
 
 새 로직(순수 계산) 없이 SwiftUI 뷰만 추가한 거라 유닛테스트는 92개 그대로 통과. 실기기(Ian) 빌드+설치+실행 완료.
+
+---
+
+## 61. iPad 분할 레이아웃 실제 구현
+
+### 배경
+
+사용자가 앞서 요청한 시각 프로토타입(아티팩트)을 보고 "iPadOS가 맞는 것 같다. 어떻게 진행하면 될까?"로 실제 반영을 요청. 플랫폼 확장(새 레이아웃 분기)이라 CLAUDE.md 원칙대로 plan mode로 접근을 먼저 확정받은 뒤 구현했다.
+
+### 확인한 전제
+
+`project.yml`엔 `TARGETED_DEVICE_FAMILY`를 명시하지 않았지만 XcodeGen이 만든 프로젝트엔 이미 `"1,2"`(아이폰+아이패드 유니버설)로 들어가 있었다 — 즉 새 타깃/새 프로젝트 설정 없이 곧바로 아이패드에서 실행 가능한 상태였고, 문제는 순전히 "레이아웃이 아이폰용 세로 스택 그대로 늘어나기만 한다"는 것뿐이었다.
+
+### 접근 — `NavigationSplitView` 대신 사이즈클래스 분기
+
+`@Environment(\.horizontalSizeClass)`가 `.regular`일 때만 분할 레이아웃(`regularLayout`)으로, 그 외(`.compact`, 아이폰 세로/아이패드 Split View로 좁아진 상태)엔 기존 카드 스택(`compactLayout`)을 그대로 쓴다. 기기 종류(`UIDevice.userInterfaceIdiom`)가 아니라 실제 표시 폭으로 판단하는 게 애플이 권장하는 적응형 방식 — 부수적으로 아이패드 멀티태스킹으로 좁아지면 자동으로 아이폰 방식으로 폴백되고, 대화면 아이폰(Pro Max) 가로모드에서도 분할 레이아웃이 자연스럽게 적용된다.
+
+프로토타입 캡션엔 "`NavigationSplitView`로 다시 설계해야 한다"고 썼었는데, 실제로 짜보니 그 정도로 무겁지 않았다 — 이 화면은 여러 문서를 오가는 사이드바 내비게이션 구조가 아니라 "화면 하나, 공간 있으면 두 열로"에 가까워서, 조건부 `HStack` 하나로 충분했다. `NavigationSplitView`의 사이드바 표시상태/독립 네비게이션 스택 같은 부가 상태 관리는 애초에 필요 없었다.
+
+### 구현
+
+`PracticeView`의 기존 인라인 카드 4개(캡처 히어로/악보/내 목소리로 화음/채점)를 `@ViewBuilder` computed property(`captureHero`, `sheetMusicPanel(fillAvailable:)`, `voiceHarmonyPanel`, `scoringCard`)로 추출해서 두 레이아웃이 그대로 공유한다 — `@State`/함수는 전혀 안 바꾸고 배치만 갈랐다.
+
+- **`compactLayout`**: 예전 `body`와 동일(`NavigationStack`+`ScrollViewReader`+세로 카드 스택+자동 스크롤).
+- **`regularLayout`**: `HStack` — 왼쪽은 고정폭(380pt, 아이폰 카드 폭과 비슷해서 `QuickRecordView` 등 기존 서브뷰가 그대로 잘 보임) `ScrollView`에 캡처+내 목소리로 화음+채점, 오른쪽은 `hasCapturedNote`면 `sheetMusicPanel(fillAvailable: true)`, 아니면 빈 상태(`sheetMusicEmptyState`, 피아노건반 아이콘+"먼저 녹음하면 여기에 악보가 나와요" — 애플 앱들의 디테일 패널 빈 상태 관례).
+- `sheetMusicPanel(fillAvailable:)`가 `true`면 `VexFlowScoreView`가 고정 높이(460pt) 대신 `.frame(maxWidth: .infinity, maxHeight: .infinity)`로 남은 공간을 꽉 채우고, 이미 상시 크게 보이니 "전체화면으로 크게 보기" 버튼은 뺀다(`SheetMusicFullScreenView`에서 이미 검증한 것과 같은 원리 — 프레임을 안 주면 WKWebView가 남은 공간을 그대로 받음).
+
+### 검증
+
+유닛테스트 92개 그대로 통과(레이아웃 배치만 바꿔서 로직 회귀 없음). 아이폰(Ian) 실기기 빌드+설치 완료(기기 잠금으로 자동 실행만 실패 — 이미 여러 번 겪은 패턴, 설치 성공 자체가 컴팩트 레이아웃 회귀 없음의 1차 확인). 아이패드 시뮬레이터(iPad Air 11-inch (M3))에 설치+실행 후 스크린샷으로 분할 레이아웃 확인 — 왼쪽 고정폭 패널에 캡처 히어로, 오른쪽 남은 공간 전체에 빈 상태 안내가 중앙 정렬로 정확히 나옴. **실기기 아이패드는 없어서 이번엔 시뮬레이터로만 확인 — 아이패드를 마련하면 실기기 확인 필요.** 녹음 후(`hasCapturedNote == true`) 오른쪽 패널에 악보가 실제로 꽉 차서 나오는지는 시뮬레이터 마이크로 노래를 부를 수 없어서 이번엔 코드 경로(SheetMusicFullScreenView와 동일한 프레임 없는 확장 패턴)로만 확인 — 다음에 실제 목소리로 확인 필요.

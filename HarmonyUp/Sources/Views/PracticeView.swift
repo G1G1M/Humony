@@ -40,6 +40,11 @@ enum PlaybackVoice: CaseIterable, Hashable {
 /// 않음) 하나로 통합했다.
 struct PracticeView: View {
     @Environment(\.modelContext) private var modelContext
+    // 아이패드(또는 가로모드 대화면 아이폰)에서 왼쪽=녹음/재생/채점, 오른쪽=악보(상시 큼) 두 열
+    // 레이아웃으로 바꾸는 기준. 기기 종류(UIDevice.userInterfaceIdiom)가 아니라 실제 표시 폭으로
+    // 판단하는 게 애플이 권장하는 적응형 방식이라, 아이패드 Split View로 좁아지면 자동으로 아이폰
+    // 방식으로 폴백되고 반대로 대화면 아이폰 가로모드에서도 자연스럽게 두 열이 적용된다.
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     // 빠른 녹음 전용 상태 — 녹음 전체를 모았다가 멈춘 뒤 한 번에 RecordingAnalyzer로 분석한다.
     @State private var quickRecordPhase: QuickRecordView.Phase = .idle
@@ -129,111 +134,50 @@ struct PracticeView: View {
     private var hasHarmony: Bool { melodySession.suggestedHarmony != nil }
 
     var body: some View {
+        Group {
+            if horizontalSizeClass == .regular {
+                regularLayout
+            } else {
+                compactLayout
+            }
+        }
+        .tint(Theme.tint)
+        .onAppear {
+            micPermissionDenied = AVAudioApplication.shared.recordPermission == .denied
+        }
+        .onDisappear {
+            audioCapture.stop()
+            voiceClipPlayer.stop()
+            isPlayingVoiceClip = false
+        }
+        .fullScreenCover(isPresented: $showingFullScreenScore) {
+            SheetMusicFullScreenView(steps: melodySteps, mutedVoices: $mutedVoices)
+        }
+    }
+
+    private var compactLayout: some View {
         NavigationStack {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
-                        // 캡처 영역 — 여기서부터 흐름이 시작된다. 빠른 녹음이 연습의 유일한 진입점이라
-                        // 카드 크롬(제목바/테두리) 없이 화면의 주인공이 되는 히어로 레이아웃을 쓴다
-                        // (QuickRecordView가 스스로 대기/녹음 중 상태를 꾸민다).
-                        Group {
-                            if micPermissionDenied {
-                                micPermissionDeniedContent
-                            } else {
-                                QuickRecordView(
-                                    phase: quickRecordPhase,
-                                    elapsed: Double(quickRecordBuffer.count) / quickRecordSampleRate,
-                                    maxDuration: quickRecordMaxDuration,
-                                    waveformSamples: quickRecordBuffer,
-                                    onStart: startQuickRecording,
-                                    onStop: stopQuickRecording,
-                                    onCancel: cancelQuickRecording,
-                                    onReset: resetSession
-                                )
-                            }
-                        }
-                        .id("captureCard")
+                        captureHero
+                            .id("captureCard")
 
                         // 악보(VexFlow 오선보) — 첫 녹음 분석이 끝나기 전엔 보여줄 게 없다.
                         if hasCapturedNote {
-                            HarmonyCard("악보", systemImage: "pianokeys") {
-                                VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                                    VexFlowScoreView(steps: melodySteps, mutedVoices: $mutedVoices)
-                                        .frame(height: VexFlowScoreView.preferredHeight)
-
-                                    Button {
-                                        showingFullScreenScore = true
-                                    } label: {
-                                        Label("전체화면으로 크게 보기", systemImage: "arrow.up.left.and.arrow.down.right")
-                                    }
-                                    .buttonStyle(.bordered)
-                                    .frame(maxWidth: .infinity)
-                                }
-                            }
-                            .id("sheetMusicCard")
-                            .transition(.opacity.combined(with: .move(edge: .top)))
+                            sheetMusicPanel(fillAvailable: false)
+                                .id("sheetMusicCard")
+                                .transition(.opacity.combined(with: .move(edge: .top)))
                         }
 
-                        // 내 목소리로 화음: 화음이 나오기 전엔 안 보인다(할 게 없으므로).
+                        // 내 목소리로 화음 + 채점: 화음이 나오기 전엔 안 보인다(할 게 없으므로).
                         if melodySession.suggestedHarmony != nil {
-                            HarmonyCard("내 목소리로 화음", systemImage: "music.mic", iconColor: Theme.voiceAccent) {
-                                VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                                    // 버튼보다 먼저 설명을 둬서, 뭘 누르기 전에 "이게 뭘 하는 버튼인지"부터
-                                    // 읽히게 한다.
-                                    Text(String(format: "방금 녹음한 노래를 그대로 베이스/3도/5도로 옮겨서 들려줘요 (확보된 목소리: %.1f초)",
-                                                Double(recentVoiceBuffer.count) / recentVoiceSampleRate))
-                                        .font(Theme.Typography.caption)
-                                        .foregroundStyle(.secondary)
+                            voiceHarmonyPanel
+                                .id("voiceHarmonyCard")
+                                .transition(.opacity.combined(with: .move(edge: .top)))
 
-                                    // 성부별 뮤트 토글 — 눌러서 재생에 포함/제외할 성부를 자유롭게 고른다.
-                                    // "내 목소리로 베이스/3도/5도"를 각각 따로 미리듣는 버튼은 이 토글로
-                                    // 성부 하나만 켜고 재생하면 결과가 같아서(오히려 pan까지 적용돼 더
-                                    // 일관됨) 따로 두지 않고 하나로 합쳤다 — 버튼 수를 줄여 카드를 더
-                                    // 단순하게 다듬았다.
-                                    ViewThatFits {
-                                        HStack {
-                                            ForEach(PlaybackVoice.allCases, id: \.self) { voice in
-                                                voiceToggle(voice)
-                                            }
-                                        }
-                                        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                                            ForEach(PlaybackVoice.allCases, id: \.self) { voice in
-                                                voiceToggle(voice)
-                                            }
-                                        }
-                                    }
-
-                                    playEnabledVoicesButton
-                                        .buttonStyle(.borderedProminent)
-                                        .frame(maxWidth: .infinity)
-                                        // "지금 쓸 수 있는 녹음이 있는지"만 본다 — isCapturing(마이크가
-                                        // 지금 열려 있는지)로 막으면, 녹음을 다 마친 뒤(=isCapturing이
-                                        // 이미 false) 정작 이 버튼을 못 누르는 문제가 있었다(실제로 겪은 버그).
-                                        .disabled(recentVoiceBuffer.isEmpty || isPlaybackBusy)
-
-                                    if !statusText.isEmpty {
-                                        Text(statusText)
-                                            .font(Theme.Typography.caption2)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                            }
-                            .id("voiceHarmonyCard")
-                            .transition(.opacity.combined(with: .move(edge: .top)))
-                        }
-
-                        // 채점: 화음이 나오기 전엔 채점할 대상이 없으므로 안 보인다.
-                        if melodySession.suggestedHarmony != nil {
-                            HarmonyCard("따라 부르기 채점", systemImage: "target") {
-                                VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                                    scoringPanel(for: .bass)
-                                    Divider()
-                                    scoringPanel(for: .third)
-                                    Divider()
-                                    scoringPanel(for: .fifth)
-                                }
-                            }
-                            .transition(.opacity.combined(with: .move(edge: .top)))
+                            scoringCard
+                                .transition(.opacity.combined(with: .move(edge: .top)))
                         }
                     }
                     .padding()
@@ -260,21 +204,163 @@ struct PracticeView: View {
                 }
             }
         }
-        .tint(Theme.tint) // 앱 전역 유일한 인터랙션 틴트(Theme.swift) — 버튼/피커 등에 일괄 적용
-        .onAppear {
-            // 버튼을 눌러보기 전에 미리 알려준다.
-            micPermissionDenied = AVAudioApplication.shared.recordPermission == .denied
-        }
-        .onDisappear {
-            audioCapture.stop()
-            voiceClipPlayer.stop()
-            isPlayingVoiceClip = false
-        }
-        .fullScreenCover(isPresented: $showingFullScreenScore) {
-            SheetMusicFullScreenView(steps: melodySteps, mutedVoices: $mutedVoices)
+    }
+
+    // MARK: - 아이패드(레귤러) 레이아웃 — 왼쪽 녹음/재생/채점, 오른쪽 악보(상시 큼) 두 열
+
+    private var regularLayout: some View {
+        NavigationStack {
+            HStack(alignment: .top, spacing: Theme.Spacing.lg) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                        captureHero
+
+                        if melodySession.suggestedHarmony != nil {
+                            voiceHarmonyPanel
+                            scoringCard
+                        }
+                    }
+                    .padding()
+                    .animation(.easeOut(duration: 0.3), value: hasHarmony)
+                }
+                // 아이폰 카드 폭과 비슷하게 고정 — QuickRecordView 등 기존 서브뷰가 이 폭에서
+                // 이미 잘 보이도록 만들어져 있어서(컴팩트 레이아웃과 같은 폭), 그대로 재사용해도
+                // 어색하지 않다.
+                .frame(width: 380)
+
+                Group {
+                    if hasCapturedNote {
+                        sheetMusicPanel(fillAvailable: true)
+                    } else {
+                        sheetMusicEmptyState
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .padding()
+            .background(Color(uiColor: .systemGroupedBackground))
+            .navigationTitle("연습")
         }
     }
 
+    // MARK: - 두 레이아웃이 공유하는 섹션
+
+    /// 캡처 영역 — 여기서부터 흐름이 시작된다. 빠른 녹음이 연습의 유일한 진입점이라 카드
+    /// 크롬(제목바/테두리) 없이 화면의 주인공이 되는 히어로 레이아웃을 쓴다(QuickRecordView가
+    /// 스스로 대기/녹음 중 상태를 꾸민다).
+    @ViewBuilder
+    private var captureHero: some View {
+        if micPermissionDenied {
+            micPermissionDeniedContent
+        } else {
+            QuickRecordView(
+                phase: quickRecordPhase,
+                elapsed: Double(quickRecordBuffer.count) / quickRecordSampleRate,
+                maxDuration: quickRecordMaxDuration,
+                waveformSamples: quickRecordBuffer,
+                onStart: startQuickRecording,
+                onStop: stopQuickRecording,
+                onCancel: cancelQuickRecording,
+                onReset: resetSession
+            )
+        }
+    }
+
+    /// 악보(VexFlow 오선보) 카드. `fillAvailable`이 true면(아이패드 오른쪽 패널) 고정 높이
+    /// 대신 남은 공간을 꽉 채우고, 이미 상시 크게 보이니 "전체화면으로 크게 보기" 버튼은 뺀다
+    /// (그 버튼은 컴팩트 레이아웃에서 좁은 카드 안에 갇힌 악보를 크게 보기 위한 것이었다).
+    private func sheetMusicPanel(fillAvailable: Bool) -> some View {
+        HarmonyCard("악보", systemImage: "pianokeys") {
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                if fillAvailable {
+                    VexFlowScoreView(steps: melodySteps, mutedVoices: $mutedVoices)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    VexFlowScoreView(steps: melodySteps, mutedVoices: $mutedVoices)
+                        .frame(height: VexFlowScoreView.preferredHeight)
+
+                    Button {
+                        showingFullScreenScore = true
+                    } label: {
+                        Label("전체화면으로 크게 보기", systemImage: "arrow.up.left.and.arrow.down.right")
+                    }
+                    .buttonStyle(.bordered)
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: fillAvailable ? .infinity : nil, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: fillAvailable ? .infinity : nil)
+    }
+
+    /// 아직 녹음이 없을 때 아이패드 오른쪽 패널에 보여주는 빈 상태 — 애플 앱들의 디테일
+    /// 패널(선택된 항목이 없을 때) 관례와 같다.
+    private var sheetMusicEmptyState: some View {
+        VStack(spacing: Theme.Spacing.sm) {
+            Image(systemName: "pianokeys")
+                .font(.system(size: 40))
+                .foregroundStyle(.tertiary)
+            Text("녹음이 완료되면 여기에 악보가 나와요")
+                .font(Theme.Typography.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var voiceHarmonyPanel: some View {
+        HarmonyCard("내 목소리로 화음", systemImage: "music.mic", iconColor: Theme.voiceAccent) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                // 버튼보다 먼저 설명을 둬서, 뭘 누르기 전에 "이게 뭘 하는 버튼인지"부터 읽히게 한다.
+                Text(String(format: "방금 녹음한 노래를 그대로 베이스/3도/5도로 옮겨서 들려줘요 (확보된 목소리: %.1f초)",
+                            Double(recentVoiceBuffer.count) / recentVoiceSampleRate))
+                    .font(Theme.Typography.caption)
+                    .foregroundStyle(.secondary)
+
+                // 성부별 뮤트 토글 — 눌러서 재생에 포함/제외할 성부를 자유롭게 고른다. "내 목소리로
+                // 베이스/3도/5도"를 각각 따로 미리듣는 버튼은 이 토글로 성부 하나만 켜고 재생하면
+                // 결과가 같아서(오히려 pan까지 적용돼 더 일관됨) 따로 두지 않고 하나로 합쳤다 —
+                // 버튼 수를 줄여 카드를 더 단순하게 다듬었다.
+                ViewThatFits {
+                    HStack {
+                        ForEach(PlaybackVoice.allCases, id: \.self) { voice in
+                            voiceToggle(voice)
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                        ForEach(PlaybackVoice.allCases, id: \.self) { voice in
+                            voiceToggle(voice)
+                        }
+                    }
+                }
+
+                playEnabledVoicesButton
+                    .buttonStyle(.borderedProminent)
+                    .frame(maxWidth: .infinity)
+                    // "지금 쓸 수 있는 녹음이 있는지"만 본다 — isCapturing(마이크가 지금 열려
+                    // 있는지)로 막으면, 녹음을 다 마친 뒤(=isCapturing이 이미 false) 정작 이
+                    // 버튼을 못 누르는 문제가 있었다(실제로 겪은 버그).
+                    .disabled(recentVoiceBuffer.isEmpty || isPlaybackBusy)
+
+                if !statusText.isEmpty {
+                    Text(statusText)
+                        .font(Theme.Typography.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var scoringCard: some View {
+        HarmonyCard("따라 부르기 채점", systemImage: "target") {
+            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                scoringPanel(for: .bass)
+                Divider()
+                scoringPanel(for: .third)
+                Divider()
+                scoringPanel(for: .fifth)
+            }
+        }
+    }
 
     /// 성부 하나를 켜고 끄는 토글 칩 — 눌린 상태(재생에 포함)면 채워진 스타일, 꺼진 상태(뮤트)면
     /// 테두리만 있는 스타일로 구분한다. 전부 꺼진 채로 재생 버튼을 누르면 안내 메시지만 뜨고

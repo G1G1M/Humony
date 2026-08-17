@@ -59,6 +59,7 @@
 - [x] **VexFlow 1차 시안 크기/겹침/라벨 재조정**: "너무 작고, 촘촘해서 겹치고, 음표가 단순했으면" 피드백 — `score.html`의 `overflow-y: hidden`(내용이 카드 높이를 넘치면 잘려서 "겹쳐 보인" 진짜 원인)을 세로도 스크롤되게 수정, `context.scale(1.4)`로 오선/음표/음자리표 전체를 비례 확대, 마디 폭·성부 간 간격도 넓힘, 음표마다 붙였던 음이름 라벨(Annotation)은 제거(오선 위치 자체가 이미 정확한 음높이 정보라 불필요, 라벨 충돌이 촘촘함의 원인이기도 했음). 유닛테스트 84개 유지, 실기기(Ian) 빌드+설치 완료
 - [x] **VexFlow 리듬/정렬 개선 — 균일 4분음표 탈피 + 성부 간 쉼표 정렬**: "실제 악보처럼 안 보이고 인위적이다" 피드백 — 원인은 (1) 모든 음을 실제 길이 데이터를 무시하고 균일한 4분음표로만 그린 점, (2) 화음 없는 스텝을 건너뛰어(`compactMap`) 성부마다 음 개수가 달라지고 그걸 각자 4개씩 따로 마디로 잘라서 성부끼리 마디가 실제로는 어긋나 있던 정렬 버그. 신규 `RhythmQuantizer`(순수 함수, 유닛테스트 8개)가 중앙값 대비 상대적 길이로 8분/4분/점4분/2분음표를 분류하고 4박 단위로 마디를 나눔 — `VexFlowScoreView`는 화음 없는 스텝을 쉼표로 채워 모든 성부의 음 배열 길이를 동일하게 맞추고, 마디 구성(`measureBreaks`)을 전 성부가 공유하도록 재작성. `render.js`는 실제 길이 반영 + 쉼표(`"qr"` 등) + `Vex.Flow.Beam.generateBeams`로 8분음표 빔 묶음 추가. 유닛테스트 92개(84+8) 통과, 실기기(Ian) 빌드+설치+실행 완료
 - [x] **악보 전체화면 뷰**: "악보만 보이는 뷰를 따로 만들어서 보여줄래? 이게 제대로 만들어지는 건지를 모르겠다" 요청 — 기존 "악보" 카드는 다른 카드들과 나란히 고정 높이(460pt) 안에 있어 렌더링 품질 판단이 어려웠음. `SheetMusicFullScreenView`(신규) — `VexFlowScoreView`를 `fullScreenCover`로 크게 보여주고, 같은 `mutedVoices` 공유 상태로 성부 on/off 토글도 그대로 둠(여기서 바꾼 뮤트가 "내 목소리로 화음" 재생에도 반영). "악보" 카드에 "전체화면으로 크게 보기" 버튼 추가. 유닛테스트 92개 유지, 실기기(Ian) 빌드+설치+실행 완료
+- [x] **iPad 분할 레이아웃**: 시각 프로토타입(아티팩트)을 보고 "iPadOS가 맞는 것 같다"는 사용자 결정으로 실제 반영. `@Environment(\.horizontalSizeClass)`가 `.regular`일 때만(아이패드, 또는 대화면 아이폰 가로모드) 왼쪽(캡처+내 목소리로 화음+채점, 고정폭 380pt)/오른쪽(악보, `VexFlowScoreView`가 남은 공간을 꽉 채움) 두 열 `HStack`으로 분기 — `NavigationSplitView`는 사이드바 내비게이션이 필요 없는 구조라 과해서 안 씀. `.compact`(아이폰, 아이패드 Split View로 좁아진 상태)는 기존 카드 스택 그대로. 기존 4개 카드를 `@ViewBuilder`로 추출해 두 레이아웃이 공유, 로직/상태 변경 없음. 유닛테스트 92개 통과, 아이폰(Ian) 회귀 없이 설치 완료, 아이패드 시뮬레이터(iPad Air 11-inch (M3))로 분할 레이아웃 스크린샷 확인 — 아이패드 실기기는 아직 없어 시뮬레이터로만 검증
 - [ ] **로드맵 Phase 7~9**: 카라오케 재생헤드 동기화, 연습 탭 최종 통합, 다듬기
 
 ## 구성 요소 (`HarmonyUp/Sources/PitchEngine/`)
@@ -85,7 +86,7 @@
 | `RecordingAnalyzer` | `MelodySegmenter` 출력을 `KeyDetector`/`ChordGenerator`에 연결해 기존 `MelodyStep` 배열로 변환 |
 | `RhythmQuantizer` | 실제 음 길이(초)를 중앙값 대비 상대적으로 비교해 VexFlow 음표 종류(8분/4분/점4분/2분)와 마디 구성으로 변환 |
 | `VexFlowScoreView` | `WKWebView`로 로컬 VexFlow(MIT, 벤더링)를 로드해 성부별 오선보를 그리는 브릿지 뷰 |
-| `SheetMusicFullScreenView` | `VexFlowScoreView`를 전체화면으로 크게 보여주는 렌더링 검증용 화면 |
+| `SheetMusicFullScreenView` | `VexFlowScoreView`를 전체화면으로 크게 보여주는 렌더링 검증용 화면(아이폰 컴팩트 레이아웃 전용) |
 
 ## 개발
 
