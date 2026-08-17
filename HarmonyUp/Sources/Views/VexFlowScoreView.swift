@@ -77,24 +77,37 @@ struct VexFlowScoreView: UIViewRepresentable {
             let color: String
             let notes: [Note]
         }
-        // 음이름 라벨(Annotation)은 v1에 있었지만 "촘촘해서 겹친다"는 피드백을 받아
-        // render.js에서 뺐다 — 이제 오선 위치 자체가 정확한 음높이라 라벨이 굳이 필요
-        // 없어졌다(docs/CONCEPTS.md 58절). 그래서 이 구조체엔 key/sharp만 남는다.
+        // key가 nil이면 쉼표(그 성부가 이 스텝엔 음이 없다는 뜻 — 온음계 밖 멜로디 음이라
+        // 화음을 못 정의한 경우 등). duration은 RhythmQuantizer가 실제 길이(초)로 정한
+        // VexFlow 음표 코드("8"/"q"/"qd"/"h") — 모든 성부가 항상 4분음표로만 그려져서
+        // "인위적으로 보인다"는 피드백을 받아 추가했다(docs/CONCEPTS.md 59절).
         struct Note: Encodable {
-            let key: String
+            let key: String?
             let sharp: Bool
+            let duration: String
         }
         let voices: [Voice]
+        // 전 성부가 공유하는 마디 구성("이 마디엔 음 몇 개") — 모든 성부가 같은 `MelodyStep`
+        // 타이밍을 공유하므로, 이 하나의 구성을 그대로 써야 성부끼리 같은 순간의 음이 화면에서
+        // 세로로 정확히 맞는다(쉼표로 빈 자리를 채우는 것과 짝을 이루는 정렬 보장).
+        let measureBreaks: [Int]
     }
 
     private func buildPayload() -> String {
+        let validSteps = steps.filter { $0.onsetTime != nil }
+        guard !validSteps.isEmpty else {
+            return "{\"voices\":[],\"measureBreaks\":[]}"
+        }
+
+        let quantized = RhythmQuantizer.quantize(durations: validSteps.map { $0.duration ?? 0.3 })
+        let measureBreaks = RhythmQuantizer.measureBreaks(notes: quantized)
+
         var voiceRows: [Payload.Voice] = []
 
         if !mutedVoices.contains(.melody) {
-            let notes = steps.compactMap { step -> Payload.Note? in
-                guard step.onsetTime != nil else { return nil }
+            let notes = zip(validSteps, quantized).map { step, quantizedNote -> Payload.Note in
                 let (key, sharp) = Self.vexFlowKey(forMIDINote: step.midiNote)
-                return Payload.Note(key: key, sharp: sharp)
+                return Payload.Note(key: key, sharp: sharp, duration: quantizedNote.vexFlowDuration)
             }
             voiceRows.append(Payload.Voice(clef: "treble", color: Self.melodyColorHex, notes: notes))
         }
@@ -104,27 +117,32 @@ struct VexFlowScoreView: UIViewRepresentable {
         for interval in [ChordGenerator.Interval.fifth, .third] {
             let voice = Self.playbackVoice(for: interval)
             guard !mutedVoices.contains(voice) else { continue }
-            let notes = harmonyNotes(for: interval)
+            let notes = harmonyNotes(for: interval, steps: validSteps, quantized: quantized)
             voiceRows.append(Payload.Voice(clef: "treble", color: Self.colorHex(for: interval), notes: notes))
         }
 
         if !mutedVoices.contains(.bass) {
-            let notes = harmonyNotes(for: .bass)
+            let notes = harmonyNotes(for: .bass, steps: validSteps, quantized: quantized)
             voiceRows.append(Payload.Voice(clef: "bass", color: Self.colorHex(for: .bass), notes: notes))
         }
 
-        let payload = Payload(voices: voiceRows)
+        let payload = Payload(voices: voiceRows, measureBreaks: measureBreaks)
         guard let data = try? JSONEncoder().encode(payload), let json = String(data: data, encoding: .utf8) else {
-            return "{\"voices\":[]}"
+            return "{\"voices\":[],\"measureBreaks\":[]}"
         }
         return json
     }
 
-    private func harmonyNotes(for interval: ChordGenerator.Interval) -> [Payload.Note] {
-        steps.compactMap { step -> Payload.Note? in
-            guard step.onsetTime != nil, let note = step.harmony?.first(where: { $0.interval == interval }) else { return nil }
+    /// steps/quantized는 항상 같은 길이(둘 다 validSteps 기준)라, 화음이 없는 스텝은 건너뛰지
+    /// 않고 쉼표(key: nil)로 채운다 — 그래야 모든 성부의 음 배열 길이가 똑같이 유지돼서
+    /// `measureBreaks`를 그대로 공유해도 어긋나지 않는다.
+    private func harmonyNotes(for interval: ChordGenerator.Interval, steps: [MelodyStep], quantized: [RhythmQuantizer.QuantizedNote]) -> [Payload.Note] {
+        zip(steps, quantized).map { step, quantizedNote -> Payload.Note in
+            guard let note = step.harmony?.first(where: { $0.interval == interval }) else {
+                return Payload.Note(key: nil, sharp: false, duration: quantizedNote.vexFlowDuration)
+            }
             let (key, sharp) = Self.vexFlowKey(forMIDINote: note.midiNote)
-            return Payload.Note(key: key, sharp: sharp)
+            return Payload.Note(key: key, sharp: sharp, duration: quantizedNote.vexFlowDuration)
         }
     }
 
