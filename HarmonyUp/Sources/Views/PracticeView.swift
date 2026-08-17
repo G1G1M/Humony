@@ -151,6 +151,15 @@ struct PracticeView: View {
                         }
                         .id("captureCard")
 
+                        // 악보(피치 하이웨이) — 첫 녹음 분석이 끝나기 전엔 보여줄 게 없다.
+                        if hasCapturedNote {
+                            HarmonyCard("악보", systemImage: "pianokeys") {
+                                PitchHighwayView(steps: melodySteps)
+                            }
+                            .id("pitchHighwayCard")
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
+
                         // 내 목소리로 화음: 화음이 나오기 전엔 안 보인다(할 게 없으므로).
                         if melodySession.suggestedHarmony != nil {
                             HarmonyCard("내 목소리로 화음", systemImage: "music.mic", iconColor: Theme.voiceAccent) {
