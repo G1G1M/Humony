@@ -3,6 +3,35 @@ import SwiftData
 import AVFAudio
 import UIKit
 
+/// "내 목소리로 화음" 재생에서 켜고 끌 수 있는 성부 — `ChordGenerator.Interval`(베이스/3도/5도)
+/// 3개에 리드 멜로디(원음)를 더한 4가지. 멜로디는 화음 성부가 아니라서 `Interval`에는 없지만,
+/// 재생 시 뮤트 대상으로는 다른 성부와 동등하게 다뤄야 해서 별도 enum으로 감쌌다.
+enum PlaybackVoice: CaseIterable, Hashable {
+    case melody
+    case bass
+    case third
+    case fifth
+
+    var koreanLabel: String {
+        switch self {
+        case .melody: return "멜로디"
+        case .bass: return ChordGenerator.Interval.bass.koreanLabel
+        case .third: return ChordGenerator.Interval.third.koreanLabel
+        case .fifth: return ChordGenerator.Interval.fifth.koreanLabel
+        }
+    }
+
+    /// 멜로디(원음)는 화음 성부가 아니라서 대응하는 `Interval`이 없다.
+    var interval: ChordGenerator.Interval? {
+        switch self {
+        case .melody: return nil
+        case .bass: return .bass
+        case .third: return .third
+        case .fifth: return .fifth
+        }
+    }
+}
+
 /// "연습" 탭 — 빠른 녹음으로 노래 한 소절을 받아 조성/화음 판별 -> 화음 청취(합성음/내 목소리) ->
 /// 채점까지 한 세션의 흐름을 담당한다. 예전엔 이 화면 자체가 앱의 유일한 화면(`ContentView`)이었는데,
 /// 세션 기록(`HistoryView`)을 별도 탭으로 분리하면서 이름도 역할에 맞게 바꿨다. 예전엔 "단음"/"멜로디"
@@ -57,6 +86,10 @@ struct PracticeView: View {
     // 옮겨서 재생한다. 빠른 녹음이 끝나면 녹음 전체가 그대로 여기 채워진다(applyQuickRecordResult).
     @State private var recentVoiceBuffer: [Float] = []
     @State private var recentVoiceSampleRate: Double = 44100
+    // "전체 화음"/"화음만 듣기"로 나뉘어 있던 두 버튼을, 성부별로 켜고 끌 수 있는 토글 하나로
+    // 일반화했다(로드맵 Phase 4, docs/CONCEPTS.md 53절) — 리드 멜로디도 다른 성부와 동등하게
+    // 뮤트 대상이 된다. 기본값은 전부 켜짐(예전 "전체 화음" 버튼과 동일한 동작).
+    @State private var mutedVoices: Set<PlaybackVoice> = []
     private let voiceClipPlayer = VoiceClipPlayer()
     // 목소리 화음 재생 시작/끝에 적용할 페이드 길이 — 녹음 구간은 원본 파형의 임의 지점에서
     // 시작/끝나서, 그대로 재생하면 클릭음이 날 수 있다(AudioGain 참고).
@@ -238,6 +271,20 @@ struct PracticeView: View {
                                         .font(Theme.Typography.caption)
                                         .foregroundStyle(.secondary)
 
+                                    // 성부별 뮤트 토글 — 눌러서 재생에 포함/제외할 성부를 자유롭게 고른다.
+                                    ViewThatFits {
+                                        HStack {
+                                            ForEach(PlaybackVoice.allCases, id: \.self) { voice in
+                                                voiceToggle(voice)
+                                            }
+                                        }
+                                        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                                            ForEach(PlaybackVoice.allCases, id: \.self) { voice in
+                                                voiceToggle(voice)
+                                            }
+                                        }
+                                    }
+
                                     // ViewThatFits: 버튼 4개가 한 줄에 안 들어갈 만큼 글자가 커지면
                                     // 세로 배치로 자동 전환된다.
                                     ViewThatFits {
@@ -245,15 +292,13 @@ struct PracticeView: View {
                                             voiceButton(for: .bass)
                                             voiceButton(for: .third)
                                             voiceButton(for: .fifth)
-                                            voiceFullChordButton
-                                            voiceChoirOnlyButton
+                                            playEnabledVoicesButton
                                         }
                                         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                                             voiceButton(for: .bass)
                                             voiceButton(for: .third)
                                             voiceButton(for: .fifth)
-                                            voiceFullChordButton
-                                            voiceChoirOnlyButton
+                                            playEnabledVoicesButton
                                         }
                                     }
                                     .buttonStyle(.bordered)
@@ -335,21 +380,34 @@ struct PracticeView: View {
         }
     }
 
-    private var voiceFullChordButton: some View {
-        Button {
-            recordAndHarmonizeFullChordWithVoice(includeMelody: true)
+    /// 성부 하나를 켜고 끄는 토글 칩 — 눌린 상태(재생에 포함)면 채워진 스타일, 꺼진 상태(뮤트)면
+    /// 테두리만 있는 스타일로 구분한다. 전부 꺼진 채로 재생 버튼을 누르면 안내 메시지만 뜨고
+    /// 아무 소리도 안 나므로(guard, 아래 recordAndHarmonizeFullChordWithVoice), 최소 하나는
+    /// 남겨야 한다는 제약을 UI에서 강제로 막지는 않았다 — 자유롭게 다 꺼봤다가 이유를 읽고
+    /// 다시 켜는 편이, 어떤 조합이 막혀있는지 미리 계산해서 버튼을 비활성화하는 것보다 단순하다.
+    private func voiceToggle(_ voice: PlaybackVoice) -> some View {
+        let isMuted = mutedVoices.contains(voice)
+        return Button {
+            if isMuted {
+                mutedVoices.remove(voice)
+            } else {
+                mutedVoices.insert(voice)
+            }
         } label: {
-            Label("내 목소리로 전체 화음", systemImage: "waveform")
+            Label(voice.koreanLabel, systemImage: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
         }
+        .buttonStyle(.bordered)
+        .tint(isMuted ? .secondary : Theme.tint)
     }
 
-    // "화음이 골고루 안 들린다"는 피드백에 대응 — 리드 멜로디를 빼고 생성된 3성부(베이스/3도/5도)만
-    // 들려줘서, 화음 성부 자체가 잘 만들어졌는지(리드 멜로디에 묻히지 않고) 바로 확인할 수 있게 한다.
-    private var voiceChoirOnlyButton: some View {
+    /// 켜져 있는 성부만 골라 동시에 재생한다 — 예전엔 "전체 화음"(전부 켜짐 고정)과 "화음만
+    /// 듣기"(멜로디만 고정으로 꺼짐) 두 버튼으로 나뉘어 있던 걸, 토글로 자유롭게 조합할 수 있게
+    /// 일반화했다(로드맵 Phase 4, docs/CONCEPTS.md 53절).
+    private var playEnabledVoicesButton: some View {
         Button {
-            recordAndHarmonizeFullChordWithVoice(includeMelody: false)
+            recordAndHarmonizeFullChordWithVoice()
         } label: {
-            Label("화음만 듣기 (멜로디 제외)", systemImage: "waveform")
+            Label("재생", systemImage: "play.fill")
         }
     }
 
@@ -744,11 +802,11 @@ struct PracticeView: View {
         }
     }
 
-    /// "내 목소리로 베이스"/"3도"/"5도"는 한 음씩만 들려주는데, 이건 베이스+3도+5도로 옮긴
-    /// 목소리를(그리고 `includeMelody`가 true면 원음/리드 멜로디까지) 한꺼번에 섞어서
-    /// 아카펠라처럼 들려준다. `includeMelody: false`로 부르면 생성된 3성부만 남아서, 리드
-    /// 멜로디에 묻히지 않고 화음 성부 자체가 잘 만들어졌는지 그대로 확인할 수 있다.
-    private func recordAndHarmonizeFullChordWithVoice(includeMelody: Bool) {
+    /// "내 목소리로 베이스"/"3도"/"5도"는 한 음씩만 들려주는데, 이건 `mutedVoices`에 안 들어있는
+    /// (=켜진) 성부만 골라 한꺼번에 동시 재생한다 — 예전엔 "전체 화음"(고정 4성부)과 "화음만
+    /// 듣기"(멜로디 고정 제외) 두 버튼이었는데, 토글로 자유롭게 조합할 수 있게 일반화했다
+    /// (로드맵 Phase 4, docs/CONCEPTS.md 53절).
+    private func recordAndHarmonizeFullChordWithVoice() {
         guard !isPlaybackBusy else {
             statusText = "다른 소리가 재생 중이에요 — 끝난 뒤 다시 눌러주세요"
             return
@@ -767,42 +825,47 @@ struct PracticeView: View {
             statusText = "아직 녹음된 목소리가 없어요 — 먼저 녹음해주세요"
             return
         }
+        // 전부 뮤트된 채로 누르면 재생할 게 없다 — 조용히 아무것도 안 하는 대신 이유를 알려준다
+        // (버튼을 눌렀는데 반응이 없어 보이는 문제를 막기 위한, 이 파일 전반의 일관된 원칙).
+        guard mutedVoices.count < PlaybackVoice.allCases.count else {
+            statusText = "재생할 성부가 없어요 — 최소 하나는 켜주세요"
+            return
+        }
 
         let recorded = recentVoiceBuffer
         let rate = recentVoiceSampleRate
         let rootFrequency = melodySession.lastNote?.frequency
-        statusText = includeMelody ? "전체 화음 만드는 중…" : "화음만 만드는 중…"
+        let muted = mutedVoices
+        statusText = "화음 만드는 중…"
 
         Task {
-            // 베이스(한 옥타브 아래, 비율 < 1) + 3도 + 5도로 각각 옮긴 목소리를 만든다.
-            // PitchShifter.shift는 비율이 1보다 작아도(음을 낮출 때도) 그대로 동작하는
-            // 양방향이라 베이스만 따로 다른 처리가 필요 없다.
-            let bassShifted = PitchShifter.shift(samples: recorded, pitchRatio: bassRatio, sampleRate: rate, expectedFrequency: rootFrequency)
-            let thirdShifted = PitchShifter.shift(samples: recorded, pitchRatio: thirdRatio, sampleRate: rate, expectedFrequency: rootFrequency)
-            let fifthShifted = PitchShifter.shift(samples: recorded, pitchRatio: fifthRatio, sampleRate: rate, expectedFrequency: rootFrequency)
-            // 성부마다 다른 지연/디튠으로 더블링해서 두께를 준다 — 멜로디(원음)는 그대로 둔다.
-            // 이미 사용자 자신이 직접 부른 진짜 목소리라 "다른 사람이 한 번 더 부른" 효과가
-            // 필요 없고, 오히려 원음이 흔들리면 리드로서의 기준점이 흐려진다.
-            let bass = VoiceDoubler.apply(to: bassShifted, sampleRate: rate, interval: .bass)
-            let third = VoiceDoubler.apply(to: thirdShifted, sampleRate: rate, interval: .third)
-            let fifth = VoiceDoubler.apply(to: fifthShifted, sampleRate: rate, interval: .fifth)
-
             // 예전엔 트랙들을 Swift 배열 단계에서 미리 하나로 합쳐서(AudioGain.mixAndNormalize)
-            // 재생했는데, 그러면 4성부가 전부 같은 위치(모노)에서만 나와서 서로 뭉개져 들렸다.
+            // 재생했는데, 그러면 성부가 전부 같은 위치(모노)에서만 나와서 서로 뭉개져 들렸다.
             // 이제 각 트랙을 자기 체감 음량으로만 맞추고(합치지 않음) VoiceClipPlayer.playTracks로
-            // 넘겨서, 각 성부가 실제로 다른 좌우 위치에서 동시에 나오게 한다(docs/CONCEPTS.md 52절).
+            // 넘겨서, 켜진 성부가 실제로 다른 좌우 위치에서 동시에 나오게 한다(docs/CONCEPTS.md 52절).
             let fadeCount = Int(rate * voiceClipFadeDuration)
             func prepare(_ samples: [Float]) -> [Float] {
                 AudioGain.applyFadeInOut(AudioGain.normalizeLoudness(samples), fadeSampleCount: fadeCount)
             }
 
-            var tracks: [(samples: [Float], pan: Float)] = [
-                (prepare(bass), ChordGenerator.Interval.bass.pan),
-                (prepare(third), ChordGenerator.Interval.third.pan),
-                (prepare(fifth), ChordGenerator.Interval.fifth.pan)
-            ]
-            if includeMelody {
+            var tracks: [(samples: [Float], pan: Float)] = []
+
+            if !muted.contains(.melody) {
                 tracks.append((prepare(recorded), 0.0)) // 리드 멜로디는 중앙
+            }
+            // 베이스(한 옥타브 아래, 비율 < 1) + 3도 + 5도로 각각 옮긴 목소리를 만든다.
+            // PitchShifter.shift는 비율이 1보다 작아도(음을 낮출 때도) 그대로 동작하는
+            // 양방향이라 베이스만 따로 다른 처리가 필요 없다. 꺼진 성부는 계산 자체를 건너뛴다
+            // (WORLD 분석은 가볍지 않아서, 안 쓸 트랙까지 굳이 만들 필요 없음).
+            for (voice, interval, ratio) in [(PlaybackVoice.bass, ChordGenerator.Interval.bass, bassRatio),
+                                              (.third, .third, thirdRatio),
+                                              (.fifth, .fifth, fifthRatio)] where !muted.contains(voice) {
+                let shifted = PitchShifter.shift(samples: recorded, pitchRatio: ratio, sampleRate: rate, expectedFrequency: rootFrequency)
+                // 성부마다 다른 지연/디튠으로 더블링해서 두께를 준다 — 멜로디(원음)는 그대로 둔다.
+                // 이미 사용자 자신이 직접 부른 진짜 목소리라 "다른 사람이 한 번 더 부른" 효과가
+                // 필요 없고, 오히려 원음이 흔들리면 리드로서의 기준점이 흐려진다.
+                let doubled = VoiceDoubler.apply(to: shifted, sampleRate: rate, interval: interval)
+                tracks.append((prepare(doubled), interval.pan))
             }
 
             do {
@@ -810,7 +873,7 @@ struct PracticeView: View {
                 try voiceClipPlayer.playTracks(tracks, sampleRate: rate) {
                     isPlayingVoiceClip = false
                 }
-                statusText = includeMelody ? "내 목소리로 만든 전체 화음을 재생합니다" : "멜로디를 뺀 화음만 재생합니다"
+                statusText = "내 목소리로 만든 화음을 재생합니다"
             } catch {
                 isPlayingVoiceClip = false
                 statusText = "재생 실패: \(error.localizedDescription)"
@@ -973,6 +1036,7 @@ struct PracticeView: View {
         playingMelodyLineInterval = nil
         isPlayingVoiceClip = false
         recentVoiceBuffer = []
+        mutedVoices = []
         activeScoringInterval = nil
         lockedScoringTargets = [:]
         latestScores = [:]
