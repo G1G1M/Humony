@@ -584,8 +584,9 @@ struct PracticeView: View {
                     .frame(maxWidth: .infinity)
                     // "지금 쓸 수 있는 녹음이 있는지"만 본다 — isCapturing(마이크가 지금 열려
                     // 있는지)로 막으면, 녹음을 다 마친 뒤(=isCapturing이 이미 false) 정작 이
-                    // 버튼을 못 누르는 문제가 있었다(실제로 겪은 버그).
-                    .disabled(recentVoiceBuffer.isEmpty || isPlaybackBusy)
+                    // 버튼을 못 누르는 문제가 있었다(실제로 겪은 버그). isScoreRendering도 같이
+                    // 보는 이유는 playHarmonizedVoice의 가드 주석 참고.
+                    .disabled(recentVoiceBuffer.isEmpty || isPlaybackBusy || isScoreRendering)
 
                 if !statusText.isEmpty {
                     Text(statusText)
@@ -988,6 +989,16 @@ struct PracticeView: View {
     /// `recentVoiceBuffer`를 그 지점부터 잘라서 넣는 걸로 바뀌고, 나머지(정규화/시프트/더블링)는
     /// 그대로다.
     private func playHarmonizedVoice(startStepIndex: Int?) {
+        // 녹음 직후엔 악보 렌더링(WKWebView가 VexFlow로 레이아웃 계산하는 무거운 JS 작업)과
+        // 화음 피치시프트(WORLD 연산)가 동시에 실기기 CPU를 다투게 되는데, 그 여파로 재생 오디오
+        // 콜백이 밀려 소리가 끊기는 문제가 있었다("녹음 듣는데 음이 끊긴다" 실기기 제보) — 악보가
+        // 완전히 그려질 때까지는(isScoreRendering이 꺼질 때까지) 재생 자체를 시작하지 않는다.
+        // 버튼(playEnabledVoicesButton)은 .disabled로 같은 조건을 미리 막지만, 악보 탭(seekPlayback)은
+        // 버튼이 아니라 JS 쪽 이벤트라 여기서도 같이 막아야 한다.
+        guard !isScoreRendering else {
+            statusText = "악보를 그리는 중이에요 — 완료되면 다시 눌러주세요"
+            return
+        }
         let isSeek = startStepIndex != nil
         if isPlaybackBusy {
             // 탭으로 인한 재생은 "다른 소리가 재생 중이면 거부" 가드를 우회하고, 대신 지금

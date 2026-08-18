@@ -63,6 +63,23 @@ function setActiveStep(index) {
   elements.forEach(function (el) { recolor(el, ACTIVE_NOTE_COLOR); });
 }
 
+// 탭한 스텝의 음표를 즉시 살짝 눌렀다 돌아오는 느낌으로 깜빡여서, "눌렸다"는 걸 바로 알려준다.
+// setActiveStep(재생이 실제로 그 지점에 도달했을 때 오렌지로 칠하는 것)과는 별개 — 이건 탭한
+// 즉시(Swift 쪽 재생 준비가 아직 안 끝났어도) 반응이 와야 하는 순수 시각 피드백이라 색이 아니라
+// 투명도를 잠깐 낮췄다 올리는 방식으로 구현했다(recolor의 fill/stroke 갱신과 안 부딪힘).
+function flashTapFeedback(index) {
+  var elements = noteState.stepElements[index];
+  if (!elements) return;
+  elements.forEach(function (el) {
+    el.style.transition = 'opacity 0.08s ease-out';
+    el.style.opacity = '0.3';
+    setTimeout(function () {
+      el.style.transition = 'opacity 0.18s ease-in';
+      el.style.opacity = '1';
+    }, 80);
+  });
+}
+
 // 애플 뮤직 가사 탭과 같은 상호작용 — 음표 글자 자체가 아니라 "그 박자 전체 구간"(이웃 스텝과의
 // 중간 지점까지)을 탭 영역으로 잡는다. 작은 음표head를 정확히 맞추기 어려운 터치 UX 문제를
 // 피하기 위해서다.
@@ -90,6 +107,7 @@ function addTapRegions() {
 
     (function (capturedIndex) {
       rect.addEventListener('click', function () {
+        flashTapFeedback(capturedIndex);
         if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.harmonyUpNoteTap) {
           window.webkit.messageHandlers.harmonyUpNoteTap.postMessage(capturedIndex);
         }
