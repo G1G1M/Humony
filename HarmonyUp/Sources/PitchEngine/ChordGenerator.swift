@@ -119,10 +119,15 @@ enum ChordGenerator {
     ///     없다 — 항상 시퀀스 전체를 한 번에 넘겨야 한다.
     ///   - key: KeyDetector가 판별한 조성
     /// - Returns: `melodyNotes`와 인덱스가 정렬된 배열. 각 원소는 `[베이스, 이너보이스1(3도),
-    ///   이너보이스2(5도)]` — 그 노트가 판별된 조성의 온음계에 속하지 않으면(예: 반음계
-    ///   경과음) `nil`(기존 "온음계 밖 음은 화음 없음" 동작 유지). 온음계 밖 노트도 코드
-    ///   진행의 문맥(앞뒤 노트가 어떤 코드를 고르는지)에는 계속 영향을 준다 — 그 노트 자신의
-    ///   출력만 nil일 뿐, 흐름이 끊기지는 않는다.
+    ///   이너보이스2(5도)]`. 그 노트가 판별된 조성의 온음계에 속하지 않으면(예: 반음계
+    ///   경과음) 새 화음을 계산하지 않고 **직전 유효 화음을 그대로 이어서 반환**한다 — 실제
+    ///   백킹보컬/아카펠라 관행이 이렇다(화음 성부는 리드가 짧게 스쳐가는 경과음까지 따라
+    ///   움직이지 않고, 화음을 그대로 붙잡고 있다가 다음 화성 변화에서만 움직인다). 예전엔
+    ///   이 경우 nil을 반환해 재생/악보 양쪽에서 무음·쉼표로 끊겼는데, 실기기 청취 피드백
+    ///   ("화음에 쉼표가 껴서 안 매끄럽다")으로 이 방식이 오히려 더 안 어울린다는 게 확인돼
+    ///   바꿨다. 시퀀스 맨 앞부터 온음계 밖 음이 나와 붙잡을 직전 화음이 아직 없으면(비교
+    ///   대상 없음) 그때만 nil을 유지한다. 온음계 밖 노트가 코드 진행의 문맥(앞뒤 노트가
+    ///   어떤 코드를 고르는지)에 계속 영향을 주는 것은 그대로다(emissionScore가 중립 처리).
     static func harmonizeSequence(melodyNotes: [(midiNote: Int, duration: Double)], key: KeyDetector.DetectedKey) -> [[HarmonyNote]?] {
         guard !melodyNotes.isEmpty else { return [] }
 
@@ -133,10 +138,19 @@ enum ChordGenerator {
         let inScale = pitchClasses.map { scale.contains($0) }
         let path = viterbiDecode(pitchClasses: pitchClasses, durations: melodyNotes.map(\.duration), inScale: inScale, candidates: candidates)
 
-        return melodyNotes.indices.map { i in
-            guard inScale[i] else { return nil }
-            return buildHarmonyNotes(candidate: candidates[path[i]], melodyMIDINote: melodyNotes[i].midiNote)
+        var lastValidHarmony: [HarmonyNote]?
+        var results: [[HarmonyNote]?] = []
+        results.reserveCapacity(melodyNotes.count)
+        for i in melodyNotes.indices {
+            guard inScale[i] else {
+                results.append(lastValidHarmony)
+                continue
+            }
+            let notes = buildHarmonyNotes(candidate: candidates[path[i]], melodyMIDINote: melodyNotes[i].midiNote)
+            lastValidHarmony = notes
+            results.append(notes)
         }
+        return results
     }
 
     private static func diatonicScale(tonic: Int, mode: KeyDetector.Mode) -> [Int] {

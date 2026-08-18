@@ -2088,3 +2088,39 @@ Task 1(포먼트 시프팅) 확인을 기다리는 동안, 승인된 순서대�
 ### 검증
 
 유닛테스트 119개(116+믹스밸런스 3개) 통과, 시뮬레이터 빌드+테스트 확인. 실기기(Ian iPhone, Ian's iPad) 둘 다 빌드+설치+실행 완료. **믹스 밸런스가 실제로 바버샵풍으로 들리는지(근음/5도가 살짝 더 크게, 3도가 배경으로) 청취 확인 필요.**
+
+---
+
+## 84. 재생 중 끊김/"악보 생성중" 반복 + 화음 쉼표 — setActiveStep 중복 IPC 제거 + 경과음 화음 이어붙이기
+
+### 배경
+
+83절 작업 직후 사용자가 실기기로 다시 테스트하며 세 가지를 제보: (1) 화음 재생 중 화면에 "악보를 만드는 중이에요" 표시가 자꾸 뜨고 소리가 뚝뚝 끊긴다, (2) 화음 부분에 쉼표 같은 게 들어가서 매끄럽지 않다, (3) 소리가 살짝 밀려서(레이턴시) 들린다. 코드를 고치기 전에 Explore 조사 2건으로 원인부터 확인했다(추측 금지 원칙, [[feedback_lolive_verify_before_blame]]).
+
+### 원인 1 — `setActiveStep`이 재생 중 매 tick 무조건 웹뷰로 IPC를 보내고 있었다
+
+카라오케 재생헤드(73절)가 50ms 타이머로 `activePlaybackStepIndex`를 갱신하고, `VexFlowScoreView.updateUIView`가 그때마다(초당 최대 20회) 다시 호출된다. `Coordinator.renderIfReady()`의 뒷부분이 `pendingStepIndex`가 직전 tick과 같은 값이어도 **매번 무조건** `webView.evaluateJavaScript("setActiveStep(...)")`을 호출하고 있었다 — 같은 음을 500ms 길게 부르면 같은 인덱스로 10번 연속 IPC 왕복이 났다는 뜻. `render.js`의 `setActiveStep` 자체는 가벼운 DOM recolor지만, 초당 20회의 Swift↔WKWebView(WebContent 프로세스) IPC가 메인스레드/오디오 렌더 스레드와 CPU를 다퉈서 "뚝뚝 끊김"의 유력한 원인으로 판단했다 — 82절에서 이미 겪은 "웹뷰 JS 작업이 오디오 재생과 CPU를 다툰다"는 문제와 같은 계열이지만, 82절은 `renderScore`(무거운 레이아웃)를 막았을 뿐 `setActiveStep`(가벼워도 초당 20번)은 다루지 않았던 사각지대였다.
+
+**수정**: `Coordinator`에 `lastSentStepIndex: Int?` + `hasSentStepIndex: Bool`(값이 nil이라도 "한 번도 안 보냄"과 구분하기 위해 Bool을 따로 둠)을 추가해서, `pendingStepIndex`가 실제로 바뀌었을 때만 `setActiveStep`을 보낸다. 새 `renderScore`가 실제로 다시 그려지는 시점(`payload != lastRenderedPayload`)엔 JS 쪽 `noteState.activeIndex`도 `null`로 초기화되므로, Swift 쪽 dedup 기록(`hasSentStepIndex`)도 같이 리셋해서 다음 `setActiveStep`은 값이 같아도 반드시 한 번은 다시 보내게 했다(안 그러면 새로 그린 악보에 하이라이트가 영영 안 찍힘).
+
+"악보 생성중" 표시가 반복되는 것 자체는 정적 코드 분석만으로는 재현 경로를 못 찾았다(`isScoreRendering=true`가 되는 경로는 `applyQuickRecordResult` 단 한 곳뿐임을 grep으로 확인) — CPU 경쟁으로 8초 타임아웃 안전망(80절)이 실제로 걸려서 그렇게 보였을 가능성이 유력하지만 확정은 못 했다. `setActiveStep` 중복 제거로 CPU 부담 자체가 줄면 이 증상도 같이 완화될 것으로 기대하지만, **다음 실기기 테스트에서 여전히 반복되면 더 깊은 진단이 필요하다.**
+
+### 원인 2 — 온음계 밖(경과음) 화음이 "무음"이었던 게 실제로는 부자연스러웠다
+
+`ChordGenerator.harmonizeSequence`는 원래 온음계 밖 음(반음계 경과음, 살짝 flat/sharp하게 부른 음 등)엔 `nil`을 반환했고, 이게 악보엔 쉼표로, `PracticeView.harmonizedTrack`(81절)에선 무음 구간으로 이어졌다. 이건 9절/51절/81절에 걸쳐 "억지로 이전 화음을 이어붙이면 오히려 더 안 어울린다"는 판단으로 의도적으로 선택된 설계였는데, 실측 청취 검증 없이 내려진 추측성 판단이었다.
+
+사용자에게 "실제 백킹보컬/아카펠라 하는 사람들은 이럴 때 어떻게 하냐"고 물어본 결과 확인한 실무 답: **화음 성부는 리드가 짧게 스쳐가는 경과음까지 따라 움직이지 않고, 화음을 그대로 붙잡고 있다가 다음 화성 변화에서만 움직인다.** 매번 화음이 끊기는 게 아니라 오히려 예외적인 경우다 — 무음(쉼표)이 표준이 아니라 "붙잡고 있기"가 표준이라는 뜻이라, 기존 9/51/81절의 판단을 뒤집기로 했다.
+
+**수정**: `harmonizeSequence`에 `lastValidHarmony: [HarmonyNote]?` 누적 변수를 추가해서(기존 `.map`을 `for` 루프로 바꿈, 84절과 무관하게 이미 몇 차례 써온 패턴), 온음계 밖 음을 만나면 새로 계산하지 않고 **직전 유효 화음을 그대로 반환**한다. 시퀀스 맨 앞부터 온음계 밖이라 붙잡을 화음 자체가 없으면 그때만 `nil`을 유지한다. 온음계 밖 노트가 Viterbi 코드 선택 문맥에 계속 영향을 주는 것(emissionScore 중립 처리)은 그대로 — 이번 변경은 "노트 자신의 출력"만 건드린다.
+
+이 함수 하나가 재생(`PracticeView.harmonizedTrack`)과 악보(`VexFlowScoreView.harmonyNotes`) 양쪽의 유일한 소스이므로(75절 이후 확인된 구조), 다른 곳은 손댈 필요가 없었다 — 경과음 구간의 오디오는 자동으로 무음 대신 직전 화음 쪽으로 피치시프트되고, 악보도 자동으로 쉼표 대신 같은 음이 이어지는 것처럼 보인다(다만 타이(tie) 기호로 묶어 그리지는 않음 — 그냥 같은 음이 반복 표기됨, 시각적으로는 사소한 한계로 남겨둠).
+
+`testOutOfScaleNoteReturnsNilWithoutBreakingContext`(기존, 경과음=nil 검증)를 `testOutOfScaleNoteCarriesForwardPreviousHarmony`(경과음이 직전 화음과 같은 베이스 자리를 이어받는지 검증)로 교체하고, 시퀀스 맨 앞이 온음계 밖이면 여전히 nil인 엣지 케이스도 `testLeadingOutOfScaleNoteWithNoPreviousHarmonyStaysNil`로 새로 검증했다.
+
+### 레이백(소리 지연) 제보에 대해
+
+원인 1의 CPU 경쟁이 완화되면 지연/버벅임도 같이 나아질 가능성이 있다고 보고 별도 코드 변경은 안 했다 — 근거 없이 다른 곳(AVAudioEngine 버퍼 크기 등)을 건드리지 않는다는 원칙 유지. **다음 실기기 테스트에서 지연이 여전하면 원인이 다른 곳(오디오 엔진 버퍼/출력 레이턴시)일 수 있어 별도 진단이 필요하다.**
+
+### 검증
+
+유닛테스트 120개(119+경과음 관련 2개 신규, 기존 1개 교체) 통과. 시뮬레이터 빌드+테스트 확인. 실기기(Ian's iPad, 이번엔 아이폰이 오프라인이라 아이패드만) 빌드+설치+실행 완료. **다음: 끊김/생성중 반복/레이백이 실제로 나아졌는지, 경과음 구간이 자연스럽게 이어지는지 실기기 청취 확인 필요.**

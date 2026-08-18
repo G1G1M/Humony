@@ -85,6 +85,15 @@ struct VexFlowScoreView: UIViewRepresentable {
         // 마지막으로 실제 renderScore를 호출한 페이로드 — 이 값이 그대로면(하이라이트만 움직인
         // 경우) 악보를 다시 그리지 않고 setActiveStep만 부른다.
         private var lastRenderedPayload: String?
+        // 마지막으로 실제 setActiveStep(...)을 보낸 스텝 인덱스 — 재생 중엔 SwiftUI가
+        // activePlaybackStepIndex 말고 다른 상태(예: statusText) 변화로도 body를 재평가해서
+        // updateUIView가 초당 최대 20번(재생헤드 타이머 주기)까지 불릴 수 있는데, 같은 인덱스를
+        // 매번 무조건 웹뷰에 다시 보내면(evaluateJavaScript IPC 왕복) 재생 중 CPU를 불필요하게
+        // 더 갉아먹는다 — 값이 실제로 바뀔 때만 보낸다. hasSentStepIndex가 false면 "아직 한 번도
+        // 안 보냄"이라 값이 nil이라도 최초 1회는 보내야 한다(Optional을 이중으로 감싸는 대신
+        // 별도 Bool로 구분).
+        private var lastSentStepIndex: Int?
+        private var hasSentStepIndex = false
         // 렌더링을 새로 시작할 때마다 늘어나는 세대 토큰 — evaluateJavaScript 완료 콜백과
         // 아래 타임아웃 안전망이 서로 다른 렌더링 요청을 잘못 끄지 않도록 구분한다.
         private var renderGeneration = 0
@@ -144,6 +153,10 @@ struct VexFlowScoreView: UIViewRepresentable {
                     self?.finishRendering(generation: generation)
                 }
                 lastRenderedPayload = payload
+                // 방금 새로 그린 악보는 JS 쪽 noteState.activeIndex가 nil로 초기화돼 있다
+                // (render.js의 renderScore) — Swift 쪽 dedup 기록도 같이 리셋해서, 아래
+                // setActiveStep이 "값은 그대로니까 생략"하지 않고 반드시 한 번은 다시 보내게 한다.
+                hasSentStepIndex = false
 
                 // evaluateJavaScript의 완료 콜백이 실제로 항상 불린다는 보장이 없다 —
                 // WKWebView의 WebContent 프로세스가 응답 없어지는 경우(76절에서 실기기 로그로
@@ -162,6 +175,15 @@ struct VexFlowScoreView: UIViewRepresentable {
                     self?.finishRendering(generation: generation)
                 }
             }
+
+            // 재생 중엔 재생헤드 타이머(50ms)가 activeStepIndex 말고 다른 상태 변화로도
+            // updateUIView를 초당 최대 20번까지 다시 부를 수 있는데, 같은 인덱스를 매번
+            // 무조건 웹뷰에 다시 보내면 그만큼 evaluateJavaScript IPC 왕복이 늘어나 재생
+            // 중 CPU를 다툰다("녹음 듣는데 음이 끊긴다" 재생 끊김 제보와 같은 계열) — 값이
+            // 실제로 바뀌었을 때만 보낸다.
+            guard !hasSentStepIndex || pendingStepIndex != lastSentStepIndex else { return }
+            hasSentStepIndex = true
+            lastSentStepIndex = pendingStepIndex
             let stepArgument = pendingStepIndex.map(String.init) ?? "null"
             webView.evaluateJavaScript("setActiveStep(\(stepArgument));") { _, error in
                 #if DEBUG

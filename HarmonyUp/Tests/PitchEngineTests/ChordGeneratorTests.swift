@@ -32,16 +32,31 @@ final class ChordGeneratorTests: XCTestCase {
         XCTAssertEqual(result.count, 3)
     }
 
-    // 온음계 밖(반음계) 음은 그 자리의 화음만 nil이어야 하고, 앞뒤 음의 화음 판단(문맥)은
-    // 끊기지 않아야 한다 — C4/E4 둘 다 여전히 화음을 갖는다.
-    func testOutOfScaleNoteReturnsNilWithoutBreakingContext() {
+    // 온음계 밖(반음계) 음은 새 화음을 계산하지 않고 직전 화음을 그대로 이어받아야 한다 —
+    // 실제 백킹보컬처럼 화음 성부가 경과음까지 따라 움직이지 않고 붙잡고 있는 게 더
+    // 매끄럽다는 실기기 청취 피드백으로 바뀐 동작(예전엔 nil=무음/쉼표였음). C#4(반음계)
+    // 자리의 화음이 앞 C4의 화음과 완전히 같아야(같은 베이스 pitchClass) 하고, 뒤 E4는
+    // 자기 자신의 화음을 새로 갖는다(이 예시에서 우연히 같을 수도 있어 pitchClass가 아니라
+    // 인스턴스 자체가 앞 화음과 동일한지를 본다).
+    func testOutOfScaleNoteCarriesForwardPreviousHarmony() {
         let notes = [(midiNote: 60, duration: 0.3), (midiNote: 61, duration: 0.3), (midiNote: 64, duration: 0.3)] // C4, C#4(반음계), E4
         let result = ChordGenerator.harmonizeSequence(melodyNotes: notes, key: key(tonic: 0, mode: .major))
 
         XCTAssertEqual(result.count, 3)
-        XCTAssertNotNil(result[0])
-        XCTAssertNil(result[1])
+        guard let first = result[0], let second = result[1] else {
+            return XCTFail("첫 음과 반음계 경과음 둘 다 화음을 가져야 함(경과음은 직전 화음을 이어받음)")
+        }
         XCTAssertNotNil(result[2])
+        XCTAssertEqual(harmonyByInterval(second)[.bass]!.midiNote, harmonyByInterval(first)[.bass]!.midiNote, "반음계 경과음은 직전 화음과 완전히 같은 자리를 이어받아야 함")
+    }
+
+    // 시퀀스 맨 앞부터 온음계 밖 음이면 이어받을 직전 화음 자체가 없으니 nil이 맞다.
+    func testLeadingOutOfScaleNoteWithNoPreviousHarmonyStaysNil() {
+        let notes = [(midiNote: 61, duration: 0.3), (midiNote: 60, duration: 0.3)] // C#4(반음계, 맨 앞), C4
+        let result = ChordGenerator.harmonizeSequence(melodyNotes: notes, key: key(tonic: 0, mode: .major))
+
+        XCTAssertNil(result[0])
+        XCTAssertNotNil(result[1])
     }
 
     // 이번 작업의 핵심 계약: 짧게 지나가는 경과음(도-레-미, 레는 C장조 화음의 구성음이
