@@ -60,7 +60,13 @@ struct SheetMusicFullScreenView: View {
                     }
                 }
             }
-            .background(Color.white)
+            // 흰 배경은 VexFlowScoreView 내부(WKWebView)에만 있다 — 오선지는 다크모드와
+            // 무관하게 항상 흰 종이인 게 악보 관례라 의도적으로 그대로 둔다(68절). 하지만 이
+            // VStack 전체(토글 행, 조성/음 캡션 텍스트가 있는 크롬)까지 흰 배경이었던 건 그
+            // 의도를 벗어난 실수였다 — 다크모드에서 화면 전체가 새하얗게 튀는 버그였다(크리틱
+            // P1). 크롬은 다른 화면들과 같은 시스템 배경을 쓰고, 오선지의 흰 종이만 그 안에서
+            // 도드라지게 남긴다.
+            .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle("악보")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

@@ -46,6 +46,16 @@ struct PracticeView: View {
     // 판단하는 게 애플이 권장하는 적응형 방식이라, 아이패드 Split View로 좁아지면 자동으로 아이폰
     // 방식으로 폴백되고 반대로 대화면 아이폰 가로모드에서도 자연스럽게 두 열이 적용된다.
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    // 카드 등장 애니메이션(아래 cardAppearTransition)이 이 설정을 존중하게 한다 — 켜져 있으면
+    // 밀려 들어오는 움직임(.move) 없이 페이드만 남긴다(Apple 권장: 슬라이드/패럴랙스 대신
+    // 크로스페이드로 대체). 크리틱 P2에서 앱 전체에 이 대응이 전혀 없다고 지적받음.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// 카드가 새로 나타날 때 쓰는 공용 트랜지션 — Reduce Motion이 켜져 있으면 이동 없이
+    /// 페이드만 쓴다.
+    private var cardAppearTransition: AnyTransition {
+        reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top))
+    }
 
     // 빠른 녹음 전용 상태 — 녹음 전체를 모았다가 멈춘 뒤 한 번에 RecordingAnalyzer로 분석한다.
     @State private var quickRecordPhase: QuickRecordView.Phase = .idle
@@ -110,6 +120,12 @@ struct PracticeView: View {
     // 옮겨서 재생한다. 빠른 녹음이 끝나면 녹음 전체가 그대로 여기 채워진다(applyQuickRecordResult).
     @State private var recentVoiceBuffer: [Float] = []
     @State private var recentVoiceSampleRate: Double = 44100
+    // 성부별(베이스/3도/5도) 화음 트랙(WORLD 피치시프트 결과) 사전 계산 캐시 — 녹음 전체
+    // (startStepIndex: nil, startTime: 0 기준)를 키로 한 번만 담아두고, 재생/탭-탐색은 여기서
+    // 필요한 구간만 잘라 쓴다. `harmonizedTrack`이 만드는 배열은 항상 recentVoiceBuffer와
+    // 길이가 같아서(공백은 무음으로 채움), 시작 샘플 인덱스로 자르기만 해도 그 지점부터
+    // recomputing한 것과 동일한 결과가 나온다.
+    @State private var precomputedHarmonyTracks: [ChordGenerator.Interval: [Float]] = [:]
     // "전체 화음"/"화음만 듣기"로 나뉘어 있던 두 버튼을, 성부별로 켜고 끌 수 있는 토글 하나로
     // 일반화했다(로드맵 Phase 4, docs/CONCEPTS.md 53절) — 리드 멜로디도 다른 성부와 동등하게
     // 뮤트 대상이 된다. 기본값은 전부 켜짐(예전 "전체 화음" 버튼과 동일한 동작).
@@ -242,19 +258,19 @@ struct PracticeView: View {
                         if melodySession.suggestedHarmony != nil {
                             voiceHarmonyPanel
                                 .id("voiceHarmonyCard")
-                                .transition(.opacity.combined(with: .move(edge: .top)))
+                                .transition(cardAppearTransition)
                         }
 
                         // 악보(VexFlow 오선보) — 첫 녹음 분석이 끝나기 전엔 보여줄 게 없다.
                         if hasCapturedNote {
                             sheetMusicPanel(fillAvailable: false)
                                 .id("sheetMusicCard")
-                                .transition(.opacity.combined(with: .move(edge: .top)))
+                                .transition(cardAppearTransition)
                         }
 
                         if melodySession.suggestedHarmony != nil {
                             scoringCard
-                                .transition(.opacity.combined(with: .move(edge: .top)))
+                                .transition(cardAppearTransition)
                         }
                     }
                     .padding()
@@ -311,13 +327,15 @@ struct PracticeView: View {
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
-                            // 다시 녹음: 세션 컨텍스트(악보/믹서/채점 기록)는 그대로 두고 마이크만
+                            // 새로 부르기: 세션 컨텍스트(악보/믹서/채점 기록)는 그대로 두고 마이크만
                             // 즉시 재가동한다 — startQuickRecording()이 hasCapturedNote/melodySteps를
                             // 건드리지 않아서, 새 분석이 끝나야(applyQuickRecordResult) 우측 악보가
-                            // 그때 가서 자연스럽게 갱신된다("홈으로"의 완전 리셋과 다른 지점).
+                            // 그때 가서 자연스럽게 갱신된다("홈으로"의 완전 리셋과 다른 지점). 라벨을
+                            // QuickRecordView의 인라인 "다시 녹음"(완전 리셋)과 일부러 다르게 지어서
+                            // — 같은 문구가 기기/레이아웃에 따라 다른 동작을 하던 걸 구분함(크리틱 P2).
                             startQuickRecording()
                         } label: {
-                            Label("다시 녹음", systemImage: "arrow.counterclockwise")
+                            Label("새로 부르기", systemImage: "arrow.counterclockwise")
                         }
                         .disabled(quickRecordPhase == .recording || quickRecordPhase == .analyzing)
                     }
@@ -458,20 +476,24 @@ struct PracticeView: View {
                     NoteNameConverter.convert(frequency: NoteNameConverter.frequency(forMIDINote: startingNoteMIDI))?.noteName ?? "?",
                     systemImage: "tuningfork"
                 )
-                .font(.caption)
+                .font(Theme.Typography.caption)
             }
             .harmonyButtonStyle()
             .controlSize(.small)
+            // controlSize(.small)만으로는 실제 탭 영역이 HIG 최소 44×44pt보다 작아질 수 있어서
+            // (크리틱 P2) — 시각적 크기(작은 알약)는 그대로 두고 탭 영역만 프레임으로 넓힌다.
+            .frame(minWidth: 44, minHeight: 44)
             .accessibilityLabel("첫음 선택")
 
             Button {
                 toggleStartingNotePlayback()
             } label: {
                 Image(systemName: isPlayingStartingNote ? "stop.fill" : "play.fill")
-                    .font(.caption)
+                    .font(Theme.Typography.caption)
             }
             .harmonyButtonStyle()
             .controlSize(.small)
+            .frame(minWidth: 44, minHeight: 44)
             .accessibilityLabel(isPlayingStartingNote ? "첫음 재생 정지" : "첫음 듣기")
         }
         .foregroundStyle(.secondary)
@@ -591,9 +613,10 @@ struct PracticeView: View {
                     .frame(maxWidth: .infinity)
                     // "지금 쓸 수 있는 녹음이 있는지"만 본다 — isCapturing(마이크가 지금 열려
                     // 있는지)로 막으면, 녹음을 다 마친 뒤(=isCapturing이 이미 false) 정작 이
-                    // 버튼을 못 누르는 문제가 있었다(실제로 겪은 버그). isScoreRendering도 같이
-                    // 보는 이유는 playHarmonizedVoice의 가드 주석 참고.
-                    .disabled(recentVoiceBuffer.isEmpty || isPlaybackBusy || isScoreRendering)
+                    // 버튼을 못 누르는 문제가 있었다(실제로 겪은 버그). isScoreRendering은 더 이상
+                    // 안 본다 — 화음 트랙이 녹음 직후 미리 계산돼 있어서(precomputeHarmonyTracks),
+                    // 재생이 악보 렌더링을 기다릴 이유가 없어졌다.
+                    .disabled(recentVoiceBuffer.isEmpty || isPlaybackBusy)
 
                 if !statusText.isEmpty {
                     Text(statusText)
@@ -850,10 +873,19 @@ struct PracticeView: View {
             // 아예 못 잡은 것(세션/권한/게인 문제)이고, 정상 발화 수준(대략 0.05 이상)인데도 음이
             // 하나도 안 잡히면 VAD가 아니라 다른 단계(YIN 신뢰도, 디바운스 등)가 원인이라는 뜻이다.
             let peakAmplitude = analyzed.voiceSamples.map { abs($0) }.max() ?? 0
-            quickRecordPhase = .error(String(
-                format: "노래가 인식되지 않았어요 — 더 또렷하게 불러서 다시 녹음해주세요 (측정된 최대 음량: %.5f)",
-                peakAmplitude
-            ))
+            #if DEBUG
+            // 원시 진폭값은 디버그 로그로만 남긴다 — 예전엔 이 숫자를 사용자에게 그대로
+            // 보여줬는데(%.5f), 이론 지식 없는 사용자한텐 그냥 의미 없는 소수점 숫자라
+            // 크리틱에서 지적받음(P1). 진단은 여기 로그로, 사용자 메시지는 평이한 언어로 분리.
+            print("[PracticeView] 인식 실패 — 측정된 최대 음량: \(String(format: "%.5f", peakAmplitude))")
+            #endif
+            // 0.01은 "마이크가 소리를 거의 못 잡은 수준"과 "소리는 잡혔지만 다른 이유로
+            // 인식이 안 된 수준"을 가르는 대략적인 경계 — VoiceActivityDetector 임계값(0.0001)
+            // 보다는 한참 위, "정상 발화 수준"(대략 0.05, 위 주석 참고)보다는 아래로 잡았다.
+            let message = peakAmplitude < 0.01
+                ? "소리가 거의 안 들렸어요 — 마이크에 더 가까이 대고 불러주세요"
+                : "노래가 인식되지 않았어요 — 음정을 살려서 더 또렷하게 다시 불러주세요"
+            quickRecordPhase = .error(message)
             return
         }
 
@@ -914,6 +946,7 @@ struct PracticeView: View {
         // 이후 3도/5도/전체 화음 버튼을 누르면 이 전체 녹음이 그대로 피치시프트된다.
         recentVoiceBuffer = analyzed.voiceSamples
         recentVoiceSampleRate = analyzed.sampleRate
+        precomputeHarmonyTracks()
 
         hasCapturedNote = true
         quickRecordPhase = .result(noteCount: analyzed.notes.count)
@@ -985,6 +1018,27 @@ struct PracticeView: View {
         return output
     }
 
+    /// 녹음 분석이 끝나자마자(재생 버튼을 누르기 전에) 성부별 화음 트랙을 미리 다 계산해서
+    /// `precomputedHarmonyTracks`에 담아둔다. 예전엔 "재생" 버튼을 누른 시점에야 이 무거운
+    /// WORLD 연산을 시작해서, 그 계산이 악보 렌더링(WKWebView JS)과 동시에 CPU를 다퉈 재생
+    /// 오디오가 끊기는 원인이 됐다 — "재생 버튼은 이미 계산돼있는 걸 들어보기 위한 버튼이어야
+    /// 하지, 누른 시점에 계산을 시작하는 버튼이면 안 된다"는 지적을 반영해 계산 시점 자체를
+    /// 녹음 직후로 앞당겼다. 이러면 계산은 악보 렌더링과 겹쳐도 상관없다(둘 다 아직 스피커로
+    /// 아무 소리도 안 내는 준비 단계라 CPU를 나눠 써도 사용자 귀에는 안 들림) — 진짜 위험한
+    /// "실시간 오디오 출력 중 CPU 경쟁"은 재생이 실제로 시작되는 시점으로 옮겨가는데, 그때는
+    /// 이미 한참 전에 계산이 끝나 있을 가능성이 높다.
+    private func precomputeHarmonyTracks() {
+        precomputedHarmonyTracks = [:]
+        let rate = recentVoiceSampleRate
+        Task {
+            var computed: [ChordGenerator.Interval: [Float]] = [:]
+            for interval in ChordGenerator.Interval.allCases {
+                computed[interval] = harmonizedTrack(interval: interval, startStepIndex: nil, startTime: 0, rate: rate)
+            }
+            precomputedHarmonyTracks = computed
+        }
+    }
+
     /// "내 목소리로 화음 만들기" — 방금 녹음한 소리(recentVoiceBuffer)를 `mutedVoices`에 안
     /// 들어있는(=켜진) 성부만 골라 베이스/3도/5도(+멜로디)로 피치 시프트해서 한꺼번에 동시
     /// 재생한다. 예전엔 "전체 화음"(고정 4성부)/"화음만 듣기"(멜로디 고정 제외)/"베이스·3도·
@@ -996,16 +1050,11 @@ struct PracticeView: View {
     /// `recentVoiceBuffer`를 그 지점부터 잘라서 넣는 걸로 바뀌고, 나머지(정규화/시프트/더블링)는
     /// 그대로다.
     private func playHarmonizedVoice(startStepIndex: Int?) {
-        // 녹음 직후엔 악보 렌더링(WKWebView가 VexFlow로 레이아웃 계산하는 무거운 JS 작업)과
-        // 화음 피치시프트(WORLD 연산)가 동시에 실기기 CPU를 다투게 되는데, 그 여파로 재생 오디오
-        // 콜백이 밀려 소리가 끊기는 문제가 있었다("녹음 듣는데 음이 끊긴다" 실기기 제보) — 악보가
-        // 완전히 그려질 때까지는(isScoreRendering이 꺼질 때까지) 재생 자체를 시작하지 않는다.
-        // 버튼(playEnabledVoicesButton)은 .disabled로 같은 조건을 미리 막지만, 악보 탭(seekPlayback)은
-        // 버튼이 아니라 JS 쪽 이벤트라 여기서도 같이 막아야 한다.
-        guard !isScoreRendering else {
-            statusText = "악보를 그리는 중이에요 — 완료되면 다시 눌러주세요"
-            return
-        }
+        // 예전엔 여기서 isScoreRendering을 확인해 악보가 다 그려질 때까지 재생을 통째로 막았다 —
+        // 화음 트랙 계산(WORLD, 무거움)이 이 함수 호출 시점에야 시작됐기 때문에, 그 계산이 악보
+        // 렌더링(WKWebView JS)과 동시에 CPU를 다퉈 재생 오디오가 끊기는 게 진짜 원인이었다.
+        // 이제 그 계산은 녹음 분석이 끝나자마자(precomputeHarmonyTracks) 미리 끝나 있으므로,
+        // 이 함수는 "이미 계산된 트랙을 트는" 역할만 남는다 — 더 이상 막을 이유가 없다.
         let isSeek = startStepIndex != nil
         if isPlaybackBusy {
             // 탭으로 인한 재생은 "다른 소리가 재생 중이면 거부" 가드를 우회하고, 대신 지금
@@ -1050,6 +1099,7 @@ struct PracticeView: View {
         let recorded = Array(recentVoiceBuffer[startSampleIndex...])
         let rate = recentVoiceSampleRate
         let muted = mutedVoices
+        let precomputed = precomputedHarmonyTracks
         statusText = "화음 만드는 중…"
 
         playbackGeneration += 1
@@ -1072,12 +1122,20 @@ struct PracticeView: View {
             }
             // 베이스(한 옥타브 아래) + 3도 + 5도 트랙을 만든다 — 스텝마다 자기 화음 목표로 따로
             // 피치시프트한다(harmonizedTrack, 멜로디가 여러 음일 때 화음이 어긋나던 문제 수정,
-            // docs/CONCEPTS.md 81절). 꺼진 성부는 계산 자체를 건너뛴다(WORLD 분석은 가볍지
-            // 않아서, 안 쓸 트랙까지 굳이 만들 필요 없음).
+            // docs/CONCEPTS.md 81절). 꺼진 성부는 건너뛴다. 보통은 precomputeHarmonyTracks가
+            // 이미 다 계산해둔 전체 트랙(startStepIndex: nil 기준, recentVoiceBuffer와 길이가
+            // 같음)에서 시작 지점부터 잘라 쓰기만 하면 되고, WORLD 연산을 다시 돌리지 않는다 —
+            // 아주 드물게(녹음 끝나자마자 몇백ms 안에 재생을 누른 경우 등) 사전 계산이 아직 안
+            // 끝났으면 그때만 예전처럼 그 자리에서 계산한다.
             for (voice, interval) in [(PlaybackVoice.bass, ChordGenerator.Interval.bass),
                                        (.third, .third),
                                        (.fifth, .fifth)] where !muted.contains(voice) {
-                let shifted = harmonizedTrack(interval: interval, startStepIndex: startStepIndex, startTime: startTime, rate: rate)
+                let shifted: [Float]
+                if let full = precomputed[interval] {
+                    shifted = Array(full[min(startSampleIndex, full.count)...])
+                } else {
+                    shifted = harmonizedTrack(interval: interval, startStepIndex: startStepIndex, startTime: startTime, rate: rate)
+                }
                 guard !shifted.isEmpty else { continue }
                 // 성부마다 다른 지연/디튠으로 더블링해서 두께를 준다 — 멜로디(원음)는 그대로 둔다.
                 // 이미 사용자 자신이 직접 부른 진짜 목소리라 "다른 사람이 한 번 더 부른" 효과가
@@ -1222,6 +1280,7 @@ struct PracticeView: View {
         voiceClipPlaybackStartedAt = nil
         activePlaybackStepIndex = nil
         recentVoiceBuffer = []
+        precomputedHarmonyTracks = [:]
         mutedVoices = []
         activeScoringInterval = nil
         lockedScoringTargets = [:]
