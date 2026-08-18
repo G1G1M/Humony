@@ -81,7 +81,11 @@ function addTapRegions() {
     rect.setAttribute('y', noteState.topY * noteState.scale);
     rect.setAttribute('width', Math.max(0, (rightBound - leftBound) * noteState.scale));
     rect.setAttribute('height', (noteState.bottomY - noteState.topY) * noteState.scale);
-    rect.setAttribute('fill', 'transparent');
+    // fill: transparent로 뒀더니 실기기에서 흔적(세로선)이 남는 문제가 있었다 — "투명하지만
+    // 클릭은 받는 영역"의 표준 SVG 관용구는 fill: none + pointer-events: all이라, 그쪽으로
+    // 바꿔서 확실히 안 보이게 한다(75절 후속).
+    rect.setAttribute('fill', 'none');
+    rect.setAttribute('stroke', 'none');
     rect.setAttribute('pointer-events', 'all');
 
     (function (capturedIndex) {

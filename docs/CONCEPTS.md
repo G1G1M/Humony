@@ -1877,3 +1877,25 @@ VexFlow는 `note.setStyle({fillStyle, strokeStyle})`로 그릴 때 색을 각 pa
 다만 코드를 다시 보니 진짜 문제(혹은 적어도 다음에 똑같은 일이 생겼을 때 원인을 알 수 없게 만드는 문제)를 하나 발견했다: `VexFlowScoreView.Coordinator`가 `WKNavigationDelegate`의 로드 **성공**(`didFinish`)만 처리하고 **실패**는 아예 처리하지 않고 있었다. 페이지 로드가 실패하면 `isPageLoaded`가 영원히 `false`로 남고, `renderIfReady()`의 guard(`guard isPageLoaded, ...`)에 막혀 `renderScore`/`setActiveStep` 호출이 조용히 아무 일도 안 하고 씹힌다 — 화면엔 그냥 빈 웹뷰만 남고 우리 쪽 로그엔 아무 흔적도 안 남는다(이번에 사용자가 시스템 콘솔을 직접 캡처해줘서 겨우 원인 후보를 좁힐 수 있었음). `didFail`/`didFailProvisionalNavigation` 델리게이트 메서드를 추가해 로드 실패를 명시적으로 로그로 남기고, 기존에 완료 핸들러 없이 던지기만 하던 `evaluateJavaScript` 호출 두 곳에도 에러 콜백을 달아서 JS 호출 자체가 실패/타임아웃했는지도 구분할 수 있게 했다 — 다음에 재현되면 "페이지 로드 실패" vs "JS 호출 실패" vs "그 외(기기 리소스 문제)"를 로그만으로 구분 가능. 코드 로직을 추측만으로 고치지 않고 진단 도구부터 심는 이유는 이 프로젝트의 기존 원칙(26절/49절/52절 — 오디오 그래프/포맷 버그는 항상 실기기 콘솔 로그로 확인 후 수정)과 같다.
 
 유닛테스트 105개 유지. 다음에 재현되면 새로 추가된 로그로 정확한 실패 지점을 확인할 예정.
+
+---
+
+## 76. 실기기 재검증 — 탭 히트 영역 세로선 + "내 목소리로 화음" 카드 실종 버그
+
+75절 기능을 실기기에서 확인하다가 사용자가 두 가지를 제보했다: (1) 악보에 원치 않는 세로선이 생긴다, (2) 어떤 녹음에서는 "내 목소리로 화음"/"채점" 카드가 통째로 안 보인다. 둘 다 추측이 아니라 코드를 직접 추적해서 원인을 확정했다.
+
+### 세로선 — `fill: transparent`가 실기기 WebKit에서 흔적을 남김
+
+75절에서 추가한 탭 히트 영역(`addTapRegions()`)이 `rect.setAttribute('fill', 'transparent')`로 투명 처리를 했는데, 실기기에서 이게 완전히 안 보이지 않고 흔적(세로선)이 남았다. "투명하지만 클릭은 받아야 하는 영역"의 표준 SVG 관용구는 `fill: none` + `pointer-events: all`이다(`transparent`는 CSS Color 쪽 개념이라 SVG presentation attribute로 넘겼을 때 렌더러마다 처리가 갈릴 수 있음) — `fill: none`, `stroke: none`으로 명시해서 고쳤다.
+
+### "내 목소리로 화음" 카드 실종 — 마지막 음이 온음계 밖이면 전체가 사라지는 구조적 문제
+
+`MelodySession.suggestedHarmony`는 원래 `sequence.last`(문자 그대로 녹음의 마지막 음 하나)만 봤다. 실기기 테스트에서 G# 단조로 감지된 녹음의 마지막 두 음(F3·G3)이 자연단조 스케일(G#·A#·B·C#·D#·E·F#, `ChordGenerator.minorScaleIntervals`)에 없는 음이었고, `ChordGenerator.harmonizeSequence`는 온음계 밖 음에 대해 `nil`을 반환한다(`guard inScale[i] else { return nil }`) — 마지막 음이 하필 이 경우라 `suggestedHarmony` 전체가 `nil`이 되고, 이 값 하나에 의존하는 "내 목소리로 화음"/"채점" 카드가 통째로 사라졌다. 악보 자체(각 스텝의 `melodySteps[i].harmony`)는 스텝마다 따로 값을 갖고 있어서 앞부분 음은 화음이 정상 표시됐다(불일치의 증거).
+
+이 "마지막 음만 본다"는 설계는 원래 실시간으로 한 음씩 들어오던 예전 캡처 방식(경과음이 지나가는 순간엔 화음을 보여주지 않는 게 맞는 의도)에서 온 것인데, 녹음 전체를 한꺼번에 분석해서 보여주는 지금의 "빠른 녹음" 흐름에서는 하필 녹음이 경과음으로 끝났다는 이유로 기능 전체가 막히는 건 원치 않는 부작용이다. `suggestedHarmony`를 `sequence.last(where: { $0 != nil })`(뒤에서부터 훑어 화음이 있는 가장 최근 음)로 완화했다.
+
+**딸린 버그**: 이 변경만으로 끝내면 안 되는 이유 — `PracticeView.pitchRatio(toInterval:)`가 목표 화음 주파수를 `melodySession.lastNote?.frequency`(진짜 마지막 음의 주파수)로 나누고 있었는데, 이제 `suggestedHarmony`가 다른(더 앞선) 음 기준으로 나올 수 있으니 분모도 반드시 "화음이 실제로 계산된 그 음"의 주파수여야 한다 — 안 그러면 화음은 A음 기준으로 나왔는데 비율은 B음으로 나누는 불일치가 생겨 "내 목소리로 화음" 재생이 실제 화성 관계와 안 맞는 음으로 어긋난다. `MelodySession`에 `suggestedHarmonyBaseFrequency`(화음의 근거가 된 그 음의 이론적 주파수, `suggestedHarmony`와 항상 같은 인덱스를 봄 — 내부적으로 `harmonizedSequence()` 헬퍼를 공유해 계산을 중복하지 않음)를 추가하고, `pitchRatio(toInterval:)`가 `lastNote?.frequency` 대신 이 값을 쓰도록 바꿨다.
+
+### 검증
+
+유닛테스트 105개 유지. 두 수정 모두 다음 실기기 세션에서 재확인 필요.

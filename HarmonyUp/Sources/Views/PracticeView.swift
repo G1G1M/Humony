@@ -871,12 +871,15 @@ struct PracticeView: View {
         #endif
     }
 
-    /// 마지막으로 잡은 음을 기준으로, 목표 interval(3도/5도) 위 주파수까지의 배율(pitchRatio)을 구한다.
+    /// 화음이 계산된 그 음을 기준으로, 목표 interval(3도/5도) 위 주파수까지의 배율(pitchRatio)을 구한다.
+    /// 분모는 `lastNote`(진짜 마지막 음)가 아니라 `suggestedHarmonyBaseFrequency`를 써야 한다 —
+    /// 녹음이 온음계 밖 음으로 끝나서 화음이 그보다 앞선 음 기준으로 나온 경우, 마지막 음으로
+    /// 나누면 화음과 안 맞는 엉뚱한 비율이 나온다(MelodySession.swift 주석 참고).
     private func pitchRatio(toInterval interval: ChordGenerator.Interval) -> Double? {
-        guard let lastFrequency = melodySession.lastNote?.frequency,
+        guard let baseFrequency = melodySession.suggestedHarmonyBaseFrequency,
               let harmony = melodySession.suggestedHarmony,
               let target = harmony.first(where: { $0.interval == interval }) else { return nil }
-        return target.frequency / lastFrequency
+        return target.frequency / baseFrequency
     }
 
     /// "내 목소리로 화음 만들기" — 방금 녹음한 소리(recentVoiceBuffer)를 `mutedVoices`에 안
