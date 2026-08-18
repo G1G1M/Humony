@@ -1076,7 +1076,9 @@ struct PracticeView: View {
                 // 이미 사용자 자신이 직접 부른 진짜 목소리라 "다른 사람이 한 번 더 부른" 효과가
                 // 필요 없고, 오히려 원음이 흔들리면 리드로서의 기준점이 흐려진다.
                 let doubled = VoiceDoubler.apply(to: shifted, sampleRate: rate, interval: interval)
-                tracks.append((prepare(doubled), interval.pan))
+                // interval.gain(바버샵풍 믹스 밸런스, docs/CONCEPTS.md 리서치 섹션 B)은
+                // prepare()로 라우드니스를 이미 맞춘 뒤 상대적인 크고 작음만 마지막에 조정한다.
+                tracks.append((AudioGain.applyGain(prepare(doubled), factor: interval.gain), interval.pan))
             }
 
             do {

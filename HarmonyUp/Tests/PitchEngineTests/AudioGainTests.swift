@@ -78,4 +78,19 @@ final class AudioGainTests: XCTestCase {
     func testApplyFadeInOutOnEmptyBufferReturnsEmpty() {
         XCTAssertTrue(AudioGain.applyFadeInOut([], fadeSampleCount: 10).isEmpty)
     }
+
+    func testApplyGainScalesEverySampleByFactor() {
+        let samples: [Float] = [0.2, -0.4, 0.6]
+        let gained = AudioGain.applyGain(samples, factor: 0.85)
+        let expected: [Float] = [0.17, -0.34, 0.51]
+
+        XCTAssertEqual(gained.count, expected.count)
+        for (actual, expectedValue) in zip(gained, expected) {
+            XCTAssertEqual(actual, expectedValue, accuracy: 0.001)
+        }
+    }
+
+    func testApplyGainOnEmptyBufferReturnsEmpty() {
+        XCTAssertTrue(AudioGain.applyGain([], factor: 0.85).isEmpty)
+    }
 }

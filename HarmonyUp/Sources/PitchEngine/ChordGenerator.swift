@@ -67,6 +67,17 @@ enum ChordGenerator {
             }
         }
 
+        /// 성부별 상대 음량 배율 — 바버샵 보이싱 관행(근음·5도를 두드러지게, 3도는 배경에
+        /// 머물게, docs/CONCEPTS.md 리서치 섹션 B)을 흉내낸 시작값. pan/formantRatio와
+        /// 마찬가지로 정확한 수치는 청감 영역이라 실기기로 들어보면서 조정한다.
+        var gain: Float {
+            switch self {
+            case .bass: return 1.0
+            case .third: return 0.85
+            case .fifth: return 1.0
+            }
+        }
+
         static func from(storageKey: String) -> Interval? {
             allCases.first { $0.storageKey == storageKey }
         }

@@ -52,4 +52,11 @@ enum AudioGain {
         }
         return result
     }
+
+    /// 성부별 상대 음량 차등(믹스 밸런스, `ChordGenerator.Interval.gain`)을 적용한다 —
+    /// `normalizeLoudness`로 모든 트랙을 이미 같은 라우드니스로 맞춘 뒤, 이 배율로 상대적인
+    /// 크고 작음만 마지막에 미세 조정하는 용도다(예: 바버샵 보이싱처럼 3도를 살짝 배경으로).
+    static func applyGain(_ samples: [Float], factor: Float) -> [Float] {
+        samples.map { $0 * factor }
+    }
 }

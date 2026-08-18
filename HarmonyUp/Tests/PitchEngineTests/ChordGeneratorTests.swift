@@ -120,4 +120,13 @@ final class ChordGeneratorTests: XCTestCase {
             XCTAssertLessThan(byInterval[.fifth]!.midiNote, melodyMIDINote)
         }
     }
+
+    // 성부별 상대 음량 배율(믹스 밸런스) — 바버샵 보이싱 관행대로 3도만 배경으로 살짝
+    // 낮아야 하고, 베이스/5도는 원래 음량(1.0)을 유지해야 한다.
+    func testGainKeepsThirdSlightlyRecessed() {
+        XCTAssertEqual(ChordGenerator.Interval.bass.gain, 1.0)
+        XCTAssertEqual(ChordGenerator.Interval.fifth.gain, 1.0)
+        XCTAssertLessThan(ChordGenerator.Interval.third.gain, 1.0)
+    }
+
 }
