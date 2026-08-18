@@ -81,29 +81,14 @@ struct SheetMusicFullScreenView: View {
         ViewThatFits {
             HStack {
                 ForEach(PlaybackVoice.allCases, id: \.self) { voice in
-                    voiceToggle(voice)
+                    VoiceToggleChip(voice: voice, mutedVoices: $mutedVoices)
                 }
             }
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                 ForEach(PlaybackVoice.allCases, id: \.self) { voice in
-                    voiceToggle(voice)
+                    VoiceToggleChip(voice: voice, mutedVoices: $mutedVoices)
                 }
             }
         }
-    }
-
-    private func voiceToggle(_ voice: PlaybackVoice) -> some View {
-        let isMuted = mutedVoices.contains(voice)
-        return Button {
-            if isMuted {
-                mutedVoices.remove(voice)
-            } else {
-                mutedVoices.insert(voice)
-            }
-        } label: {
-            Label(voice.koreanLabel, systemImage: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-        }
-        .harmonyButtonStyle()
-        .tint(isMuted ? .secondary : Theme.tint)
     }
 }

@@ -29,6 +29,27 @@ enum Theme {
     static let pitchGood = Color(uiColor: .systemGreen)
     static let pitchBad = Color(uiColor: .systemRed)
 
+    /// 경고/주의 문구 색 — "약점 화성 안내"(HistoryView) 등에 흩어져 쓰이던 `.orange` 리터럴을
+    /// 이름 붙은 토큰으로 승격했다(다른 시맨틱 색들처럼 "이 색이 무슨 의미인지" 한 곳에서
+    /// 관리하기 위함, 크리틱 Minor Observations 정리).
+    static let warning = Color(uiColor: .systemOrange)
+
+    /// 성부(베이스/3도/5도)마다 고정된 정체성 색 — 인터랙션 틴트(`tint`)와는 다른 목적이다.
+    /// HIG 원칙("하나의 틴트가 인터랙션을 이끈다")을 지키기 위해 **버튼에는 절대 안 쓰고**,
+    /// 텍스트/차트 범례처럼 순수 장식·식별 용도로만 쓴다(`voiceAccent`와 같은 원칙). 채점
+    /// 상태색(pitchGood 초록/pitchBad 빨강)이나 위 `warning`(주황)과도 겹치지 않게 골랐다 —
+    /// 이 색이 "정확/부정확/주의"라는 상태 의미로 오해되면 안 되고, 순수하게 "이게 몇 도
+    /// 성부인지"만 가리켜야 한다. HistoryView의 정확도 추이 차트와 PracticeView의 채점 패널
+    /// 라벨이 같은 색으로 이어져서, 두 화면을 오갈 때도 "이건 3도 얘기구나"를 색으로 먼저
+    /// 알아챌 수 있게 한다.
+    static func intervalColor(for interval: ChordGenerator.Interval) -> Color {
+        switch interval {
+        case .bass: return .blue
+        case .third: return .teal
+        case .fifth: return .purple
+        }
+    }
+
     enum Spacing {
         static let xs: CGFloat = 4
         static let sm: CGFloat = 8

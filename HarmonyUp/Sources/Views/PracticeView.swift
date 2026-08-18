@@ -33,6 +33,33 @@ enum PlaybackVoice: CaseIterable, Hashable {
     }
 }
 
+/// 성부 하나를 켜고 끄는 토글 칩 — `PracticeView`와 `SheetMusicFullScreenView`가 똑같이 쓴다
+/// (둘 다 같은 `mutedVoices` `@Binding`을 공유하므로 하나만 있으면 됨 — 예전엔 두 파일에
+/// 토씨 하나 안 틀리고 중복 구현돼 있었다, 크리틱 Minor Observations 정리). 눌린 상태(재생에
+/// 포함)면 채워진 스타일, 꺼진 상태(뮤트)면 테두리만 있는 스타일로 구분한다. 전부 꺼진 채로
+/// 재생 버튼을 누르면 안내 메시지만 뜨고 아무 소리도 안 나므로(playHarmonizedVoice의 guard),
+/// 최소 하나는 남겨야 한다는 제약을 UI에서 강제로 막지는 않았다 — 자유롭게 다 꺼봤다가 이유를
+/// 읽고 다시 켜는 편이, 어떤 조합이 막혀있는지 미리 계산해서 버튼을 비활성화하는 것보다 단순하다.
+struct VoiceToggleChip: View {
+    let voice: PlaybackVoice
+    @Binding var mutedVoices: Set<PlaybackVoice>
+
+    var body: some View {
+        let isMuted = mutedVoices.contains(voice)
+        Button {
+            if isMuted {
+                mutedVoices.remove(voice)
+            } else {
+                mutedVoices.insert(voice)
+            }
+        } label: {
+            Label(voice.koreanLabel, systemImage: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+        }
+        .harmonyButtonStyle()
+        .tint(isMuted ? .secondary : Theme.tint)
+    }
+}
+
 /// "연습" 탭 — 빠른 녹음으로 노래 한 소절을 받아 조성/화음 판별 -> 화음 청취(합성음/내 목소리) ->
 /// 채점까지 한 세션의 흐름을 담당한다. 예전엔 이 화면 자체가 앱의 유일한 화면(`ContentView`)이었는데,
 /// 세션 기록(`HistoryView`)을 별도 탭으로 분리하면서 이름도 역할에 맞게 바꿨다. 예전엔 "단음"/"멜로디"
@@ -107,6 +134,15 @@ struct PracticeView: View {
     // 직접 표시하지 않지만(조성/화음 요약 카드는 제거했다 — 지금 단계에선 필요 없다는 판단),
     // 다음 단계인 악보 렌더링에 그대로 필요한 데이터라 계속 계산해서 들고 있는다.
     @State private var hasCapturedNote = false
+    // 채점 카드는 접힌 상태로 시작한다 — PRODUCT.md 원칙3("채점은 화면 위계에서 영구히 중심일
+    // 필요 없다")이 실제 화면엔 반영 안 돼 있었다는 크리틱 지적(P1) 반영. "내 목소리로 화음"
+    // 카드와 똑같은 크기/제목 굵기로 자동으로 펼쳐지던 걸, 펼쳐야 보이는 가벼운 한 줄 디스클로저로
+    // 낮췄다 — 화음 체험을 먼저 끝낸 사람만 일부러 채점으로 넘어가는 흐름.
+    @State private var isScoringExpanded = false
+    // "중지"를 눌러 채점 시도가 저장된 직후에만 잠깐 확인 메시지를 보여준다 — 예전엔 저장이
+    // 조용히 끝나서 정말 기록됐는지 알 방법이 없었다(크리틱 P3). 새 채점을 시작하거나 새로
+    // 녹음하면 지운다.
+    @State private var lastSavedInterval: ChordGenerator.Interval?
     @State private var melodySteps: [MelodyStep] = []
     // 악보 카드가 뜬 시점엔 항상 true로 시작 — WKWebView 프로세스가 늦게 뜰 수 있어서(76절),
     // 첫 렌더가 끝날 때까지는 화면이 비어 보이는 대신 "만드는 중" 표시를 겹쳐 보여준다.
@@ -146,7 +182,7 @@ struct PracticeView: View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             Label("마이크 권한이 꺼져 있어요", systemImage: "mic.slash.fill")
                 .font(Theme.Typography.subheadlineBold)
-                .foregroundStyle(.orange)
+                .foregroundStyle(Theme.warning)
             Text("설정에서 마이크 권한을 허용하면 바로 시작할 수 있어요")
                 .font(Theme.Typography.caption)
                 .foregroundStyle(.secondary)
@@ -598,12 +634,12 @@ struct PracticeView: View {
                 ViewThatFits {
                     HStack {
                         ForEach(PlaybackVoice.allCases, id: \.self) { voice in
-                            voiceToggle(voice)
+                            VoiceToggleChip(voice: voice, mutedVoices: $mutedVoices)
                         }
                     }
                     VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                         ForEach(PlaybackVoice.allCases, id: \.self) { voice in
-                            voiceToggle(voice)
+                            VoiceToggleChip(voice: voice, mutedVoices: $mutedVoices)
                         }
                     }
                 }
@@ -627,36 +663,62 @@ struct PracticeView: View {
         }
     }
 
+    @ViewBuilder
     private var scoringCard: some View {
-        HarmonyCard("따라 부르기 채점", systemImage: "target") {
-            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                scoringPanel(for: .bass)
-                Divider()
-                scoringPanel(for: .third)
-                Divider()
-                scoringPanel(for: .fifth)
+        if isScoringExpanded {
+            HarmonyCard("따라 부르기 채점", systemImage: "target") {
+                VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                    // "중지"로 채점 시도를 저장한 직후에만 잠깐 보인다 — 예전엔 저장이 조용히
+                    // 끝나서 정말 기록됐는지 알 방법이 없었다(크리틱 P3).
+                    if let lastSavedInterval {
+                        Label("\(lastSavedInterval.koreanLabel) 채점을 저장했어요 — 기록 탭에서 확인해보세요", systemImage: "checkmark.circle.fill")
+                            .font(Theme.Typography.caption)
+                            .foregroundStyle(Theme.pitchGood)
+                    }
+
+                    scoringPanel(for: .bass)
+                    Divider()
+                    scoringPanel(for: .third)
+                    Divider()
+                    scoringPanel(for: .fifth)
+
+                    Button {
+                        withAnimation(.easeOut(duration: 0.2)) { isScoringExpanded = false }
+                    } label: {
+                        Label("접기", systemImage: "chevron.up")
+                    }
+                    .harmonyButtonStyle()
+                    .frame(maxWidth: .infinity)
+                }
             }
+        } else {
+            scoringDisclosureRow
         }
     }
 
-    /// 성부 하나를 켜고 끄는 토글 칩 — 눌린 상태(재생에 포함)면 채워진 스타일, 꺼진 상태(뮤트)면
-    /// 테두리만 있는 스타일로 구분한다. 전부 꺼진 채로 재생 버튼을 누르면 안내 메시지만 뜨고
-    /// 아무 소리도 안 나므로(guard, 아래 recordAndHarmonizeFullChordWithVoice), 최소 하나는
-    /// 남겨야 한다는 제약을 UI에서 강제로 막지는 않았다 — 자유롭게 다 꺼봤다가 이유를 읽고
-    /// 다시 켜는 편이, 어떤 조합이 막혀있는지 미리 계산해서 버튼을 비활성화하는 것보다 단순하다.
-    private func voiceToggle(_ voice: PlaybackVoice) -> some View {
-        let isMuted = mutedVoices.contains(voice)
-        return Button {
-            if isMuted {
-                mutedVoices.remove(voice)
-            } else {
-                mutedVoices.insert(voice)
-            }
+    /// 채점 카드의 접힌 상태 — "내 목소리로 화음" 카드보다 눈에 띄게 가벼운 무게로 보이도록,
+    /// HarmonyCard(title3Bold 제목+큰 패딩)를 그대로 안 쓰고 작은 한 줄 디스클로저 행으로
+    /// 따로 만들었다. 탭하면 펼쳐지기만 할 뿐 채점을 자동 시작하진 않는다 — 성부별 "채점"
+    /// 버튼은 펼친 뒤에도 그대로 남아있다.
+    private var scoringDisclosureRow: some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.2)) { isScoringExpanded = true }
         } label: {
-            Label(voice.koreanLabel, systemImage: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+            HStack(spacing: Theme.Spacing.xs) {
+                Image(systemName: "target")
+                Text("따라 부르기 채점")
+                    .font(Theme.Typography.subheadline)
+                Spacer()
+                Image(systemName: "chevron.down")
+                    .font(Theme.Typography.caption2)
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, Theme.Spacing.md)
+            .padding(.vertical, Theme.Spacing.sm)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .harmonyGlassCard()
         }
-        .harmonyButtonStyle()
-        .tint(isMuted ? .secondary : Theme.tint)
+        .buttonStyle(.plain)
     }
 
     /// 켜져 있는 성부만 골라 동시에 재생한다 — 예전엔 "전체 화음"(전부 켜짐 고정)과 "화음만
@@ -681,7 +743,10 @@ struct PracticeView: View {
 
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(label).font(Theme.Typography.subheadlineBold)
+                // 성부 이름을 HistoryView의 정확도 추이 차트와 같은 정체성 색으로 칠해서, 두
+                // 화면을 오갈 때도 "이건 3도 얘기구나"를 색으로 먼저 알아챌 수 있게 한다
+                // (Theme.intervalColor, 크리틱 "시각 정체성이 약하다" 지적 반영).
+                Text(label).font(Theme.Typography.subheadlineBold).foregroundStyle(Theme.intervalColor(for: interval))
                 if let target {
                     Text(NoteNameConverter.convert(frequency: target.frequency)?.noteName ?? "?")
                         .font(.system(.subheadline, design: .monospaced))
@@ -947,6 +1012,8 @@ struct PracticeView: View {
         recentVoiceBuffer = analyzed.voiceSamples
         recentVoiceSampleRate = analyzed.sampleRate
         precomputeHarmonyTracks()
+        isScoringExpanded = false // 새 녹음마다 채점 카드는 다시 접힌 상태로
+        lastSavedInterval = nil
 
         hasCapturedNote = true
         quickRecordPhase = .result(noteCount: analyzed.notes.count)
@@ -1231,6 +1298,7 @@ struct PracticeView: View {
         if activeScoringInterval == interval {
             finalizeCurrentAttempt(interval: interval)
             activeScoringInterval = nil
+            lastSavedInterval = interval
             return
         }
 
@@ -1244,6 +1312,7 @@ struct PracticeView: View {
 
         lockedScoringTargets[interval] = target
         activeScoringInterval = interval
+        lastSavedInterval = nil // 새 채점을 시작하면 직전 저장 확인 메시지는 지운다
         pitchSmoother.reset() // 이전 채점(또는 다른 음)에서 쓰던 값이 새 채점에 섞여 들어가지 않도록
 
         // "채점하기"를 눌렀는데 마이크가 꺼져 있으면 자동으로 켜준다.
@@ -1282,6 +1351,8 @@ struct PracticeView: View {
         recentVoiceBuffer = []
         precomputedHarmonyTracks = [:]
         mutedVoices = []
+        isScoringExpanded = false
+        lastSavedInterval = nil
         activeScoringInterval = nil
         lockedScoringTargets = [:]
         latestScores = [:]

@@ -2198,3 +2198,35 @@ Task 1(포먼트 시프팅) 확인을 기다리는 동안, 승인된 순서대�
 ### 검증
 
 유닛테스트 120개 유지(전부 UI/오디오 경로 변경이라 새 유닛테스트 대상 로직 없음), 시뮬레이터 빌드+테스트 통과. 실기기(Ian's iPad)에 빌드+설치+실행 완료. **다음: 재생이 실제로 즉시(대기 없이) 시작되는지, 여전히 끊김이 없는지, 전체화면 악보가 다크모드에서 정상으로 보이는지, 새 에러 메시지/라벨이 자연스러운지 실기기 확인 필요.**
+
+---
+
+## 87. 디자인 폴리시 — 채점 카드 접기 + 성부 정체성 색 통일 + 코드 중복 정리 + 저장 확인 피드백
+
+### 배경
+
+86절 직후 사용자가 "디자인 관련 수정을 이어가자"고 요청 — 크리틱에서 남겨둔 미정 항목(채점 카드 위계)과, `/impeccable polish` 방향의 전반적인 시각 다듬기를 같이 진행했다.
+
+### 채점 카드 접힌 상태로 시작
+
+크리틱의 "Questions to Consider" 1번("채점 카드를 아예 펼쳐야 보이는 접힌 상태로 시작하는 게 어떨까?")에 대해 사용자가 "접힌 상태로 시작"을 선택. `scoringCard`를 `isScoringExpanded`(`@State`, 새 녹음마다 `false`로 리셋) 기준으로 분기: 접힌 상태는 `HarmonyCard`(title3Bold 제목 + 큰 패딩)를 그대로 안 쓰고, 작은 한 줄 디스클로저 행(`scoringDisclosureRow` — 아이콘+`subheadline`+chevron, `.secondary` 색, 얇은 패딩)으로 따로 만들어서 "내 목소리로 화음" 카드보다 눈에 띄게 가벼운 무게로 보이게 했다. 탭하면 펼쳐지기만 하고 채점을 자동 시작하진 않는다 — 펼친 뒤엔 기존 성부별 "채점" 버튼이 그대로 있다. 펼친 카드 안에 "접기" 버튼도 추가.
+
+### 성부 정체성 색을 `Theme.intervalColor(for:)`로 통일
+
+크리틱의 "시각 정체성이 iOS 기본기에 가깝다"는 지적(Design Specificity Verdict)에 대한 안전한 대응 — HistoryView의 정확도 추이 차트(85절)가 이미 베이스=blue/3도=teal/5도=purple 색을 쓰고 있었는데, 이게 그 차트 안에서만 `private` dict로 갇혀 있었다. `Theme.swift`에 `intervalColor(for: ChordGenerator.Interval)`로 승격해서 HistoryView(차트+정확도 요약 라벨)와 PracticeView(`scoringPanel`의 성부 이름 라벨)가 전부 같은 색을 쓰게 통일했다. **중요한 제약**: 이 색은 절대 버튼/인터랙션에는 안 쓴다 — `Theme.swift` 문서 주석이 명시한 "하나의 틴트가 인터랙션을 이끈다"는 HIG 원칙과 충돌하지 않게, 순수 텍스트/차트 범례 같은 장식·식별 용도로만 제한했다(기존 `voiceAccent`와 같은 원칙). 두 화면을 오갈 때 "이건 3도 얘기구나"를 색으로 먼저 알아챌 수 있게 하는 게 목적.
+
+### `.orange` → `Theme.warning` 토큰 승격
+
+"약점 화성" 경고(HistoryView), 마이크 권한 거부(PracticeView), 인식 실패 에러(QuickRecordView) 세 곳에 흩어져 있던 `.orange` 리터럴을 `Theme.warning`(`.systemOrange` 래핑)으로 통일 — `pitchGood`/`pitchBad`와 같은 네이밍 패턴으로 "이 색이 무슨 의미인지"를 한 곳에서 관리(크리틱 Minor Observations).
+
+### `voiceToggle` 코드 중복 제거
+
+`PracticeView.swift`와 `SheetMusicFullScreenView.swift`에 토씨 하나 안 틀리고 중복 구현돼 있던 성부 뮤트 토글 칩(크리틱 Minor Observations)을 `VoiceToggleChip`(새 `View` struct, `PlaybackVoice` 정의 바로 아래)으로 뽑아서 두 파일이 공유하게 정리.
+
+### 채점 저장 확인 피드백
+
+"중지"로 채점 시도를 저장해도 조용히 끝나서 정말 기록됐는지 알 방법이 없었다(크리틱 P3). `lastSavedInterval`(`@State`)을 추가해, "중지"를 누른 직후에만 펼친 채점 카드 안에 "OO 채점을 저장했어요 — 기록 탭에서 확인해보세요"를 `Theme.pitchGood` 색 체크마크와 함께 잠깐 보여준다. 새 채점을 시작하거나 새로 녹음하면 지운다.
+
+### 검증
+
+유닛테스트 120개 유지(전부 UI 레이어 변경). 시뮬레이터 빌드+테스트 통과, 앱 실행해 크래시 없음 스크린샷 확인. 실기기(Ian's iPad)에 빌드+설치+실행 완료. **다음: 채점 카드 펼치기/접기, 성부 색이 두 화면에서 일관되게 보이는지, 저장 확인 메시지가 자연스러운지 실기기 확인 필요.**

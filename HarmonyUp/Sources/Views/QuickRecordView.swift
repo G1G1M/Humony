@@ -196,7 +196,7 @@ struct QuickRecordView: View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
             Label(message, systemImage: "exclamationmark.triangle.fill")
                 .font(Theme.Typography.subheadline)
-                .foregroundStyle(.orange)
+                .foregroundStyle(Theme.warning)
 
             if showsInlineRetry {
                 Button(action: onReset) {

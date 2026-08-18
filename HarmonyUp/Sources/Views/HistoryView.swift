@@ -26,7 +26,7 @@ struct HistoryView: View {
                                 if let message = weakerIntervalMessage {
                                     Text(message)
                                         .font(Theme.Typography.caption)
-                                        .foregroundStyle(.orange)
+                                        .foregroundStyle(Theme.warning)
                                 }
                             }
                         }
@@ -81,16 +81,6 @@ struct HistoryView: View {
 
     // MARK: - 정확도 추이 차트
 
-    /// 성부(베이스/3도/5도)마다 고정된 정체성 색 — 채점 상태색(pitchGood 초록/pitchBad 빨강,
-    /// Theme.swift)이나 "정확도 요약" 카드의 경고 문구 색(주황, weakerIntervalMessage)과 절대
-    /// 안 겹치게 골랐다. 차트 범례는 "이 선이 어느 성부인지" 구분하는 용도일 뿐, 정확/부정확
-    /// 같은 상태 의미를 담으면 안 되기 때문이다(상태색은 상태 전용으로 예약).
-    private static let intervalColors: [ChordGenerator.Interval: Color] = [
-        .bass: .blue,
-        .third: .teal,
-        .fifth: .purple,
-    ]
-
     private struct AccuracyPoint: Identifiable {
         let id = UUID()
         let date: Date
@@ -125,9 +115,9 @@ struct HistoryView: View {
             .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
         }
         .chartForegroundStyleScale([
-            ChordGenerator.Interval.bass.koreanLabel: Self.intervalColors[.bass]!,
-            ChordGenerator.Interval.third.koreanLabel: Self.intervalColors[.third]!,
-            ChordGenerator.Interval.fifth.koreanLabel: Self.intervalColors[.fifth]!,
+            ChordGenerator.Interval.bass.koreanLabel: Theme.intervalColor(for: .bass),
+            ChordGenerator.Interval.third.koreanLabel: Theme.intervalColor(for: .third),
+            ChordGenerator.Interval.fifth.koreanLabel: Theme.intervalColor(for: .fifth),
         ])
         .chartYScale(domain: 0...100)
         .chartYAxis {
@@ -168,7 +158,9 @@ struct HistoryView: View {
     private func intervalSummary(for interval: ChordGenerator.Interval) -> some View {
         let list = attempts(for: interval)
         VStack(alignment: .leading, spacing: 2) {
-            Text(interval.koreanLabel).font(Theme.Typography.caption).foregroundStyle(.secondary)
+            // 성부 이름을 정체성 색(Theme.intervalColor)으로 칠해서, 바로 아래 "정확도 추이"
+            // 차트의 같은 색 범례와 한눈에 연결되게 한다.
+            Text(interval.koreanLabel).font(Theme.Typography.caption).foregroundStyle(Theme.intervalColor(for: interval))
             if let average = averageOnPitchRatio(list) {
                 Text(String(format: "%.0f%% (%d회)", average * 100, list.count))
                     .font(.system(.body, design: .monospaced))
