@@ -85,6 +85,9 @@ struct VexFlowScoreView: UIViewRepresentable {
         // 마지막으로 실제 renderScore를 호출한 페이로드 — 이 값이 그대로면(하이라이트만 움직인
         // 경우) 악보를 다시 그리지 않고 setActiveStep만 부른다.
         private var lastRenderedPayload: String?
+        // 렌더링을 새로 시작할 때마다 늘어나는 세대 토큰 — evaluateJavaScript 완료 콜백과
+        // 아래 타임아웃 안전망이 서로 다른 렌더링 요청을 잘못 끄지 않도록 구분한다.
+        private var renderGeneration = 0
 
         deinit {
             contentController?.removeScriptMessageHandler(forName: VexFlowScoreView.noteTapMessageName)
@@ -131,14 +134,33 @@ struct VexFlowScoreView: UIViewRepresentable {
         func renderIfReady() {
             guard isPageLoaded, let webView, let payload = pendingPayload else { return }
             if payload != lastRenderedPayload {
+                renderGeneration += 1
+                let generation = renderGeneration
                 setRendering(true)
                 webView.evaluateJavaScript("renderScore(\(payload));") { [weak self] _, error in
                     #if DEBUG
                     if let error { print("[VexFlowScoreView] renderScore 호출 실패: \(error.localizedDescription)") }
                     #endif
-                    self?.setRendering(false)
+                    self?.finishRendering(generation: generation)
                 }
                 lastRenderedPayload = payload
+
+                // evaluateJavaScript의 완료 콜백이 실제로 항상 불린다는 보장이 없다 —
+                // WKWebView의 WebContent 프로세스가 응답 없어지는 경우(76절에서 실기기 로그로
+                // 이미 확인됨)엔 콜백 자체가 영영 안 올 수 있다. 콜백만 믿으면 "악보를 만드는
+                // 중이에요"가 실제로는 다 만들어졌거나 영영 실패했는데도 화면에 계속 남아
+                // 레이아웃을 가리는 문제가 생긴다 — 일정 시간 안에 콜백이 안 오면 강제로
+                // 로딩 표시를 꺼서 최소한 화면이 영구히 막히지는 않게 한다. renderGeneration으로
+                // 그 사이 새 렌더링이 시작됐으면(더 최신 콜백이 처리할 일이므로) 이 타이머는
+                // 아무 것도 안 하게 막는다.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
+                    #if DEBUG
+                    if self?.renderGeneration == generation {
+                        print("[VexFlowScoreView] renderScore 완료 콜백이 8초 안에 안 와서 타임아웃으로 로딩 표시를 끔")
+                    }
+                    #endif
+                    self?.finishRendering(generation: generation)
+                }
             }
             let stepArgument = pendingStepIndex.map(String.init) ?? "null"
             webView.evaluateJavaScript("setActiveStep(\(stepArgument));") { _, error in
@@ -146,6 +168,14 @@ struct VexFlowScoreView: UIViewRepresentable {
                 if let error { print("[VexFlowScoreView] setActiveStep 호출 실패: \(error.localizedDescription)") }
                 #endif
             }
+        }
+
+        /// `generation`이 지금 진행 중인 렌더링과 같을 때만 로딩 표시를 끈다 — 완료 콜백과
+        /// 타임아웃 안전망 둘 다 이 함수를 거치므로, 둘 중 뭐가 먼저 오든 안전하고, 그 사이
+        /// 새 렌더링이 시작된 뒤라면(세대가 달라짐) 무시된다.
+        private func finishRendering(generation: Int) {
+            guard generation == renderGeneration else { return }
+            setRendering(false)
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
