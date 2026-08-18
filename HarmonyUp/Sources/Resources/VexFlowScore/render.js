@@ -3,7 +3,7 @@
 //
 // data 형식:
 // {
-//   voices: [ { clef: "treble"|"bass", color: "#RRGGBB",
+//   voices: [ { clef: "treble"|"bass",
 //               notes: [ { key: "c#/4"|null, sharp: bool, duration: "8"|"q"|"qd"|"h" }, ... ] }, ... ],
 //   measureBreaks: [4, 4, 2, ...]  // 마디마다 음이 몇 개인지 — 모든 성부가 공유하는 한 벌
 // }
@@ -16,49 +16,90 @@
 // 공유한다 — 그래야 성부끼리 같은 순간의 음이 화면에서 정확히 세로로 맞는다.
 //
 // duration도 실제 길이(초, RhythmQuantizer가 중앙값 대비 상대적으로 분류)를 반영한다(59절).
-// 재생헤드(카라오케처럼 재생 중인 음 위에 세로선)가 재사용하는 값들 — renderScore가 새로
-// 그릴 때마다 갱신되고, setPlayheadStep(index)는 이 값들만 읽어서 전체를 다시 그리지 않고
-// 선 하나만 움직인다. 매 50ms 재생 타이머 tick마다 renderScore 전체를 다시 부르면 낭비고,
-// scoreWrapper 스크롤 위치도 원점으로 리셋돼버린다(35~38행에서 이미 겪은 문제와 같은 종류).
-var playheadState = {
-  svg: null,           // renderer가 그린 실제 <svg> 엘리먼트
+//
+// 재생 하이라이트(애플 뮤직 가사 하이라이트 방식으로 교체, 74절 이후) — 평소엔 모든 음표가
+// 검정이고, 지금 소리 나는 스텝의 음표만 오렌지로 칠한다(성부 구분 색은 없앴다). 탭하면 그
+// 지점부터 재생되도록, 각 스텝 폭만큼 투명한 히트 영역도 함께 그린다. renderScore가 새로 그릴
+// 때마다 stepElements/stepX를 다시 채우고, setActiveStep(index)는 이 값들만 읽어서 이전
+// 하이라이트를 되돌리고 새 하이라이트만 칠한다 — 매 50ms 재생 타이머 tick마다 renderScore
+// 전체를 다시 부르면 낭비고, scoreWrapper 스크롤 위치도 원점으로 리셋돼버린다(35~38행에서
+// 이미 겪은 문제와 같은 종류).
+var BASE_NOTE_COLOR = '#1a1a1a';
+var ACTIVE_NOTE_COLOR = '#FF9500';
+
+var noteState = {
+  svg: null,            // renderer가 그린 실제 <svg> 엘리먼트
   scale: 1,
   topY: 0,
   bottomY: 0,
-  stepX: []            // 스텝 인덱스 -> x좌표(원래 크기 단위, scale 곱하기 전)
+  stepX: [],             // 스텝 인덱스 -> x좌표(원래 크기 단위, scale 곱하기 전) — rowIndex 0 기준
+  stepElements: [],      // 스텝 인덱스 -> 그 순간 소리 나는 음표들의 SVG 엘리먼트 배열(쉼표 제외)
+  activeIndex: null
 };
 
-function clearPlayhead() {
-  if (!playheadState.svg) return;
-  var existing = playheadState.svg.querySelector('#playhead');
-  if (existing) existing.remove();
+// el 자신과 그 자손 중 fill/stroke 속성을 가진 노드를 전부 찾아 색을 바꾼다. VexFlow가 그릴 때
+// 색을 각 path에 직접 attribute로 굽기 때문에, 부모 그룹의 색만 바꿔서는 상속되지 않는다(DOM을
+// 직접 확인해서 이렇게 결정 — docs/CONCEPTS.md 74절).
+function recolor(el, color) {
+  if (!el) return;
+  if (el.hasAttribute('fill')) el.setAttribute('fill', color);
+  if (el.hasAttribute('stroke')) el.setAttribute('stroke', color);
+  var descendants = el.querySelectorAll('[fill], [stroke]');
+  descendants.forEach(function (node) {
+    if (node.hasAttribute('fill')) node.setAttribute('fill', color);
+    if (node.hasAttribute('stroke')) node.setAttribute('stroke', color);
+  });
 }
 
-// index가 가리키는 스텝의 x좌표에 세로선을 그린다. renderScore가 마지막으로 그린 악보
-// 기준이므로, 악보가 다시 그려지지 않은 채 곡이 바뀌면(이론상 없음) 좌표가 어긋날 수 있는데
-// 실제로는 새 녹음마다 항상 renderScore부터 다시 불리니 문제되지 않는다.
-function setPlayheadStep(index) {
-  clearPlayhead();
-  if (index === null || index === undefined) return;
-  if (!playheadState.svg || index < 0 || index >= playheadState.stepX.length) return;
+// index가 가리키는 스텝의 음표(들)만 강조색으로 칠하고, 이전에 칠했던 스텝은 검정으로 되돌린다.
+function setActiveStep(index) {
+  if (noteState.activeIndex !== null && noteState.stepElements[noteState.activeIndex]) {
+    noteState.stepElements[noteState.activeIndex].forEach(function (el) { recolor(el, BASE_NOTE_COLOR); });
+  }
+  noteState.activeIndex = (index === null || index === undefined) ? null : index;
+  if (noteState.activeIndex === null) return;
+  var elements = noteState.stepElements[noteState.activeIndex];
+  if (!elements) return;
+  elements.forEach(function (el) { recolor(el, ACTIVE_NOTE_COLOR); });
+}
 
-  var x = playheadState.stepX[index] * playheadState.scale;
-  var line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-  line.setAttribute('id', 'playhead');
-  line.setAttribute('x1', x);
-  line.setAttribute('x2', x);
-  line.setAttribute('y1', playheadState.topY * playheadState.scale);
-  line.setAttribute('y2', playheadState.bottomY * playheadState.scale);
-  line.setAttribute('stroke', '#FF5A36');
-  line.setAttribute('stroke-width', 2);
-  line.setAttribute('pointer-events', 'none');
-  playheadState.svg.appendChild(line);
+// 애플 뮤직 가사 탭과 같은 상호작용 — 음표 글자 자체가 아니라 "그 박자 전체 구간"(이웃 스텝과의
+// 중간 지점까지)을 탭 영역으로 잡는다. 작은 음표head를 정확히 맞추기 어려운 터치 UX 문제를
+// 피하기 위해서다.
+function addTapRegions() {
+  if (!noteState.svg) return;
+  var xs = noteState.stepX;
+  var n = xs.length;
+  if (n === 0) return;
+
+  for (var idx = 0; idx < n; idx++) {
+    var leftBound = idx === 0 ? 0 : (xs[idx - 1] + xs[idx]) / 2;
+    var rightBound = idx === n - 1 ? xs[idx] + (xs[idx] - leftBound) : (xs[idx] + xs[idx + 1]) / 2;
+
+    var rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('x', leftBound * noteState.scale);
+    rect.setAttribute('y', noteState.topY * noteState.scale);
+    rect.setAttribute('width', Math.max(0, (rightBound - leftBound) * noteState.scale));
+    rect.setAttribute('height', (noteState.bottomY - noteState.topY) * noteState.scale);
+    rect.setAttribute('fill', 'transparent');
+    rect.setAttribute('pointer-events', 'all');
+
+    (function (capturedIndex) {
+      rect.addEventListener('click', function () {
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.harmonyUpNoteTap) {
+          window.webkit.messageHandlers.harmonyUpNoteTap.postMessage(capturedIndex);
+        }
+      });
+    })(idx);
+
+    noteState.svg.appendChild(rect);
+  }
 }
 
 function renderScore(data) {
   var container = document.getElementById('score');
   container.innerHTML = '';
-  playheadState = { svg: null, scale: 1, topY: 0, bottomY: 0, stepX: [] };
+  noteState = { svg: null, scale: 1, topY: 0, bottomY: 0, stepX: [], stepElements: [], activeIndex: null };
 
   var VF = Vex.Flow;
   var voices = (data.voices || []).filter(function (v) { return v.notes.length > 0; });
@@ -167,9 +208,10 @@ function renderScore(data) {
     var y = topPad + rowIndex * staveRowHeight;
     var measures = voiceMeasures[rowIndex];
     var x = leftPad;
-    // 재생헤드는 성부 하나(rowIndex 0, 항상 존재)의 x좌표만 기준으로 삼는다 — 모든 성부가
-    // 같은 measureBreaks를 공유해서 같은 스텝 인덱스는 어느 성부에서 재도 같은 x에 있다(위
-    // buildPayload 쪽 주석과 동일한 전제).
+    // 모든 성부가 같은 measureBreaks를 공유해서, 같은 스텝 인덱스는 어느 성부에서 재도 같은
+    // 순간을 가리킨다(위 buildPayload 쪽 주석과 동일한 전제) — 그래서 스텝 인덱스 카운터를
+    // 성부마다 독립적으로 0부터 다시 세도 서로 어긋나지 않는다. x좌표(stepX)는 rowIndex 0
+    // 기준만 기록해서 탭 히트 영역에 쓴다(어차피 같은 스텝은 어느 성부에서든 같은 x).
     var globalStepIndex = 0;
 
     for (var i = 0; i < measureCount; i++) {
@@ -186,7 +228,7 @@ function renderScore(data) {
       if (measureNotes.length > 0) {
         var staveNotes = buildStaveNotes(measureNotes, voiceData.clef);
         staveNotes.forEach(function (note) {
-          note.setStyle({ fillStyle: voiceData.color, strokeStyle: voiceData.color });
+          note.setStyle({ fillStyle: BASE_NOTE_COLOR, strokeStyle: BASE_NOTE_COLOR });
         });
 
         var vfVoice = new VF.Voice({ num_beats: measureBeats(measureNotes), beat_value: 4 });
@@ -201,13 +243,23 @@ function renderScore(data) {
         var beams = VF.Beam.generateBeams(staveNotes, { beam_rests: false });
         beams.forEach(function (beam) { beam.setContext(context).draw(); });
 
-        if (rowIndex === 0) {
-          staveNotes.forEach(function (note) {
-            playheadState.stepX[globalStepIndex] = note.getAbsoluteX();
-            globalStepIndex++;
-          });
-        }
-      } else if (rowIndex === 0) {
+        // draw() 이후에만 각 노트의 실제 SVG 엘리먼트를 얻을 수 있다(getSVGElement가
+        // document.getElementById로 draw 시점에 만들어진 DOM 노드를 찾아오므로).
+        staveNotes.forEach(function (note, noteIdx) {
+          if (rowIndex === 0) {
+            noteState.stepX[globalStepIndex] = note.getAbsoluteX();
+          }
+          var sourceNote = measureNotes[noteIdx];
+          if (sourceNote.key) { // 쉼표는 하이라이트 대상에서 제외
+            var el = note.getSVGElement();
+            if (el) {
+              if (!noteState.stepElements[globalStepIndex]) noteState.stepElements[globalStepIndex] = [];
+              noteState.stepElements[globalStepIndex].push(el);
+            }
+          }
+          globalStepIndex++;
+        });
+      } else {
         globalStepIndex += measureBreaks[i];
       }
 
@@ -215,11 +267,13 @@ function renderScore(data) {
     }
   });
 
-  playheadState.svg = context.svg || null;
-  playheadState.scale = SCALE;
-  playheadState.topY = topPad - 15;
-  playheadState.bottomY = topPad + voices.length * staveRowHeight - 20;
+  noteState.svg = context.svg || null;
+  noteState.scale = SCALE;
+  noteState.topY = topPad - 15;
+  noteState.bottomY = topPad + voices.length * staveRowHeight - 20;
+
+  addTapRegions();
 }
 
 window.renderScore = renderScore;
-window.setPlayheadStep = setPlayheadStep;
+window.setActiveStep = setActiveStep;

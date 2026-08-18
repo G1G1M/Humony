@@ -153,6 +153,10 @@ struct PracticeView: View {
     // 피치만 바꾸고 길이는 그대로라, 재생 경과 시간과 원본 녹음 타임라인이 그대로 일치한다.
     @State private var voiceClipPlaybackStartedAt: Date?
     @State private var activePlaybackStepIndex: Int?
+    // 탭으로 다른 지점을 다시 눌렀을 때(seekPlayback), 이전 재생의 onFinished 콜백이
+    // voiceClipPlayer.stop() 이후에도 뒤늦게 도착해 방금 시작한 새 재생 상태를 지워버리는 걸
+    // 막는 세대 토큰 — 재생을 새로 시작할 때마다 증가시키고, 콜백에서 세대가 다르면 무시한다.
+    @State private var playbackGeneration = 0
     // .autoconnect()로 뷰가 살아있는 동안 항상 흐르지만, updatePlaybackStepIndex()가
     // voiceClipPlaybackStartedAt이 nil이면 즉시 return하므로 재생 중이 아닐 땐 사실상 아무 일도
     // 안 한다 — 재생 시작/종료마다 타이머를 새로 만들고 해제하는 생명주기 관리보다 단순하다.
@@ -490,10 +494,10 @@ struct PracticeView: View {
                 }
 
                 if fillAvailable {
-                    VexFlowScoreView(steps: melodySteps, mutedVoices: $mutedVoices, activeStepIndex: activePlaybackStepIndex)
+                    VexFlowScoreView(steps: melodySteps, mutedVoices: $mutedVoices, activeStepIndex: activePlaybackStepIndex, onSeekToStep: { seekPlayback(toStep: $0) })
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    VexFlowScoreView(steps: melodySteps, mutedVoices: $mutedVoices, activeStepIndex: activePlaybackStepIndex)
+                    VexFlowScoreView(steps: melodySteps, mutedVoices: $mutedVoices, activeStepIndex: activePlaybackStepIndex, onSeekToStep: { seekPlayback(toStep: $0) })
                         .frame(height: VexFlowScoreView.preferredHeight)
 
                     Button {
@@ -590,7 +594,7 @@ struct PracticeView: View {
     /// 일반화했다(로드맵 Phase 4, docs/CONCEPTS.md 53절).
     private var playEnabledVoicesButton: some View {
         Button {
-            recordAndHarmonizeFullChordWithVoice()
+            playHarmonizedVoice(startStepIndex: nil)
         } label: {
             Label("재생", systemImage: "play.fill")
         }
@@ -880,10 +884,22 @@ struct PracticeView: View {
     /// 재생한다. 예전엔 "전체 화음"(고정 4성부)/"화음만 듣기"(멜로디 고정 제외)/"베이스·3도·
     /// 5도 각각 미리듣기" 여러 버튼으로 나뉘어 있던 걸, 토글 하나로 자유롭게 조합할 수 있게
     /// 일반화했다(로드맵 Phase 4, docs/CONCEPTS.md 53절).
-    private func recordAndHarmonizeFullChordWithVoice() {
-        guard !isPlaybackBusy else {
-            statusText = "다른 소리가 재생 중이에요 — 끝난 뒤 다시 눌러주세요"
-            return
+    ///
+    /// `startStepIndex`가 있으면(악보 탭, 74절) 그 스텝의 onsetTime부터 재생한다 — 버튼(항상
+    /// nil, 처음부터)과 탭(구체적 인덱스)이 같은 파이프라인을 공유한다. 재생 시작 지점만
+    /// `recentVoiceBuffer`를 그 지점부터 잘라서 넣는 걸로 바뀌고, 나머지(정규화/시프트/더블링)는
+    /// 그대로다.
+    private func playHarmonizedVoice(startStepIndex: Int?) {
+        let isSeek = startStepIndex != nil
+        if isPlaybackBusy {
+            // 탭으로 인한 재생은 "다른 소리가 재생 중이면 거부" 가드를 우회하고, 대신 지금
+            // 재생 중인 소리를 끊고 그 자리에서 새로 시작한다 — 애플 뮤직에서 재생 중에 다른
+            // 가사를 탭하면 바로 그리로 이동하는 것과 같은 동작.
+            guard isSeek else {
+                statusText = "다른 소리가 재생 중이에요 — 끝난 뒤 다시 눌러주세요"
+                return
+            }
+            voiceClipPlayer.stop()
         }
         guard melodySession.suggestedHarmony != nil else {
             statusText = "아직 화음이 없어요 — 먼저 녹음해주세요"
@@ -906,11 +922,21 @@ struct PracticeView: View {
             return
         }
 
-        let recorded = recentVoiceBuffer
+        let startTime: Double
+        if let index = startStepIndex, melodySteps.indices.contains(index), let onset = melodySteps[index].onsetTime {
+            startTime = onset
+        } else {
+            startTime = 0
+        }
+        let startSampleIndex = min(recentVoiceBuffer.count, max(0, Int(startTime * recentVoiceSampleRate)))
+        let recorded = Array(recentVoiceBuffer[startSampleIndex...])
         let rate = recentVoiceSampleRate
         let rootFrequency = melodySession.lastNote?.frequency
         let muted = mutedVoices
         statusText = "화음 만드는 중…"
+
+        playbackGeneration += 1
+        let generation = playbackGeneration
 
         Task {
             // 예전엔 트랙들을 Swift 배열 단계에서 미리 하나로 합쳐서(AudioGain.mixAndNormalize)
@@ -944,20 +970,33 @@ struct PracticeView: View {
 
             do {
                 isPlayingVoiceClip = true
-                voiceClipPlaybackStartedAt = Date()
+                // 실제 시작 시각이 아니라 startTime만큼 과거로 앞당긴 시각을 기준점으로 삼는다 —
+                // updatePlaybackStepIndex()가 "지금 - 이 시각"으로 경과 시간을 구해서 그대로
+                // melodySteps의 onsetTime/duration과 비교하므로, 이렇게 하면 잘라낸 지점부터
+                // 재생해도 원본 녹음 타임라인 기준 경과 시간이 계속 정확하게 나온다(한 줄도
+                // 안 고치고 재사용 가능).
+                voiceClipPlaybackStartedAt = Date().addingTimeInterval(-startTime)
                 try voiceClipPlayer.playTracks(tracks, sampleRate: rate) {
+                    guard generation == playbackGeneration else { return }
                     isPlayingVoiceClip = false
                     voiceClipPlaybackStartedAt = nil
                     activePlaybackStepIndex = nil
                 }
                 statusText = "내 목소리로 만든 화음을 재생합니다"
             } catch {
+                guard generation == playbackGeneration else { return }
                 isPlayingVoiceClip = false
                 voiceClipPlaybackStartedAt = nil
                 activePlaybackStepIndex = nil
                 statusText = "재생 실패: \(error.localizedDescription)"
             }
         }
+    }
+
+    /// 악보의 음표를 탭했을 때(`VexFlowScoreView.onSeekToStep`) 호출된다 — 그 지점부터
+    /// 재생을 시작하는 얇은 래퍼.
+    private func seekPlayback(toStep index: Int) {
+        playHarmonizedVoice(startStepIndex: index)
     }
 
     /// 재생헤드 타이머(playheadTimer)가 50ms마다 부른다 — 재생 중이 아니면(voiceClipPlaybackStartedAt이

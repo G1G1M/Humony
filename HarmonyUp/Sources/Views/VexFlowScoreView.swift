@@ -8,7 +8,9 @@ import WebKit
 ///
 /// **아키텍처**: `WKWebView`가 로컬 HTML(`score.html`, CDN 없이 완전 오프라인)을 로드하고,
 /// Swift가 `melodySteps`+`mutedVoices`를 JSON으로 만들어 `window.renderScore(data)`를
-/// 직접 호출한다(단방향 브릿지 — JS에서 Swift로 돌아올 데이터가 없어 메시지 핸들러 불필요).
+/// 직접 호출한다(Swift→JS). 음표를 탭하면 그 지점부터 재생하는 기능(74절)을 위해 반대 방향
+/// 브릿지도 있다 — JS가 `WKScriptMessageHandler`("harmonyUpNoteTap")로 탭한 스텝 인덱스를
+/// Swift에 돌려준다.
 ///
 /// **성부 배치**: 레퍼런스 악보(사용자 제공)처럼 성부마다 자기 오선을 갖는다 — 멜로디(위)부터
 /// 5도·3도(둘 다 높은음자리표)·베이스(낮은음자리표) 순으로 쌓는다(실제 피치 순서와 일치).
@@ -17,27 +19,31 @@ import WebKit
 struct VexFlowScoreView: UIViewRepresentable {
     let steps: [MelodyStep]
     @Binding var mutedVoices: Set<PlaybackVoice>
-    /// 카라오케 재생헤드가 지금 가리키는 스텝(`steps`의 인덱스, `nil`이면 표시 안 함) — Phase 7.
-    /// 재생 중 50ms마다 바뀌는 값이라, `updateUIView`가 이 값 하나 바뀔 때마다 악보 전체를
-    /// 다시 그리면 낭비고 스크롤 위치도 리셋된다(render.js 상단 주석과 같은 이유) — 그래서
-    /// `Coordinator`가 페이로드(악보 내용) 변경과 이 값 변경을 구분해서 다르게 처리한다.
+    /// 지금 소리 나는 스텝(`steps`의 인덱스, `nil`이면 표시 안 함) — 애플 뮤직 가사 하이라이트
+    /// 방식으로 이 스텝의 음표만 검정에서 오렌지로 바뀐다(74절). 재생 중 50ms마다 바뀌는
+    /// 값이라, `updateUIView`가 이 값 하나 바뀔 때마다 악보 전체를 다시 그리면 낭비고 스크롤
+    /// 위치도 리셋된다(render.js 상단 주석과 같은 이유) — 그래서 `Coordinator`가 페이로드
+    /// (악보 내용) 변경과 이 값 변경을 구분해서 다르게 처리한다.
     let activeStepIndex: Int?
+    /// 악보의 음표를 탭했을 때(애플 뮤직 가사 탭과 동일한 상호작용) 호출된다 — 인자는 탭한
+    /// 스텝 인덱스(`steps`의 인덱스, `activeStepIndex`와 같은 좌표계).
+    let onSeekToStep: (Int) -> Void
 
     /// 카드에 줄 고정 높이 — "너무 작다"는 실기기 피드백으로 키웠다(docs/CONCEPTS.md 58절).
     /// 4성부가 전부 나올 때 필요한 높이보다는 작을 수 있는데, `score.html`이 세로 스크롤도
     /// 지원해서(58절) 잘리지 않고 스크롤로 볼 수 있다.
     static let preferredHeight: CGFloat = 460
 
-    // 이 앱 전체가 다크모드를 지원하지만, 악보는 항상 흰 종이 위에 그린다(실제 악보/독서
-    // 앱들의 관례) — 그래서 여기 색상은 Theme의 다이나믹 컬러가 아니라 라이트 모드 값에
-    // 대응하는 고정 hex를 쓴다.
-    private static let melodyColorHex = "#5959D6"
-    private static let bassColorHex = "#8E8E93"
-    private static let thirdColorHex = "#2CA8B5"
-    private static let fifthColorHex = "#F06B5C"
+    /// JS가 탭 이벤트를 돌려보내는 메시지 핸들러 이름 — `render.js`의 `addTapRegions()`가
+    /// 같은 이름으로 `postMessage`를 호출한다.
+    private static let noteTapMessageName = "harmonyUpNoteTap"
 
     func makeUIView(context: Context) -> WKWebView {
-        let webView = WKWebView()
+        let configuration = WKWebViewConfiguration()
+        configuration.userContentController.add(context.coordinator, name: Self.noteTapMessageName)
+        context.coordinator.contentController = configuration.userContentController
+
+        let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.isOpaque = false
         webView.backgroundColor = .white
         webView.scrollView.backgroundColor = .white
@@ -54,19 +60,29 @@ struct VexFlowScoreView: UIViewRepresentable {
     func updateUIView(_ webView: WKWebView, context: Context) {
         context.coordinator.pendingPayload = buildPayload()
         context.coordinator.pendingStepIndex = activeStepIndex
+        context.coordinator.onNoteTapped = onSeekToStep
         context.coordinator.renderIfReady()
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    final class Coordinator: NSObject, WKNavigationDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         weak var webView: WKWebView?
+        // userContentController가 코디네이터를 강하게 붙잡고 있어서(add(_:name:)), 반대로
+        // 여기서 강하게 잡으면 서로 놓아주지 못하는 순환 참조가 된다 — weak로만 들고, deinit에서
+        // 핸들러를 명시적으로 떼어낸다.
+        weak var contentController: WKUserContentController?
         var pendingPayload: String?
         var pendingStepIndex: Int?
+        var onNoteTapped: ((Int) -> Void)?
         private var isPageLoaded = false
-        // 마지막으로 실제 renderScore를 호출한 페이로드 — 이 값이 그대로면(재생헤드만 움직인
-        // 경우) 악보를 다시 그리지 않고 setPlayheadStep만 부른다.
+        // 마지막으로 실제 renderScore를 호출한 페이로드 — 이 값이 그대로면(하이라이트만 움직인
+        // 경우) 악보를 다시 그리지 않고 setActiveStep만 부른다.
         private var lastRenderedPayload: String?
+
+        deinit {
+            contentController?.removeScriptMessageHandler(forName: VexFlowScoreView.noteTapMessageName)
+        }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             isPageLoaded = true
@@ -80,7 +96,12 @@ struct VexFlowScoreView: UIViewRepresentable {
                 lastRenderedPayload = payload
             }
             let stepArgument = pendingStepIndex.map(String.init) ?? "null"
-            webView.evaluateJavaScript("setPlayheadStep(\(stepArgument));")
+            webView.evaluateJavaScript("setActiveStep(\(stepArgument));")
+        }
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard let index = message.body as? Int else { return }
+            onNoteTapped?(index)
         }
     }
 
@@ -89,7 +110,6 @@ struct VexFlowScoreView: UIViewRepresentable {
     private struct Payload: Encodable {
         struct Voice: Encodable {
             let clef: String
-            let color: String
             let notes: [Note]
         }
         // key가 nil이면 쉼표(그 성부가 이 스텝엔 음이 없다는 뜻 — 온음계 밖 멜로디 음이라
@@ -129,7 +149,7 @@ struct VexFlowScoreView: UIViewRepresentable {
             // ("c3인데 완전 아래에 내려가 있다" 피드백). 실제 악보처럼 그 성부가 실제로 부른
             // 음역에 맞는 음자리표를 골라야 한다.
             let clef = Self.clef(forMIDINotes: validSteps.map(\.midiNote))
-            voiceRows.append(Payload.Voice(clef: clef, color: Self.melodyColorHex, notes: notes))
+            voiceRows.append(Payload.Voice(clef: clef, notes: notes))
         }
 
         // 실제 음높이 순서(멜로디 다음으로 5도가 3도보다 위)와 맞춰서 그린다 — ChordGenerator의
@@ -143,12 +163,12 @@ struct VexFlowScoreView: UIViewRepresentable {
             guard !mutedVoices.contains(voice) else { continue }
             let notes = harmonyNotes(for: interval, steps: validSteps, quantized: quantized)
             let midiNotes = validSteps.compactMap { $0.harmony?.first(where: { $0.interval == interval })?.midiNote }
-            voiceRows.append(Payload.Voice(clef: Self.clef(forMIDINotes: midiNotes), color: Self.colorHex(for: interval), notes: notes))
+            voiceRows.append(Payload.Voice(clef: Self.clef(forMIDINotes: midiNotes), notes: notes))
         }
 
         if !mutedVoices.contains(.bass) {
             let notes = harmonyNotes(for: .bass, steps: validSteps, quantized: quantized)
-            voiceRows.append(Payload.Voice(clef: "bass", color: Self.colorHex(for: .bass), notes: notes))
+            voiceRows.append(Payload.Voice(clef: "bass", notes: notes))
         }
 
         let payload = Payload(voices: voiceRows, measureBreaks: measureBreaks)
@@ -168,14 +188,6 @@ struct VexFlowScoreView: UIViewRepresentable {
             }
             let (key, sharp) = Self.vexFlowKey(forMIDINote: note.midiNote)
             return Payload.Note(key: key, sharp: sharp, duration: quantizedNote.vexFlowDuration)
-        }
-    }
-
-    private static func colorHex(for interval: ChordGenerator.Interval) -> String {
-        switch interval {
-        case .bass: return bassColorHex
-        case .third: return thirdColorHex
-        case .fifth: return fifthColorHex
         }
     }
 

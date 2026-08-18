@@ -1834,3 +1834,38 @@ F3(0.16s, 신뢰도0.98), G3(0.43s, 신뢰도0.99), G#3(0.06s, 신뢰도0.95)
 ## 74. 첫음 기본값을 C4로 고정
 
 `startingNoteMIDI`의 기본값이 A4(69)였는데, 사용자가 항상 도(C4, 60)로 시작하도록 요청했다. 참고음 재생/드롭다운은 이미 47/72절에서 만들어둔 그대로라 초기값 하나만 바꾸면 된다 — 파이프라인이나 UI 구조에는 영향 없음.
+
+---
+
+## 75. 재생헤드를 "세로선"에서 "음표 하이라이트 + 탭 재생"으로 교체
+
+### 배경
+
+73절에서 만든 세로선 재생헤드가 "저런 선느낌 말고, 애플 뮤직에서 가사 누르면 그 가사부터 나오게 하는 그 느낌"이라는 반려를 받았다. 원하는 건 두 가지 — (1) 지금 소리 나는 음표 자체가 검정에서 색으로 바뀌고(평소엔 성부 구분 없이 전부 검정), (2) 악보의 음표를 탭하면 그 지점부터 재생이 시작된다. 세로선 방식은 폐기하고 이 두 가지로 교체했다.
+
+### 음표 색상 — SVG를 직접 조작해야 하는 이유
+
+VexFlow는 `note.setStyle({fillStyle, strokeStyle})`로 그릴 때 색을 각 path에 직접 attribute로 굽는다 — 부모 그룹의 색만 바꿔서는 자식에게 상속되지 않는다(벤더링된 `vexflow.js` DOM을 직접 확인해서 결정). 그래서 `render.js`가 `renderScore()`로 그릴 때마다 각 음표(쉼표 제외)의 실제 SVG 엘리먼트를 `Element.getSVGElement()`(draw 이후 `document.getElementById(this.attrs.id)`로 그 노트의 DOM 노드를 찾아오는 공개 API, 마찬가지로 소스에서 직접 확인)로 얻어서 `stepElements[스텝 인덱스]`에 저장해둔다. `setActiveStep(index)`가 이 저장된 엘리먼트들과 그 자손 중 `fill`/`stroke` 속성을 가진 노드를 전부 찾아 색만 바꾼다 — 이전 인덱스는 검정(`#1a1a1a`)으로 되돌리고 새 인덱스만 오렌지(`#FF9500`)로 칠한다. 성부별 색 구분이 필요 없어져서 `VexFlowScoreView.swift`의 색상 hex 상수 4개, `Payload.Voice.color` 필드, `colorHex(for:)` 함수를 전부 지웠다.
+
+### 탭 재생 — 이 프로젝트 첫 JS→Swift 역방향 브릿지
+
+지금까지 `VexFlowScoreView`는 Swift가 `window.renderScore(data)`를 부르는 단방향 브릿지만 있었다. 탭 이벤트를 돌려받으려면 `WKScriptMessageHandler`가 필요해서, `Coordinator`가 이를 채택하고 `makeUIView`에서 `WKWebViewConfiguration().userContentController.add(coordinator, name: "harmonyUpNoteTap")`로 등록했다. `userContentController`가 코디네이터를 강하게 붙잡는데 코디네이터도 컨트롤러를 강하게 잡으면 순환 참조가 되므로, 컨트롤러 쪽은 `weak`로만 들고 `deinit`에서 `removeScriptMessageHandler(forName:)`으로 정리한다.
+
+`render.js`는 음표 자체가 아니라 "그 박자 전체 구간"(이웃 스텝과의 중간 지점까지)을 탭 영역(`<rect>`, `pointer-events: all`, 투명)으로 잡는다 — 애플 뮤직 가사 탭이 글자 하나가 아니라 줄 전체를 탭 영역으로 잡는 것과 같은 이유로, 작은 음표head를 정확히 맞추기 어려운 터치 UX 문제를 피한다. 클릭 시 `window.webkit.messageHandlers.harmonyUpNoteTap.postMessage(index)`를 부른다.
+
+### 탭한 지점부터 재생 — 기존 재생헤드 매핑을 그대로 재사용
+
+`recordAndHarmonizeFullChordWithVoice()`를 `playHarmonizedVoice(startStepIndex: Int?)`로 일반화했다. 버튼(`nil`, 처음부터)과 탭(구체적 인덱스)이 같은 파이프라인(정규화/시프트/더블링)을 공유하고, 다른 건 두 가지뿐이다:
+
+- **재생 시작 지점**: `melodySteps[index].onsetTime`을 초 단위로 구해서 `recentVoiceBuffer`를 그 지점부터 잘라낸 배열을 파이프라인에 넣는다.
+- **재생헤드 매핑 재사용**: `voiceClipPlaybackStartedAt`을 `Date()`가 아니라 `Date().addingTimeInterval(-startTime)`로 설정한다 — 73절에서 만든 `updatePlaybackStepIndex()`(경과시간 = 지금 - startedAt을 `onsetTime`/`duration`과 비교)를 한 줄도 안 고치고 그대로 재사용할 수 있다. 잘라낸 지점부터 재생해도 "경과시간 = 실제 지난 시간 + startTime"이 되어 원본 타임라인 기준 경과시간이 계속 정확하다.
+
+탭으로 인한 재생은 "다른 소리가 재생 중이면 거부"하던 기존 가드를 우회하고 `voiceClipPlayer.stop()`으로 지금 재생 중인 소리를 끊은 뒤 그 자리에서 새로 시작한다(애플 뮤직에서 재생 중 다른 가사를 탭하면 바로 이동하는 것과 동일). 이때 `AVAudioPlayerNode.stop()`이 이전 재생의 완료 콜백을 뒤늦게 발화시켜 방금 시작한 새 재생 상태를 지워버릴 가능성이 있어서, `playbackGeneration`(재생을 새로 시작할 때마다 증가하는 정수)을 콜백 안에서 확인해 세대가 다르면(=이전 재생의 뒤늦은 콜백이면) 무시하도록 방어했다.
+
+### 이번 단계에서 뺀 것
+
+`SheetMusicFullScreenView`(전체화면 악보)는 73절과 같은 이유("하나씩 순서대로")로 이번에도 `onSeekToStep: { _ in }`로 비워뒀다.
+
+### 검증
+
+유닛테스트 105개 그대로 통과(회귀 없음). 시뮬레이터에서 빌드/설치/실행해 크래시 없이 정상 기동하는지 확인(악보 자체는 실제 녹음이 있어야 나타나는데, 시뮬레이터로는 마이크 입력을 만들 수 없어 하이라이트/탭이 실제로 동작하는지는 이 단계에서 확인 못 함). 실기기에서 실제로 노래를 부르고 재생하면서 음표가 순서대로 검정→오렌지로 바뀌는지, 악보를 탭했을 때 그 지점부터 재생되는지(재생 중이 아닐 때/재생 중 다른 지점 탭 둘 다) 확인이 필요하다 — 다음 세션에서 실기기로 확인 예정.
