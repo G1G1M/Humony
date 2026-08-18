@@ -1869,3 +1869,11 @@ VexFlow는 `note.setStyle({fillStyle, strokeStyle})`로 그릴 때 색을 각 pa
 ### 검증
 
 유닛테스트 105개 그대로 통과(회귀 없음). 시뮬레이터에서 빌드/설치/실행해 크래시 없이 정상 기동하는지 확인(악보 자체는 실제 녹음이 있어야 나타나는데, 시뮬레이터로는 마이크 입력을 만들 수 없어 하이라이트/탭이 실제로 동작하는지는 이 단계에서 확인 못 함). 실기기에서 실제로 노래를 부르고 재생하면서 음표가 순서대로 검정→오렌지로 바뀌는지, 악보를 탭했을 때 그 지점부터 재생되는지(재생 중이 아닐 때/재생 중 다른 지점 탭 둘 다) 확인이 필요하다 — 다음 세션에서 실기기로 확인 예정.
+
+### 후속: 실기기에서 "악보가 안 보인다" 제보 — 로드 실패 경로가 아예 없었다
+
+실기기(`devicectl --console`)로 확인해보니 화음 파이프라인(멜로디 세그멘테이션→화음 생성)은 정상이었고(`applyQuickRecordResult 완료 — hasCapturedNote=true, melodySteps=5개`), 문제는 그 뒤 `WKWebView` 쪽 — 콘솔에 `GPU process took 2s`/`WebContent process took 3s`/`Networking process took 13.8s`/`Could not create a sandbox extension`/`WebProcessProxy::didBecomeUnresponsive`/`Result accumulator timeout: 3.000000, exceeded`가 찍혔다. 우리가 만든 자바스크립트가 던진 에러는 하나도 없어서, 코드 로직 버그가 아니라 기기에서 웹뷰 프로세스 자체가 늦게 뜨거나 응답을 못 한 것으로 보인다.
+
+다만 코드를 다시 보니 진짜 문제(혹은 적어도 다음에 똑같은 일이 생겼을 때 원인을 알 수 없게 만드는 문제)를 하나 발견했다: `VexFlowScoreView.Coordinator`가 `WKNavigationDelegate`의 로드 **성공**(`didFinish`)만 처리하고 **실패**는 아예 처리하지 않고 있었다. 페이지 로드가 실패하면 `isPageLoaded`가 영원히 `false`로 남고, `renderIfReady()`의 guard(`guard isPageLoaded, ...`)에 막혀 `renderScore`/`setActiveStep` 호출이 조용히 아무 일도 안 하고 씹힌다 — 화면엔 그냥 빈 웹뷰만 남고 우리 쪽 로그엔 아무 흔적도 안 남는다(이번에 사용자가 시스템 콘솔을 직접 캡처해줘서 겨우 원인 후보를 좁힐 수 있었음). `didFail`/`didFailProvisionalNavigation` 델리게이트 메서드를 추가해 로드 실패를 명시적으로 로그로 남기고, 기존에 완료 핸들러 없이 던지기만 하던 `evaluateJavaScript` 호출 두 곳에도 에러 콜백을 달아서 JS 호출 자체가 실패/타임아웃했는지도 구분할 수 있게 했다 — 다음에 재현되면 "페이지 로드 실패" vs "JS 호출 실패" vs "그 외(기기 리소스 문제)"를 로그만으로 구분 가능. 코드 로직을 추측만으로 고치지 않고 진단 도구부터 심는 이유는 이 프로젝트의 기존 원칙(26절/49절/52절 — 오디오 그래프/포맷 버그는 항상 실기기 콘솔 로그로 확인 후 수정)과 같다.
+
+유닛테스트 105개 유지. 다음에 재현되면 새로 추가된 로그로 정확한 실패 지점을 확인할 예정.

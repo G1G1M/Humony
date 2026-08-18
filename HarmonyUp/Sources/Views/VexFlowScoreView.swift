@@ -85,18 +85,46 @@ struct VexFlowScoreView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            #if DEBUG
+            print("[VexFlowScoreView] score.html 로드 완료")
+            #endif
             isPageLoaded = true
             renderIfReady()
+        }
+
+        // 기존엔 로드 성공(didFinish)만 처리하고 실패는 그냥 무시했다 — 실패하면 isPageLoaded가
+        // 영원히 false로 남아서 renderIfReady()의 guard에 막혀 아무 자바스크립트도 안 불리고,
+        // 화면엔 그냥 빈 웹뷰만 남는데 왜 그런지 알 방법이 없었다(실기기에서 "악보가 안 보인다"는
+        // 제보를 받고서야 이 공백을 발견 — 75절 이후). 최소한 원인이 로드 실패인지는 로그로
+        // 구분할 수 있게 남긴다.
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            #if DEBUG
+            print("[VexFlowScoreView] score.html 로드 실패(didFail): \(error.localizedDescription)")
+            #endif
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            #if DEBUG
+            print("[VexFlowScoreView] score.html 로드 실패(didFailProvisionalNavigation): \(error.localizedDescription)")
+            #endif
         }
 
         func renderIfReady() {
             guard isPageLoaded, let webView, let payload = pendingPayload else { return }
             if payload != lastRenderedPayload {
-                webView.evaluateJavaScript("renderScore(\(payload));")
+                webView.evaluateJavaScript("renderScore(\(payload));") { _, error in
+                    #if DEBUG
+                    if let error { print("[VexFlowScoreView] renderScore 호출 실패: \(error.localizedDescription)") }
+                    #endif
+                }
                 lastRenderedPayload = payload
             }
             let stepArgument = pendingStepIndex.map(String.init) ?? "null"
-            webView.evaluateJavaScript("setActiveStep(\(stepArgument));")
+            webView.evaluateJavaScript("setActiveStep(\(stepArgument));") { _, error in
+                #if DEBUG
+                if let error { print("[VexFlowScoreView] setActiveStep 호출 실패: \(error.localizedDescription)") }
+                #endif
+            }
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
