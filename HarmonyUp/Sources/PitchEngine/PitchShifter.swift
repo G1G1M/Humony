@@ -18,10 +18,14 @@ enum PitchShifter {
     /// - Parameters:
     ///   - samples: 원본 오디오(모노, [-1, 1] 범위)
     ///   - pitchRatio: 목표 주파수 / 원래 주파수. 1보다 크면 높은 음(예: 장3도 위 = 2^(4/12)).
+    ///   - formantRatio: 포먼트(스펙트럼 포락선, 음색) 이동 비율. 기본값 1.0은 "포먼트 그대로,
+    ///     피치만 이동"(예전 동작과 동일). 1보다 크면 포먼트가 위로(더 맑은 음색), 작으면
+    ///     아래로(더 굵은 음색) 옮겨져서 실제로 다른 성역의 목소리처럼 들린다 —
+    ///     `ChordGenerator.Interval.formantRatio` 참고(docs/CONCEPTS.md 77절).
     ///   - expectedFrequency: WORLD가 직접 F0를 추정하므로 이 버전에서는 쓰지 않는다 —
     ///     기존 호출부(PracticeView)를 그대로 두기 위해 파라미터 자리만 남겨뒀다.
-    /// - Returns: 길이는 원본과 같고, 피치만 pitchRatio배 된 오디오.
-    static func shift(samples: [Float], pitchRatio: Double, sampleRate: Double, expectedFrequency: Double? = nil) -> [Float] {
+    /// - Returns: 길이는 원본과 같고, 피치/포먼트가 각 비율만큼 옮겨진 오디오.
+    static func shift(samples: [Float], pitchRatio: Double, formantRatio: Double = 1.0, sampleRate: Double, expectedFrequency: Double? = nil) -> [Float] {
         guard !samples.isEmpty, pitchRatio > 0 else { return samples }
 
         // WORLD는 double 배열을 쓴다 — Float([-1,1] 범위) <-> Double 변환만 여기서 감싼다.
@@ -35,6 +39,7 @@ enum PitchShifter {
                     Int32(input.count),
                     Int32(sampleRate),
                     pitchRatio,
+                    formantRatio,
                     outputBuffer.baseAddress
                 )
             }

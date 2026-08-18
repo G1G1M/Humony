@@ -105,6 +105,36 @@ final class PitchShifterTests: XCTestCase {
         XCTAssertEqual(PitchShifter.shift(samples: input, pitchRatio: -1, sampleRate: sampleRate), input)
     }
 
+    // formantRatio를 안 넘기면 예전 호출부(포먼트 개념이 없던 시절)와 완전히 같은 경로를
+    // 타야 한다 — 브릿지 쪽에서 formantRatio == 1.0이면 워핑 자체를 건너뛰므로, 기본값을
+    // 안 쓴 명시적 1.0 호출과 바이트 단위로 같은 결과가 나와야 한다(Phase 8 Task 1).
+    func testFormantRatioDefaultMatchesExplicitIdentity() {
+        let input = voiceLikeWave(frequency: 440.0, sampleCount: 8192)
+        let ratio = pow(2.0, -7.0 / 12.0)
+
+        let withDefault = PitchShifter.shift(samples: input, pitchRatio: ratio, sampleRate: sampleRate)
+        let withExplicitIdentity = PitchShifter.shift(samples: input, pitchRatio: ratio, formantRatio: 1.0, sampleRate: sampleRate)
+
+        XCTAssertEqual(withDefault, withExplicitIdentity)
+    }
+
+    // 포먼트(스펙트럼 포락선)와 F0(피치)는 WORLD 안에서 서로 독립적인 축이다 — pitchRatio를
+    // 1.0으로 고정한 채 formantRatio만 바꿔도, YIN으로 되짚어 재는 F0 자체는 그대로 440Hz
+    // 근처여야 한다(포먼트만 바뀌고 피치는 안 바뀌는지 확인).
+    func testFormantRatioDoesNotChangeDetectedPitch() throws {
+        let input = voiceLikeWave(frequency: 440.0, sampleCount: 16384)
+
+        let shifted = PitchShifter.shift(samples: input, pitchRatio: 1.0, formantRatio: 1.15, sampleRate: sampleRate)
+        XCTAssertEqual(shifted.count, input.count)
+
+        let middle = middleSegment(of: shifted, length: 4096)
+        let candidates = YINPitchDetector.detectPitch(samples: middle, sampleRate: sampleRate)
+        let detected = try XCTUnwrap(candidates.first)
+
+        let cents = 1200.0 * log2(detected.frequency / 440.0)
+        XCTAssertEqual(cents, 0, accuracy: 50)
+    }
+
     // WORLD은 순수 Swift 구현보다 훨씬 무겁다(F0 추정+스펙트럼 포락선+비주기성 분석을 전부
     // 거친다) — "빠른 녹음"의 녹음 상한(30초, PracticeView.quickRecordMaxDuration)에 맞춰
     // 실측해두고, 나중에 알고리즘을 더 바꿨을 때 눈에 띄게 느려지면(예: 실수로 Dio 대신

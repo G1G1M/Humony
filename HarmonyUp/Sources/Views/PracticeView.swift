@@ -992,7 +992,7 @@ struct PracticeView: View {
             for (voice, interval, ratio) in [(PlaybackVoice.bass, ChordGenerator.Interval.bass, bassRatio),
                                               (.third, .third, thirdRatio),
                                               (.fifth, .fifth, fifthRatio)] where !muted.contains(voice) {
-                let shifted = PitchShifter.shift(samples: recorded, pitchRatio: ratio, sampleRate: rate, expectedFrequency: rootFrequency)
+                let shifted = PitchShifter.shift(samples: recorded, pitchRatio: ratio, formantRatio: interval.formantRatio, sampleRate: rate, expectedFrequency: rootFrequency)
                 // 성부마다 다른 지연/디튠으로 더블링해서 두께를 준다 — 멜로디(원음)는 그대로 둔다.
                 // 이미 사용자 자신이 직접 부른 진짜 목소리라 "다른 사람이 한 번 더 부른" 효과가
                 // 필요 없고, 오히려 원음이 흔들리면 리드로서의 기준점이 흐려진다.

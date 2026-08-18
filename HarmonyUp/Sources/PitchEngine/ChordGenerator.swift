@@ -52,6 +52,20 @@ enum ChordGenerator {
             }
         }
 
+        /// 포먼트(스펙트럼 포락선, 성도 길이가 만드는 음색) 이동 비율 — `PitchShifter.shift`의
+        /// `formantRatio`로 그대로 전달된다(Phase 8 Task 1, docs/CONCEPTS.md 77절). 피치만
+        /// 옮기던 예전 방식은 "같은 사람이 음만 이동한" 소리로 들려서, 베이스는 포먼트를
+        /// 아래로(성도가 긴 실제 저음처럼), 3도/5도는 위로(맑은 두성처럼) 같이 옮겨 다른
+        /// 성역의 사람이 부르는 느낌을 낸다. 정확한 수치는 코드로 검증할 수 없는 청감
+        /// 영역이라, 실기기로 들어보면서 조정해나갈 시작값이다.
+        var formantRatio: Double {
+            switch self {
+            case .bass: return 0.85
+            case .third: return 1.15
+            case .fifth: return 1.15
+            }
+        }
+
         static func from(storageKey: String) -> Interval? {
             allCases.first { $0.storageKey == storageKey }
         }

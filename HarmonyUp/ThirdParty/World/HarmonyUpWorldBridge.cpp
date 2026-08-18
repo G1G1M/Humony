@@ -10,7 +10,7 @@
 #include <cstring>
 
 void HarmonyUpWorldPitchShift(const double *input, int length, int sampleRate,
-                               double pitchRatio, double *output) {
+                               double pitchRatio, double formantRatio, double *output) {
   if (length <= 0) {
     return;
   }
@@ -81,7 +81,41 @@ void HarmonyUpWorldPitchShift(const double *input, int length, int sampleRate,
     shiftedF0[static_cast<size_t>(i)] = original > 0.0 ? original * pitchRatio : 0.0;
   }
 
-  // 5단계: 옮긴 F0 + 원본 포먼트/비주기성으로 재합성 — "같은 목소리, 다른 음높이".
-  Synthesis(shiftedF0.data(), f0Length, spectrogram.data(), aperiodicity.data(), fftSize,
+  // 4.5단계: formantRatio가 1.0이 아니면 스펙트럼 포락선(포먼트)을 주파수 축으로 워핑한다 —
+  // F0(피치) 축과 완전히 분리된 별개의 축이라, 여기서 포먼트를 옮겨도 방금 위에서 정한 피치는
+  // 그대로 유지된다. 출력 빈 k의 값을 원본의 k/formantRatio 위치에서 선형보간해 가져온다 —
+  // formantRatio > 1이면(포먼트를 위로) 낮은 주파수 내용이 더 높은 빈으로 당겨지고, < 1이면
+  // (포먼트를 아래로) 반대로 이동한다. 벤더링된 WORLD 소스는 건드리지 않고 이 브릿지 레이어
+  // 에서만 포락선 배열을 새로 만들어 Synthesis에 넘긴다(docs/CONCEPTS.md 77절).
+  std::vector<std::vector<double>> warpedStorage;
+  std::vector<double *> warpedSpectrogram;
+  double *const *synthesisSpectrogram = spectrogram.data();
+
+  if (formantRatio > 0.0 && formantRatio != 1.0) {
+    warpedStorage.assign(static_cast<size_t>(f0Length),
+                          std::vector<double>(static_cast<size_t>(spectralSize)));
+    warpedSpectrogram.resize(static_cast<size_t>(f0Length));
+    for (int i = 0; i < f0Length; ++i) {
+      const double *source = spectrogram[static_cast<size_t>(i)];
+      double *dest = warpedStorage[static_cast<size_t>(i)].data();
+      for (int k = 0; k < spectralSize; ++k) {
+        double sourceIndex = static_cast<double>(k) / formantRatio;
+        if (sourceIndex <= 0.0) {
+          dest[k] = source[0];
+        } else if (sourceIndex >= spectralSize - 1) {
+          dest[k] = source[spectralSize - 1];
+        } else {
+          int lower = static_cast<int>(sourceIndex);
+          double frac = sourceIndex - lower;
+          dest[k] = source[lower] * (1.0 - frac) + source[lower + 1] * frac;
+        }
+      }
+      warpedSpectrogram[static_cast<size_t>(i)] = dest;
+    }
+    synthesisSpectrogram = warpedSpectrogram.data();
+  }
+
+  // 5단계: 옮긴 F0 + (필요시 워핑된) 포먼트 + 원본 비주기성으로 재합성.
+  Synthesis(shiftedF0.data(), f0Length, synthesisSpectrogram, aperiodicity.data(), fftSize,
             dioOption.frame_period, sampleRate, length, output);
 }
