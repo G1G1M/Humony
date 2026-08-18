@@ -1054,7 +1054,7 @@ struct PracticeView: View {
             }
             // 베이스(한 옥타브 아래) + 3도 + 5도 트랙을 만든다 — 스텝마다 자기 화음 목표로 따로
             // 피치시프트한다(harmonizedTrack, 멜로디가 여러 음일 때 화음이 어긋나던 문제 수정,
-            // docs/CONCEPTS.md 80절). 꺼진 성부는 계산 자체를 건너뛴다(WORLD 분석은 가볍지
+            // docs/CONCEPTS.md 81절). 꺼진 성부는 계산 자체를 건너뛴다(WORLD 분석은 가볍지
             // 않아서, 안 쓸 트랙까지 굳이 만들 필요 없음).
             for (voice, interval) in [(PlaybackVoice.bass, ChordGenerator.Interval.bass),
                                        (.third, .third),
