@@ -918,11 +918,63 @@ struct PracticeView: View {
     /// 분모는 `lastNote`(진짜 마지막 음)가 아니라 `suggestedHarmonyBaseFrequency`를 써야 한다 —
     /// 녹음이 온음계 밖 음으로 끝나서 화음이 그보다 앞선 음 기준으로 나온 경우, 마지막 음으로
     /// 나누면 화음과 안 맞는 엉뚱한 비율이 나온다(MelodySession.swift 주석 참고).
+    ///
+    /// `playHarmonizedVoice`가 실제 재생 트랙을 만들 때는 이 값을 쓰지 않는다(스텝마다 자기
+    /// 화음으로 따로 계산 — `harmonizedTrack(interval:startStepIndex:startTime:rate:)` 참고).
+    /// 여기서는 "화음이 아예 있는지"를 확인하는 가벼운 존재 확인 용도로만 남겨뒀다.
     private func pitchRatio(toInterval interval: ChordGenerator.Interval) -> Double? {
         guard let baseFrequency = melodySession.suggestedHarmonyBaseFrequency,
               let harmony = melodySession.suggestedHarmony,
               let target = harmony.first(where: { $0.interval == interval }) else { return nil }
         return target.frequency / baseFrequency
+    }
+
+    /// 성부 하나(베이스/3도/5도)의 재생 트랙을 멜로디 스텝 단위로 만든다. 예전엔 화음 전체를
+    /// (마지막 음 기준) 고정 비율 하나로 통째로 옮겼는데, 여러 음으로 된 멜로디에서는 음마다
+    /// 실제 화음이 다른데 비율은 하나로 고정돼 있어서 앵커 음이 아닌 나머지 음들에서 화음이
+    /// 어긋나 불협화음처럼 들렸다("메인 멜로디는 괜찮은데 화음이 거슬린다" 실사용 피드백으로
+    /// 원인 확정). 이제 각 스텝을 자기 구간(`onsetTime`~`onsetTime+duration`)만큼만 잘라서 그
+    /// 스텝 자신의 화음 목표 주파수로 각각 피치시프트한 뒤 이어붙인다. 스텝에 이 성부의 화음이
+    /// 없으면(온음계 밖 음 등, 악보에도 쉼표로 표시되는 것과 같은 경우) 무음으로 채워서 재생
+    /// 타이밍(재생헤드 매핑, 멜로디 트랙과의 동기)은 그대로 유지한다 — 스텝 사이의 빈틈도
+    /// 무음으로 메워서, 결과 트랙 길이가 `recorded`(멜로디 트랙)와 정확히 같게 만든다.
+    private func harmonizedTrack(interval: ChordGenerator.Interval, startStepIndex: Int?, startTime: Double, rate: Double) -> [Float] {
+        let startIndex = startStepIndex ?? 0
+        guard melodySteps.indices.contains(startIndex) else { return [] }
+
+        // 세그먼트 경계에서 나는 클릭음을 없애는 짧은 페이드 — 트랙 전체에 거는 fade보다
+        // 훨씬 짧게(1/3 정도)만 줘서, 음이 여러 개 짧게 이어질 때 소리가 너무 죽지 않게 한다.
+        let segmentFadeCount = max(1, Int(rate * voiceClipFadeDuration / 3))
+        let bufferEnd = recentVoiceBuffer.count
+        var output: [Float] = []
+        var cursor = max(0, min(bufferEnd, Int(startTime * rate)))
+
+        for i in startIndex..<melodySteps.count {
+            let step = melodySteps[i]
+            guard let onset = step.onsetTime, let duration = step.duration, duration > 0 else { continue }
+            let segStart = max(0, Int(onset * rate))
+            let segEnd = min(bufferEnd, Int((onset + duration) * rate))
+            guard segStart < segEnd else { continue }
+
+            if segStart > cursor {
+                output.append(contentsOf: [Float](repeating: 0, count: segStart - cursor))
+            }
+
+            let segment = Array(recentVoiceBuffer[segStart..<segEnd])
+            if let target = step.harmony?.first(where: { $0.interval == interval }) {
+                let ratio = target.frequency / NoteNameConverter.frequency(forMIDINote: step.midiNote)
+                let shifted = PitchShifter.shift(samples: segment, pitchRatio: ratio, formantRatio: interval.formantRatio, sampleRate: rate)
+                output.append(contentsOf: AudioGain.applyFadeInOut(shifted, fadeSampleCount: min(segmentFadeCount, shifted.count / 2)))
+            } else {
+                output.append(contentsOf: [Float](repeating: 0, count: segment.count))
+            }
+            cursor = segEnd
+        }
+
+        if cursor < bufferEnd {
+            output.append(contentsOf: [Float](repeating: 0, count: bufferEnd - cursor))
+        }
+        return output
     }
 
     /// "내 목소리로 화음 만들기" — 방금 녹음한 소리(recentVoiceBuffer)를 `mutedVoices`에 안
@@ -951,9 +1003,11 @@ struct PracticeView: View {
             statusText = "아직 화음이 없어요 — 먼저 녹음해주세요"
             return
         }
-        guard let bassRatio = pitchRatio(toInterval: .bass),
-              let thirdRatio = pitchRatio(toInterval: .third),
-              let fifthRatio = pitchRatio(toInterval: .fifth) else {
+        // 이후 실제 트랙은 스텝마다 자기 화음으로 따로 계산한다(harmonizedTrack) — 여기서는
+        // "화음 자체가 있는지"만 가볍게 확인한다.
+        guard pitchRatio(toInterval: .bass) != nil,
+              pitchRatio(toInterval: .third) != nil,
+              pitchRatio(toInterval: .fifth) != nil else {
             statusText = "목표음을 계산하지 못했어요"
             return
         }
@@ -977,7 +1031,6 @@ struct PracticeView: View {
         let startSampleIndex = min(recentVoiceBuffer.count, max(0, Int(startTime * recentVoiceSampleRate)))
         let recorded = Array(recentVoiceBuffer[startSampleIndex...])
         let rate = recentVoiceSampleRate
-        let rootFrequency = melodySession.lastNote?.frequency
         let muted = mutedVoices
         statusText = "화음 만드는 중…"
 
@@ -999,14 +1052,15 @@ struct PracticeView: View {
             if !muted.contains(.melody) {
                 tracks.append((prepare(recorded), 0.0)) // 리드 멜로디는 중앙
             }
-            // 베이스(한 옥타브 아래, 비율 < 1) + 3도 + 5도로 각각 옮긴 목소리를 만든다.
-            // PitchShifter.shift는 비율이 1보다 작아도(음을 낮출 때도) 그대로 동작하는
-            // 양방향이라 베이스만 따로 다른 처리가 필요 없다. 꺼진 성부는 계산 자체를 건너뛴다
-            // (WORLD 분석은 가볍지 않아서, 안 쓸 트랙까지 굳이 만들 필요 없음).
-            for (voice, interval, ratio) in [(PlaybackVoice.bass, ChordGenerator.Interval.bass, bassRatio),
-                                              (.third, .third, thirdRatio),
-                                              (.fifth, .fifth, fifthRatio)] where !muted.contains(voice) {
-                let shifted = PitchShifter.shift(samples: recorded, pitchRatio: ratio, formantRatio: interval.formantRatio, sampleRate: rate, expectedFrequency: rootFrequency)
+            // 베이스(한 옥타브 아래) + 3도 + 5도 트랙을 만든다 — 스텝마다 자기 화음 목표로 따로
+            // 피치시프트한다(harmonizedTrack, 멜로디가 여러 음일 때 화음이 어긋나던 문제 수정,
+            // docs/CONCEPTS.md 80절). 꺼진 성부는 계산 자체를 건너뛴다(WORLD 분석은 가볍지
+            // 않아서, 안 쓸 트랙까지 굳이 만들 필요 없음).
+            for (voice, interval) in [(PlaybackVoice.bass, ChordGenerator.Interval.bass),
+                                       (.third, .third),
+                                       (.fifth, .fifth)] where !muted.contains(voice) {
+                let shifted = harmonizedTrack(interval: interval, startStepIndex: startStepIndex, startTime: startTime, rate: rate)
+                guard !shifted.isEmpty else { continue }
                 // 성부마다 다른 지연/디튠으로 더블링해서 두께를 준다 — 멜로디(원음)는 그대로 둔다.
                 // 이미 사용자 자신이 직접 부른 진짜 목소리라 "다른 사람이 한 번 더 부른" 효과가
                 // 필요 없고, 오히려 원음이 흔들리면 리드로서의 기준점이 흐려진다.
