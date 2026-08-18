@@ -232,6 +232,19 @@ struct PracticeView: View {
                         captureHero(prominent: false)
                             .id("captureCard")
 
+                        // 카드 순서: 캡처 다음 바로 "내 목소리로 화음"이 오도록 악보보다 앞에
+                        // 둔다 — PRODUCT.md 핵심 가치("내 목소리로 화음 듣기"가 채점보다도
+                        // 우선인 이 앱의 대표 경험)에 맞춰, 악보(이론/표기 중심이라 상대적으로
+                        // 보조적)를 지나치지 않고 바로 그 경험에 닿게 한다. 화음이 나오기 전엔
+                        // 안 보인다(할 게 없으므로) — hasCapturedNote가 참이어도 온음계 밖
+                        // 음뿐이면 harmony가 없을 수 있는데(드문 경우), 그때는 이 카드가 아예
+                        // 안 보이고 악보만 보인다.
+                        if melodySession.suggestedHarmony != nil {
+                            voiceHarmonyPanel
+                                .id("voiceHarmonyCard")
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
+
                         // 악보(VexFlow 오선보) — 첫 녹음 분석이 끝나기 전엔 보여줄 게 없다.
                         if hasCapturedNote {
                             sheetMusicPanel(fillAvailable: false)
@@ -239,12 +252,7 @@ struct PracticeView: View {
                                 .transition(.opacity.combined(with: .move(edge: .top)))
                         }
 
-                        // 내 목소리로 화음 + 채점: 화음이 나오기 전엔 안 보인다(할 게 없으므로).
                         if melodySession.suggestedHarmony != nil {
-                            voiceHarmonyPanel
-                                .id("voiceHarmonyCard")
-                                .transition(.opacity.combined(with: .move(edge: .top)))
-
                             scoringCard
                                 .transition(.opacity.combined(with: .move(edge: .top)))
                         }
@@ -258,13 +266,12 @@ struct PracticeView: View {
                 .background(Color(uiColor: .systemGroupedBackground))
                 .navigationTitle("연습")
                 // 카드가 막 나타난 시점에 화면 아래로 스크롤해서, "방금 뭐가 생겼다"는 걸
-                // 사용자가 놓치지 않고 바로 보게 한다.
-                .onChange(of: hasCapturedNote) { _, appeared in
-                    guard appeared else { return }
-                    withAnimation(.easeOut(duration: 0.3)) {
-                        proxy.scrollTo("keyHarmonyCard", anchor: .top)
-                    }
-                }
+                // 사용자가 놓치지 않고 바로 보게 한다. hasCapturedNote와 hasHarmony는 거의
+                // 항상 같은 순간에 함께 true가 되므로(applyQuickRecordResult가 한 번에 둘 다
+                // 채움), 스크롤 목표는 hasHarmony 하나로 충분하다 — 예전엔 hasCapturedNote용
+                // 스크롤도 따로 있었는데 "조성과 화음" 카드 제거(54절) 이후 존재하지 않는
+                // id("keyHarmonyCard")를 가리키는 죽은 코드로 남아 있었다(조용히 아무 일도 안
+                // 하는 버그, 이번에 발견해서 정리함).
                 .onChange(of: hasHarmony) { _, appeared in
                     guard appeared else { return }
                     withAnimation(.easeOut(duration: 0.3)) {
