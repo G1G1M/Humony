@@ -42,13 +42,14 @@ enum ChordGenerator {
 
         /// 여러 성부를 동시에 재생할 때 좌우로 벌리는 위치(-1=완전 왼쪽 ~ 1=완전 오른쪽).
         /// 사람 귀는 같은 방향에서 겹쳐 나는 소리보다 다른 방향에서 나는 소리를 훨씬 잘
-        /// 구분한다(docs/CONCEPTS.md 52절) — 리드 멜로디는 중앙, 저음(베이스)은 방향감이
-        /// 잘 안 느껴져서 중앙 근처, 3도/5도는 좌우로 갈라 성부 분리감을 준다.
+        /// 구분한다(docs/CONCEPTS.md 52절) — 리드 멜로디는 중앙(0.0, `PracticeView`에서 별도
+        /// 지정), 베이스는 저음이라 방향감이 잘 안 느껴져서 중앙에 살짝만 치우치고, 3도/5도는
+        /// 좌우로 크게 갈라 성부 분리감을 키운다(Phase 8 Task 2, docs/CONCEPTS.md 77절).
         var pan: Float {
             switch self {
-            case .bass: return 0.0
-            case .third: return -0.5
-            case .fifth: return 0.5
+            case .bass: return -0.25
+            case .third: return 0.45
+            case .fifth: return -0.55
             }
         }
 

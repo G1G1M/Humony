@@ -166,6 +166,16 @@ struct PracticeView: View {
     // 안 한다 — 재생 시작/종료마다 타이머를 새로 만들고 해제하는 생명주기 관리보다 단순하다.
     private let playheadTimer = Timer.publish(every: 0.05, on: .main, in: .common).autoconnect()
 
+    // 재생헤드가 다음 스텝으로 넘어갈 때마다 미세한 진동을 줘서(Phase 8 Task 5), 화면을 안
+    // 보고 듣기만 해도 박자를 손끝으로 느낄 수 있게 한다. 마디의 첫 박(다운비트)은 더 강하게,
+    // 나머지(업비트)는 약하게 — RhythmQuantizer.measureBreaks가 이미 "마디마다 음이 몇 개인지"
+    // 계산해주므로, 그 구간의 시작 인덱스만 모아두면 다운비트 판정이 된다. VexFlowScoreView가
+    // 악보를 그릴 때 쓰는 것과 똑같은 계산이지만, 여기선 소리(햅틱) 쪽에서만 필요해서 따로
+    // 가볍게 한 번 더 돌린다(melodySteps가 바뀔 때만, 재생 중 매 tick마다가 아님).
+    @State private var downbeatStepIndices: Set<Int> = []
+    private let downbeatHaptic = UIImpactFeedbackGenerator(style: .heavy)
+    private let upbeatHaptic = UIImpactFeedbackGenerator(style: .light)
+
     // 화음이 나오는 순간(카드 2개가 한꺼번에 등장) 새로 나타난 카드로 자동 스크롤하기 위한 판정.
     // melodySession.suggestedHarmony(Optional 배열) 자체는 Equatable이 아니라서, onChange/애니메이션
     // 트리거로 쓰기 쉬운 단순 Bool로 한 번 감싼다.
@@ -182,6 +192,9 @@ struct PracticeView: View {
         .tint(Theme.tint)
         .onReceive(playheadTimer) { _ in
             updatePlaybackStepIndex()
+        }
+        .onChange(of: activePlaybackStepIndex) { _, newIndex in
+            triggerStepHaptic(for: newIndex)
         }
         .onAppear {
             #if DEBUG
@@ -887,6 +900,7 @@ struct PracticeView: View {
         // "다시 녹음"으로 새 악보 내용이 들어올 때도 다시 "만드는 중" 표시부터 보여준다 —
         // VexFlowScoreView.Coordinator가 새 페이로드의 renderScore 호출이 끝나면 false로 되돌림.
         isScoreRendering = true
+        downbeatStepIndices = Self.downbeatStepIndices(from: melodySteps)
 
         // "내 목소리로 화음"/채점 카드가 그대로 재사용하는 recentVoiceBuffer를 녹음 전체로 채운다 —
         // 이후 3도/5도/전체 화음 버튼을 누르면 이 전체 녹음이 그대로 피치시프트된다.
@@ -1002,6 +1016,10 @@ struct PracticeView: View {
 
             do {
                 isPlayingVoiceClip = true
+                // 재생 시작 직후 첫 스텝 전환에서부터 지연 없이 울리도록, 애플이 권장하는 대로
+                // 실제 impactOccurred() 호출 전에 미리 준비해둔다.
+                downbeatHaptic.prepare()
+                upbeatHaptic.prepare()
                 // 실제 시작 시각이 아니라 startTime만큼 과거로 앞당긴 시각을 기준점으로 삼는다 —
                 // updatePlaybackStepIndex()가 "지금 - 이 시각"으로 경과 시간을 구해서 그대로
                 // melodySteps의 onsetTime/duration과 비교하므로, 이렇게 하면 잘라낸 지점부터
@@ -1042,6 +1060,35 @@ struct PracticeView: View {
             guard let onset = step.onsetTime, let duration = step.duration else { return false }
             return elapsed >= onset && elapsed < onset + duration
         }
+    }
+
+    /// `activePlaybackStepIndex`가 바뀔 때마다(.onChange) 불린다 — 재생이 멈추거나(nil로
+    /// 바뀔 때) 시작 직전(nil에서 처음 값이 잡히는 순간 포함)에도 자연스럽게 한 번 울리는
+    /// 정도라 굳이 nil을 걸러낼 필요는 없고, index 자체가 nil이면 그냥 아무 것도 안 한다.
+    private func triggerStepHaptic(for index: Int?) {
+        guard let index else { return }
+        if downbeatStepIndices.contains(index) {
+            downbeatHaptic.impactOccurred()
+        } else {
+            upbeatHaptic.impactOccurred()
+        }
+    }
+
+    /// 마디의 첫 박(다운비트) 스텝 인덱스만 모은다 — `RhythmQuantizer.measureBreaks`가 이미
+    /// "마디마다 음이 몇 개인지"를 계산해주므로, 각 구간의 시작 인덱스만 누적하면 된다.
+    /// `VexFlowScoreView.buildPayload`가 악보를 그릴 때 쓰는 것과 같은 계산을 여기서도 한 번
+    /// 더 돌린다 — `activePlaybackStepIndex`가 `melodySteps`(필터링 전) 인덱스를 그대로
+    /// 쓰므로, 여기서도 필터링 없이 `melodySteps` 전체 길이 기준으로 맞춘다.
+    private static func downbeatStepIndices(from melodySteps: [MelodyStep]) -> Set<Int> {
+        let quantized = RhythmQuantizer.quantize(durations: melodySteps.map { $0.duration ?? 0.3 })
+        let measureBreaks = RhythmQuantizer.measureBreaks(notes: quantized)
+        var indices: Set<Int> = []
+        var cursor = 0
+        for count in measureBreaks {
+            if count > 0 { indices.insert(cursor) }
+            cursor += count
+        }
+        return indices
     }
 
     /// 화음의 3도 또는 5도 음을 채점 목표로 고정한다. 같은 걸 다시 누르면 중지되고,

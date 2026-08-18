@@ -13,10 +13,13 @@ final class ChordGeneratorTests: XCTestCase {
 
     // 여러 성부를 동시에 재생할 때(VoiceClipPlayer.playTracks) 실제로 좌우로 갈라지는지의
     // 근거가 되는 값 — 3도는 왼쪽, 5도는 오른쪽, 베이스는 중앙이어야 한다.
+    // Phase 8 Task 2(공간 패닝) 사양대로 정확한 값을 검증한다 — 베이스는 중앙에 살짝
+    // 치우치고, 3도/5도는 서로 반대편으로 크게 갈라진다(docs/CONCEPTS.md 77절).
     func testPanSpreadsThirdAndFifthToOppositeSides() {
-        XCTAssertEqual(ChordGenerator.Interval.bass.pan, 0.0)
-        XCTAssertLessThan(ChordGenerator.Interval.third.pan, 0)
-        XCTAssertGreaterThan(ChordGenerator.Interval.fifth.pan, 0)
+        XCTAssertEqual(ChordGenerator.Interval.bass.pan, -0.25)
+        XCTAssertEqual(ChordGenerator.Interval.third.pan, 0.45)
+        XCTAssertEqual(ChordGenerator.Interval.fifth.pan, -0.55)
+        XCTAssertNotEqual(ChordGenerator.Interval.third.pan.sign, ChordGenerator.Interval.fifth.pan.sign)
     }
 
     func testEmptyInputReturnsEmpty() {

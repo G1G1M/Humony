@@ -77,7 +77,8 @@
 - [x] **탭 히트 영역 세로선 제거 + "내 목소리로 화음" 카드 실종 버그 수정**: 실기기 재검증에서 발견한 두 버그. `render.js` 탭 히트 영역이 `fill: transparent`라 실기기에서 흔적(세로선)이 남던 걸 `fill: none`으로 수정. `MelodySession.suggestedHarmony`가 녹음의 진짜 마지막 음(경과음이라 온음계 밖일 수 있음)만 보다가 그 음이 온음계 밖이면 화음 관련 카드 전체가 사라지던 걸, 뒤에서부터 훑어 화음이 있는 가장 최근 음을 쓰도록 완화 — 딸려서 `pitchRatio`의 분모도 `suggestedHarmonyBaseFrequency`(화음이 실제로 계산된 그 음의 주파수)로 맞춰 화음-비율 불일치를 방지. 유닛테스트 105개 유지, 실기기 재확인 필요
 - [x] **악보 렌더링 중 로딩 표시 추가**: "악보 생성이 되는데 시간이 좀 걸리는 것 같다"는 사용자 진단에 맞춰, `VexFlowScoreView`에 `isRendering` 바인딩을 추가해 웹뷰 로드~renderScore 완료까지 악보 카드 중앙에 `ProgressView`+"악보를 만드는 중이에요" 표시. 유닛테스트 105개 유지, 시뮬레이터 크래시 없음 확인 — 실기기 타이밍 확인 필요
 - [x] **로드맵 Phase 8 Task 1 — WORLD 포먼트 시프팅**: "내 목소리로 화음"이 F0(피치)만 옮기고 포먼트(음색)는 그대로라 "같은 사람이 음만 이동한" 느낌이던 걸, 스펙트럼 포락선(CheapTrick 출력)을 주파수 축으로 워핑해서 베이스는 아래로(0.85배, 더 굵은 저음)/3도·5도는 위로(1.15배, 맑은 두성) 음색까지 같이 옮기도록 확장. `HarmonyUpWorldBridge`에 `formantRatio` 파라미터 추가(브릿지 레이어에서만 워핑, 벤더링된 WORLD 소스는 무수정), `PitchShifter.shift`/`ChordGenerator.Interval`(기존 `pan`과 같은 패턴)/`PracticeView` 순으로 연결. 유닛테스트 107개(105+2) 통과, 시뮬레이터 빌드+설치+실행 크래시 없음 — 실제 음색 변화 청취는 실기기 확인 필요
-- [ ] **로드맵 Phase 8 Task 2~6 — 공간 패닝/타임스트레치/피치 시각화/햅틱/글래스 카드**: Task 1 청취 확인 후 순차 진행 예정
+- [x] **로드맵 Phase 8 Task 2 — 공간 패닝 재조정 + Task 5 — 스텝 전환 햅틱**: `ChordGenerator.Interval.pan`을 사양대로 조정(베이스 -0.25/3도 +0.45/5도 -0.55, 3도·5도 좌우 방향이 기존과 반대로 바뀜 — 의도된 변경, 관련 테스트도 같이 수정). 재생헤드가 다음 스텝으로 넘어갈 때마다 `UIImpactFeedbackGenerator`로 진동(다운비트 `.heavy`/업비트 `.light`, `RhythmQuantizer.measureBreaks`로 다운비트 판정). 유닛테스트 107개 통과, 시뮬레이터 크래시 없음 — 실기기 청취/촉감 확인 필요
+- [ ] **로드맵 Phase 8 Task 3·4·6 — 타임스트레치/피치 시각화(Canvas)/글래스 카드 레이어링**: 각각 별도 계획 승인 후 진행 예정
 - [ ] **로드맵 Phase 9**: 다듬기
 
 ## 구성 요소 (`HarmonyUp/Sources/PitchEngine/`)
