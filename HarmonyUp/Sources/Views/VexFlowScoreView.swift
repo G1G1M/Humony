@@ -28,6 +28,10 @@ struct VexFlowScoreView: UIViewRepresentable {
     /// 악보의 음표를 탭했을 때(애플 뮤직 가사 탭과 동일한 상호작용) 호출된다 — 인자는 탭한
     /// 스텝 인덱스(`steps`의 인덱스, `activeStepIndex`와 같은 좌표계).
     let onSeekToStep: (Int) -> Void
+    /// 지금 웹뷰가 로드 중이거나 `renderScore` 자바스크립트 호출이 아직 안 끝났으면 true —
+    /// 실기기에서 웹뷰 프로세스 자체가 늦게 뜨는 경우(76절)가 있어서, 이 시간 동안 화면이 그냥
+    /// 비어 보이면 "먹통인가?" 싶을 수 있다. 호출부가 이 값으로 로딩 표시를 겹쳐 보여준다.
+    @Binding var isRendering: Bool
 
     /// 카드에 줄 고정 높이 — "너무 작다"는 실기기 피드백으로 키웠다(docs/CONCEPTS.md 58절).
     /// 4성부가 전부 나올 때 필요한 높이보다는 작을 수 있는데, `score.html`이 세로 스크롤도
@@ -61,6 +65,7 @@ struct VexFlowScoreView: UIViewRepresentable {
         context.coordinator.pendingPayload = buildPayload()
         context.coordinator.pendingStepIndex = activeStepIndex
         context.coordinator.onNoteTapped = onSeekToStep
+        context.coordinator.isRenderingBinding = $isRendering
         context.coordinator.renderIfReady()
     }
 
@@ -75,6 +80,7 @@ struct VexFlowScoreView: UIViewRepresentable {
         var pendingPayload: String?
         var pendingStepIndex: Int?
         var onNoteTapped: ((Int) -> Void)?
+        var isRenderingBinding: Binding<Bool>?
         private var isPageLoaded = false
         // 마지막으로 실제 renderScore를 호출한 페이로드 — 이 값이 그대로면(하이라이트만 움직인
         // 경우) 악보를 다시 그리지 않고 setActiveStep만 부른다.
@@ -82,6 +88,16 @@ struct VexFlowScoreView: UIViewRepresentable {
 
         deinit {
             contentController?.removeScriptMessageHandler(forName: VexFlowScoreView.noteTapMessageName)
+        }
+
+        // Binding 대입은 SwiftUI 뷰 업데이트 도중(updateUIView가 부른 renderIfReady 안)이나
+        // 비동기 콜백(evaluateJavaScript 완료 핸들러, WKNavigationDelegate) 어느 쪽에서
+        // 불릴지 몰라서, 항상 다음 런루프로 미룬다 — 뷰 업데이트 도중 같은 뷰의 상태를 동기로
+        // 바꾸면 SwiftUI가 "Modifying state during view update" 경고를 낸다.
+        private func setRendering(_ value: Bool) {
+            DispatchQueue.main.async { [weak self] in
+                self?.isRenderingBinding?.wrappedValue = value
+            }
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -96,26 +112,31 @@ struct VexFlowScoreView: UIViewRepresentable {
         // 영원히 false로 남아서 renderIfReady()의 guard에 막혀 아무 자바스크립트도 안 불리고,
         // 화면엔 그냥 빈 웹뷰만 남는데 왜 그런지 알 방법이 없었다(실기기에서 "악보가 안 보인다"는
         // 제보를 받고서야 이 공백을 발견 — 75절 이후). 최소한 원인이 로드 실패인지는 로그로
-        // 구분할 수 있게 남긴다.
+        // 구분할 수 있게 남긴다. 로딩 표시도 여기서 꺼야 한다 — 안 그러면 실패했는데도 "만드는
+        // 중"이라고 영원히 거짓말하게 된다.
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
             #if DEBUG
             print("[VexFlowScoreView] score.html 로드 실패(didFail): \(error.localizedDescription)")
             #endif
+            setRendering(false)
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
             #if DEBUG
             print("[VexFlowScoreView] score.html 로드 실패(didFailProvisionalNavigation): \(error.localizedDescription)")
             #endif
+            setRendering(false)
         }
 
         func renderIfReady() {
             guard isPageLoaded, let webView, let payload = pendingPayload else { return }
             if payload != lastRenderedPayload {
-                webView.evaluateJavaScript("renderScore(\(payload));") { _, error in
+                setRendering(true)
+                webView.evaluateJavaScript("renderScore(\(payload));") { [weak self] _, error in
                     #if DEBUG
                     if let error { print("[VexFlowScoreView] renderScore 호출 실패: \(error.localizedDescription)") }
                     #endif
+                    self?.setRendering(false)
                 }
                 lastRenderedPayload = payload
             }

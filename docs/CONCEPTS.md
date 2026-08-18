@@ -1899,3 +1899,15 @@ VexFlow는 `note.setStyle({fillStyle, strokeStyle})`로 그릴 때 색을 각 pa
 ### 검증
 
 유닛테스트 105개 유지. 두 수정 모두 다음 실기기 세션에서 재확인 필요.
+
+### 추가: 악보 렌더링 중 로딩 표시
+
+사용자가 "악보 생성이 되는데 시간이 좀 걸려서 그런 것 같다"고 스스로 진단하면서, 렌더링 중임을 알려주는 표시를 요청했다. `VexFlowScoreView`에 `@Binding var isRendering: Bool`을 추가해 — `renderScore` 자바스크립트 호출 직전에 `true`, `evaluateJavaScript`의 완료 콜백(성공/실패 둘 다)에서 `false`로 되돌린다. 웹뷰 프로세스 자체가 늦게 뜨는 구간(`isPageLoaded`가 아직 `false`인 동안)까지 포괄하기 위해, 호출부(`PracticeView`/`SheetMusicFullScreenView`)의 `@State`를 애초에 `true`로 시작해두고 첫 렌더가 끝나야 `false`가 되도록 했다 — 그래야 웹뷰가 뜨기 전 구간도 "만드는 중"으로 자연스럽게 이어진다. `PracticeView`는 "다시 녹음"으로 새 악보 내용이 들어올 때도 `isScoreRendering = true`로 다시 켜서 재렌더 구간도 표시한다.
+
+Binding 대입은 항상 `DispatchQueue.main.async`로 한 번 미룬다 — `updateUIView` 실행 도중(SwiftUI 뷰 업데이트 사이클 한복판)에 같은 뷰 트리의 상태를 동기로 바꾸면 "Modifying state during view update" 경고/미정의 동작 위험이 있어서, `UIViewRepresentable`+`Binding` 조합에서 흔히 쓰는 방어적 관용구를 따랐다.
+
+UI는 `ZStack`으로 `VexFlowScoreView` 위에 `ProgressView` + "악보를 만드는 중이에요" 캡션을 겹쳐서(악보가 항상 흰 배경이라 별도 카드 배경 없이도 자연스럽게 보임) 렌더 중일 때만 보여준다.
+
+### 검증(추가분)
+
+유닛테스트 105개 유지, 시뮬레이터 빌드+설치+실행으로 크래시 없음 확인. 로딩 표시가 실제로 뜨고 사라지는 타이밍은 실기기에서 확인 필요.

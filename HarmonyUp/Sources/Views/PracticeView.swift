@@ -98,6 +98,10 @@ struct PracticeView: View {
     // 다음 단계인 악보 렌더링에 그대로 필요한 데이터라 계속 계산해서 들고 있는다.
     @State private var hasCapturedNote = false
     @State private var melodySteps: [MelodyStep] = []
+    // 악보 카드가 뜬 시점엔 항상 true로 시작 — WKWebView 프로세스가 늦게 뜰 수 있어서(76절),
+    // 첫 렌더가 끝날 때까지는 화면이 비어 보이는 대신 "만드는 중" 표시를 겹쳐 보여준다.
+    // VexFlowScoreView.Coordinator가 renderScore 자바스크립트 호출이 끝나면 false로 되돌린다.
+    @State private var isScoreRendering = true
     // 악보 카드는 다른 카드들과 나란히 있어서 고정 높이 안에 좁게 보인다 — 렌더링이 제대로
     // 되는지 크게 확인하고 싶을 때 이 상태로 전체화면 뷰(SheetMusicFullScreenView)를 띄운다.
     @State private var showingFullScreenScore = false
@@ -494,10 +498,10 @@ struct PracticeView: View {
                 }
 
                 if fillAvailable {
-                    VexFlowScoreView(steps: melodySteps, mutedVoices: $mutedVoices, activeStepIndex: activePlaybackStepIndex, onSeekToStep: { seekPlayback(toStep: $0) })
+                    scoreViewWithLoadingOverlay
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    VexFlowScoreView(steps: melodySteps, mutedVoices: $mutedVoices, activeStepIndex: activePlaybackStepIndex, onSeekToStep: { seekPlayback(toStep: $0) })
+                    scoreViewWithLoadingOverlay
                         .frame(height: VexFlowScoreView.preferredHeight)
 
                     Button {
@@ -512,6 +516,28 @@ struct PracticeView: View {
             .frame(maxWidth: .infinity, maxHeight: fillAvailable ? .infinity : nil, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: fillAvailable ? .infinity : nil)
+    }
+
+    /// 악보(VexFlowScoreView) 위에 로딩 표시를 겹치는 공통 래퍼 — `sheetMusicPanel`의 두 크기
+    /// 분기가 똑같이 재사용한다.
+    private var scoreViewWithLoadingOverlay: some View {
+        ZStack {
+            VexFlowScoreView(
+                steps: melodySteps,
+                mutedVoices: $mutedVoices,
+                activeStepIndex: activePlaybackStepIndex,
+                onSeekToStep: { seekPlayback(toStep: $0) },
+                isRendering: $isScoreRendering
+            )
+            if isScoreRendering {
+                VStack(spacing: Theme.Spacing.sm) {
+                    ProgressView()
+                    Text("악보를 만드는 중이에요")
+                        .font(Theme.Typography.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
     }
 
     private var voiceHarmonyPanel: some View {
@@ -858,6 +884,9 @@ struct PracticeView: View {
                 duration: note.duration
             )
         }
+        // "다시 녹음"으로 새 악보 내용이 들어올 때도 다시 "만드는 중" 표시부터 보여준다 —
+        // VexFlowScoreView.Coordinator가 새 페이로드의 renderScore 호출이 끝나면 false로 되돌림.
+        isScoreRendering = true
 
         // "내 목소리로 화음"/채점 카드가 그대로 재사용하는 recentVoiceBuffer를 녹음 전체로 채운다 —
         // 이후 3도/5도/전체 화음 버튼을 누르면 이 전체 녹음이 그대로 피치시프트된다.
