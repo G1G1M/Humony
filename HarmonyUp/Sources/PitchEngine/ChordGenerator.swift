@@ -8,11 +8,16 @@ import Foundation
 /// 녹음/분석하는 구조라 코드 데이터가 저절로 생기는 소스가 없고, "멜로디를 녹음하면 나머지
 /// 화성이 다 자동으로 나와야 한다"는 요구사항 때문이다.
 ///
-/// **화성 모델(v2)**: 예전엔 "멜로디 음 자신이 그 순간 화음의 근음"이었는데(음마다 화음이
-/// 다시 계산됨), 이제는 조성의 다이어토닉 코드 7개(I~vii°) 중 그 구간에 가장 어울리는 코드를
-/// **HMM + Viterbi 알고리즘**으로 골라서 배정한다 — 화음이 멜로디 음 여러 개에 걸쳐 유지될 수
-/// 있고(경과음 처리), 4성부가 멜로디를 그대로 따라 움직이는 병행 진행도 줄어든다. 근거는
-/// docs/CONCEPTS.md 51절 참고.
+/// **화성 모델(v1로 회귀, 101절)**: v2(51절)에서는 조성의 다이어토닉 코드 7개(I~vii°) 중
+/// 그 구간에 가장 어울리는 코드를 HMM+Viterbi로 골라 배정했다 — 화음이 멜로디 음 여러 개에
+/// 걸쳐 유지될 수 있고(경과음 처리), "화성 리듬이 멜로디 리듬보다 느린" 실제 편곡 관행을
+/// 흉내낸 것이었다. 하지만 이건 곧 "화음이 매 멜로디 음마다 같이 움직이지 않고 문맥에 따라
+/// 몇 음에 걸쳐 붙잡고 있을 수 있다"는 뜻이기도 해서, 실기기 청취에서 반복적으로 나온
+/// "화음 박자가 안 맞는다/밀린다" 피드백의 실제 원인이 이 설계 자체였을 가능성이 크다 —
+/// DSP 쪽(더블링/포먼트/페이드/재생 스케줄링)을 여러 차례 손봐도 해소되지 않던 이유이기도
+/// 하다. 사용자가 "화음을 멜로디 음 하나하나에 맞게"를 명시적으로 요청해 v1(멜로디 음 자신이
+/// 그 순간 화음의 근음, 음마다 새로 계산)으로 되돌린다 — Viterbi/HMM(전이 점수, 감정 점수,
+/// 토널 기능) 관련 코드는 이제 안 쓰여서 함께 제거했다.
 enum ChordGenerator {
 
     enum Interval: Hashable, CaseIterable {
@@ -98,58 +103,45 @@ enum ChordGenerator {
     private static let majorScaleIntervals = [0, 2, 4, 5, 7, 9, 11]
     private static let minorScaleIntervals = [0, 2, 3, 5, 7, 8, 10]
 
-    /// 다이어토닉 토널 기능의 표준 3분류 단순화 — Tonic(안정)/Subdominant(불안)/Dominant(긴장)이
-    /// T→S→D→T로 순환하는 게 자연스럽다는 화성학 원칙(docs/CONCEPTS.md 51절 리서치)을
-    /// 코드 전이 점수에 반영하는 데 쓴다.
-    private enum TonalFunction {
-        case tonic
-        case subdominant
-        case dominant
-    }
-
-    /// 다이어토닉 코드 후보 하나(스케일 디그리 0~6 중 하나 위에 3도씩 쌓은 트라이어드).
+    /// 다이어토닉 코드 후보 하나(스케일 디그리 0~6 중 하나 위에 3도씩 쌓은 트라이어드) —
+    /// `chordCandidates(scale:)`가 반환하는 배열의 인덱스 자체가 스케일 디그리와 같다.
     private struct ChordCandidate {
-        let scaleDegree: Int
         let rootPitchClass: Int
         let thirdPitchClass: Int
         let fifthPitchClass: Int
-        let function: TonalFunction
     }
 
     /// - Parameters:
     ///   - melodyNotes: 멜로디 노트 시퀀스 전체(순서대로) — 각 노트의 실제 MIDI 노트와 길이(초).
-    ///     Viterbi가 문맥(앞뒤 노트)을 보고 코드를 고르므로, 노트 하나만 떼어 다시 계산할 수
-    ///     없다 — 항상 시퀀스 전체를 한 번에 넘겨야 한다.
+    ///     v1 모델은 노트마다 독립적으로 화음을 계산하므로(문맥 의존 없음) 시퀀스 전체를 넘길
+    ///     필요는 없지만, `harmonizedTrack` 등 호출부와의 인터페이스를 유지하기 위해 시그니처는
+    ///     그대로 둔다.
     ///   - key: KeyDetector가 판별한 조성
     /// - Returns: `melodyNotes`와 인덱스가 정렬된 배열. 각 원소는 `[베이스, 이너보이스1(3도),
-    ///   이너보이스2(5도)]`. 그 노트가 판별된 조성의 온음계에 속하지 않으면(예: 반음계
-    ///   경과음) 새 화음을 계산하지 않고 **직전 유효 화음을 그대로 이어서 반환**한다 — 실제
-    ///   백킹보컬/아카펠라 관행이 이렇다(화음 성부는 리드가 짧게 스쳐가는 경과음까지 따라
-    ///   움직이지 않고, 화음을 그대로 붙잡고 있다가 다음 화성 변화에서만 움직인다). 예전엔
-    ///   이 경우 nil을 반환해 재생/악보 양쪽에서 무음·쉼표로 끊겼는데, 실기기 청취 피드백
-    ///   ("화음에 쉼표가 껴서 안 매끄럽다")으로 이 방식이 오히려 더 안 어울린다는 게 확인돼
-    ///   바꿨다. 시퀀스 맨 앞부터 온음계 밖 음이 나와 붙잡을 직전 화음이 아직 없으면(비교
-    ///   대상 없음) 그때만 nil을 유지한다. 온음계 밖 노트가 코드 진행의 문맥(앞뒤 노트가
-    ///   어떤 코드를 고르는지)에 계속 영향을 주는 것은 그대로다(emissionScore가 중립 처리).
+    ///   이너보이스2(5도)]` — **그 멜로디 음 자신을 근음으로 삼은** 트라이어드다(101절, v1
+    ///   모델). 그 노트가 판별된 조성의 온음계에 속하지 않으면(예: 반음계 경과음) 새 화음을
+    ///   계산하지 않고 **직전 유효 화음을 그대로 이어서 반환**한다 — 실제 백킹보컬/아카펠라
+    ///   관행이 이렇다(화음 성부는 리드가 짧게 스쳐가는 경과음까지 따라 움직이지 않고, 화음을
+    ///   그대로 붙잡고 있다가 다음 음에서만 움직인다). 시퀀스 맨 앞부터 온음계 밖 음이 나와
+    ///   붙잡을 직전 화음이 아직 없으면(비교 대상 없음) 그때만 nil을 유지한다.
     static func harmonizeSequence(melodyNotes: [(midiNote: Int, duration: Double)], key: KeyDetector.DetectedKey) -> [[HarmonyNote]?] {
         guard !melodyNotes.isEmpty else { return [] }
 
         let scale = diatonicScale(tonic: key.tonicPitchClass, mode: key.mode)
         let candidates = chordCandidates(scale: scale)
 
-        let pitchClasses = melodyNotes.map { $0.midiNote.mod(12) }
-        let inScale = pitchClasses.map { scale.contains($0) }
-        let path = viterbiDecode(pitchClasses: pitchClasses, durations: melodyNotes.map(\.duration), inScale: inScale, candidates: candidates)
-
         var lastValidHarmony: [HarmonyNote]?
         var results: [[HarmonyNote]?] = []
         results.reserveCapacity(melodyNotes.count)
-        for i in melodyNotes.indices {
-            guard inScale[i] else {
+        for note in melodyNotes {
+            let pitchClass = note.midiNote.mod(12)
+            // 이 멜로디 음 자신을 근음으로 갖는 다이어토닉 트라이어드를 찾는다 — 온음계 안
+            // 음이면 스케일 어딘가에 정확히 일치하는 디그리가 항상 있다.
+            guard let degree = scale.firstIndex(of: pitchClass) else {
                 results.append(lastValidHarmony)
                 continue
             }
-            let notes = buildHarmonyNotes(candidate: candidates[path[i]], melodyMIDINote: melodyNotes[i].midiNote)
+            let notes = buildHarmonyNotes(candidate: candidates[degree], melodyMIDINote: note.midiNote)
             lastValidHarmony = notes
             results.append(notes)
         }
@@ -162,105 +154,15 @@ enum ChordGenerator {
     }
 
     /// 스케일 디그리 0~6마다 그 위에 3도씩 쌓은 트라이어드(I, ii, iii, IV, V, vi, vii°) 7개를
-    /// 만든다. 기능 매핑은 표준 3기능 이론(T/S/D)의 단순화 버전 — I/iii/vi=Tonic,
-    /// ii/IV=Subdominant, V/vii°=Dominant(docs/CONCEPTS.md 51절).
+    /// 만든다.
     private static func chordCandidates(scale: [Int]) -> [ChordCandidate] {
-        let functions: [TonalFunction] = [.tonic, .subdominant, .tonic, .subdominant, .dominant, .tonic, .dominant]
-        return (0..<7).map { degree in
+        (0..<7).map { degree in
             ChordCandidate(
-                scaleDegree: degree,
                 rootPitchClass: scale[degree],
                 thirdPitchClass: scale[(degree + 2) % 7],
-                fifthPitchClass: scale[(degree + 4) % 7],
-                function: functions[degree]
+                fifthPitchClass: scale[(degree + 4) % 7]
             )
         }
-    }
-
-    /// 멜로디 음 하나가 후보 코드에 얼마나 잘 맞는지 — 코드 구성음(근음/3도/5도)이면 높은 점수,
-    /// 아니면 낮은(음수) 점수. 노트 길이로 가중해서, 짧은 음(경과음일 가능성)은 안 맞아도 덜
-    /// 불리하고 긴 음(진짜 그 화음 위에서 부른 음일 가능성)은 안 맞으면 더 불리하게 만든다 —
-    /// `KeyDetector`가 조성 판별에서 길이 가중치를 쓰는 것과 같은 원리.
-    /// 온음계 밖 노트(inScale=false)는 중립(0)으로 둬서 어떤 코드도 불리하게 만들지 않는다 —
-    /// 그래야 반음계 경과음 하나 때문에 앞뒤 코드 흐름이 끊기지 않는다.
-    private static func emissionScore(pitchClass: Int, duration: Double, inScale: Bool, candidate: ChordCandidate) -> Double {
-        guard inScale else { return 0 }
-        let isChordTone = pitchClass == candidate.rootPitchClass
-            || pitchClass == candidate.thirdPitchClass
-            || pitchClass == candidate.fifthPitchClass
-        return duration * (isChordTone ? 2.0 : -1.0)
-    }
-
-    /// 코드에서 코드로 넘어갈 때의 자연스러움 점수.
-    /// - 같은 코드 유지(디그리 차이 0): 가장 큰 보너스 — 경과음이 지나가는 동안 화음이 안
-    ///   바뀌도록 유도한다(이게 이번 리서치의 핵심 목표였던 "화성 리듬을 멜로디보다 느리게").
-    /// - 근음이 4도 위(디그리+3) 또는 그와 동치인 5도 위(디그리+4)로 움직이는 "강한 진행":
-    ///   중간 보너스(circle-of-fifths 진행 — 다이어토닉 스케일 디그리 공간에서 "+3 mod 7"을
-    ///   반복하면 I-IV-vii°-iii-vi-ii-V-I라는 표준 5도권 진행이 그대로 나온다).
-    /// - 3도 위/아래로 움직이는 진행: 약한 보너스. 그 외(인접/스텝와이즈 근음 진행): 중립.
-    /// - Dominant(불안정) 뒤에 Subdominant로 가는 "역행"은 소폭 페널티, Dominant→Tonic
-    ///   "해결"은 추가 보너스 — T→S→D→T 순환 원칙(docs/CONCEPTS.md 51절 리서치) 반영.
-    private static func transitionScore(from: ChordCandidate, to: ChordCandidate) -> Double {
-        let diff = (to.scaleDegree - from.scaleDegree + 7) % 7
-        var score: Double
-        switch diff {
-        case 0: score = 3.0
-        case 3, 4: score = 2.0
-        case 2, 5: score = 1.0
-        default: score = 0.0
-        }
-
-        if from.function == .dominant {
-            if to.function == .subdominant { score -= 1.0 }
-            if to.function == .tonic { score += 1.0 }
-        }
-        return score
-    }
-
-    /// Viterbi 알고리즘 — 각 노트마다 "이 코드를 골랐을 때 여기까지의 누적 점수가 최대인 경로"를
-    /// 동적계획법으로 계산하고(dp), 마지막 노트에서 가장 점수가 높은 코드부터 backpointer를 따라
-    /// 거꾸로 되짚어 전체 시퀀스의 최적 코드열을 복원한다. 노트 수(n)×코드 후보(7)×코드 후보(7)
-    /// 규모라 녹음 하나(최대 수십 개 노트)에 밀리초 단위로 끝난다.
-    private static func viterbiDecode(
-        pitchClasses: [Int],
-        durations: [Double],
-        inScale: [Bool],
-        candidates: [ChordCandidate]
-    ) -> [Int] {
-        let n = pitchClasses.count
-        let k = candidates.count
-
-        var dp = [[Double]](repeating: [Double](repeating: 0, count: k), count: n)
-        var backpointer = [[Int]](repeating: [Int](repeating: 0, count: k), count: n)
-
-        for c in 0..<k {
-            dp[0][c] = emissionScore(pitchClass: pitchClasses[0], duration: durations[0], inScale: inScale[0], candidate: candidates[c])
-        }
-
-        for i in 1..<n {
-            for c in 0..<k {
-                var bestScore = -Double.infinity
-                var bestPrev = 0
-                for prevC in 0..<k {
-                    let score = dp[i - 1][prevC] + transitionScore(from: candidates[prevC], to: candidates[c])
-                    if score > bestScore {
-                        bestScore = score
-                        bestPrev = prevC
-                    }
-                }
-                dp[i][c] = bestScore + emissionScore(pitchClass: pitchClasses[i], duration: durations[i], inScale: inScale[i], candidate: candidates[c])
-                backpointer[i][c] = bestPrev
-            }
-        }
-
-        var path = [Int](repeating: 0, count: n)
-        path[n - 1] = (0..<k).max(by: { dp[n - 1][$0] < dp[n - 1][$1] }) ?? 0
-        if n > 1 {
-            for i in stride(from: n - 1, to: 0, by: -1) {
-                path[i - 1] = backpointer[i][path[i]]
-            }
-        }
-        return path
     }
 
     private static func buildHarmonyNotes(candidate: ChordCandidate, melodyMIDINote: Int) -> [HarmonyNote] {

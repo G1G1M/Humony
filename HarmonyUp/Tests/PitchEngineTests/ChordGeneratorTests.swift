@@ -59,39 +59,17 @@ final class ChordGeneratorTests: XCTestCase {
         XCTAssertNotNil(result[1])
     }
 
-    // 이번 작업의 핵심 계약: 짧게 지나가는 경과음(도-레-미, 레는 C장조 화음의 구성음이
-    // 아님) 위에서는 화음이 안 바뀌고 하나로 유지돼야 한다 — 화성 리듬이 멜로디 리듬보다
-    // 느려야 한다는 리서치 결론(docs/CONCEPTS.md 51절)을 직접 검증한다. 짧은 길이(0.2초)를
-    // 써야 한다 — 길게 끌면(경과음이 아니라 진짜 화성 변화로 봐야 하므로) 오히려 코드가
-    // 바뀌는 게 맞는 동작이다(아래 testLongHeldNotesPreferSwitchingChordsOverStaying 참고).
-    func testShortPassingToneDoesNotChangeChord() {
-        let notes = [(midiNote: 60, duration: 0.2), (midiNote: 62, duration: 0.2), (midiNote: 64, duration: 0.2)] // C4-D4-E4
+    // 101절(v1로 회귀)의 핵심 계약: 화음이 멜로디 음 하나하나에 맞게, 매번 그 음 자신을
+    // 근음으로 삼아 새로 계산돼야 한다 — HMM/Viterbi가 문맥을 보고 코드를 몇 음에 걸쳐
+    // 붙잡고 있던 v2와 달리, 이제는 노트마다 독립적이라 "베이스의 음이름은 항상 그 멜로디
+    // 음 자신의 음이름과 같다"는 게 모든 온음계 안 음에서 성립해야 한다. 실기기 청취에서
+    // 반복된 "화음 박자가 안 맞는다"는 피드백에 대한 사용자의 명시적 요청으로 바뀐 동작.
+    func testEachNoteGetsItsOwnChordRootedOnItself() {
+        let notes = [(midiNote: 60, duration: 0.2), (midiNote: 62, duration: 0.2), (midiNote: 64, duration: 1.0)] // C4-D4-E4(길이도 섞어서 문맥 의존이 없음을 확인)
         let result = ChordGenerator.harmonizeSequence(melodyNotes: notes, key: key(tonic: 0, mode: .major))
         let basses = result.compactMap { $0 }.map { harmonyByInterval($0)[.bass]!.pitchClass }
 
-        XCTAssertEqual(basses.count, 3, "세 음 다 온음계 안이라 전부 화음이 있어야 함")
-        XCTAssertEqual(Set(basses).count, 1, "경과음 구간 전체가 하나의 코드(같은 베이스 음이름)로 유지돼야 함")
-    }
-
-    // 반대로 충분히 길게 끄는 음들(도→레→솔)은 서로 다른 코드로 진짜 바뀌어야 한다.
-    // 도-레 두 음만 보면 "레를 구성음으로 갖는 코드"가 여러 개(ii/V/vii°)라 어느 쪽이든
-    // 전이 점수가 동률일 수 있는데, 마지막에 솔(G)까지 이어 붙이면 "도-레-솔 셋 다 구성음으로
-    // 갖으면서 전이 점수 합도 최대인" 조합이 I→V→V(근음 4도 위로 강하게 진행한 뒤 그 자리에
-    //머무름) 하나로 유일하게 좁혀진다 — 근음 진행 선호 규칙이 실제로 동작하는지 확인한다.
-    func testLongHeldNotesPreferStrongRootMotionWhenSwitchingChords() {
-        let notes = [(midiNote: 60, duration: 1.0), (midiNote: 62, duration: 1.0), (midiNote: 67, duration: 1.0)] // C4, D4, G4(전부 길게)
-        let result = ChordGenerator.harmonizeSequence(melodyNotes: notes, key: key(tonic: 0, mode: .major))
-
-        guard let first = result[0], let second = result[1], let third = result[2] else {
-            return XCTFail("셋 다 온음계 안이라 화음이 있어야 함")
-        }
-        XCTAssertEqual(harmonyByInterval(first)[.bass]?.pitchClass, 0, "도 위는 I(근음 C)여야 함")
-        XCTAssertEqual(harmonyByInterval(second)[.bass]?.pitchClass, 7, "레 위는 V(근음 G)로 강한 진행을 타야 함")
-        // 솔(G)은 V의 근음이면서 동시에 I의 5도이기도 해서, "V에 그대로 머무르기"와
-        // "I로 해결하기"(V→I는 근음이 4도 위로 움직이는 강한 진행 + 도미넌트→토닉 해결
-        // 보너스가 겹쳐 "머무르기"와 정확히 동점) 둘 다 이론적으로 똑같이 타당하다 —
-        // 어느 쪽이든 화성적으로 맞으므로 둘 중 하나이기만 하면 된다.
-        XCTAssertTrue([0, 7].contains(harmonyByInterval(third)[.bass]?.pitchClass), "솔 위는 V(머무름) 또는 I(해결) 중 하나여야 함")
+        XCTAssertEqual(basses, [0, 2, 4], "베이스 음이름이 각 멜로디 음(C,D,E) 자신과 매번 같아야 함 — 문맥/길이와 무관")
     }
 
     func testCMajorTriadFromRootMelodyNote() throws {
