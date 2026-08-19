@@ -132,6 +132,39 @@ extension PracticeView {
             )
         }
 
+        // 같은 음 안에서(런 안쪽) 골이 없어져도, 서로 다른 음끼리 붙어서(레가토로 이어 부른
+        // 멜로디는 음 사이에 거의 틈이 없다) 넘어갈 때마다 여전히 fade-out→fade-in이 한 번씩
+        // 걸려서 "뚝뚝 끊긴다"는 재확인 피드백을 받음 — 노래 한 곡엔 이런 음 전환이 수십 번
+        // 있을 수 있어서, 짧은 골이라도 자주 반복되면 전체적으로 "덜컹거리는" 느낌이 쌓인다.
+        // 무음(진짜 쉼표) 없이 유성음끼리 바로 붙는 전환은 fade-out/fade-in 대신 **크로스페이드**
+        // (직전 런의 꼬리와 다음 런의 머리를 선형으로 겹쳐 섞기)로 이어서, 신호가 한 번도
+        // 0으로 안 떨어지고 자연스럽게 넘어가게 한다. 진짜 쉼표(간격이 있는 경우)는 그대로
+        // 무음으로 채우고 그 앞뒤에만 클릭 방지 페이드를 건다.
+        let crossfadeCount = segmentFadeCount
+
+        // `output`의 꼬리와 `chunk`의 머리를 선형 크로스페이드로 섞어 이어붙인다. `overlap`은
+        // 반드시 `chunk`를 만들 때 실제로 원본에서 더 끌어온(overlapBorrowed) 만큼과 정확히
+        // 같아야 한다 — 그래야 여기서 버리는 `chunk`의 앞부분 길이가 그 "더 끌어온" 길이와
+        // 정확히 상쇄돼서 트랙 전체 길이가 보존된다(둘이 어긋나면 트랙이 조금씩 짧아지면서
+        // `recentVoiceBuffer`와의 샘플 대응이 깨져 재생이 갈수록 밀리는 버그로 이어질 수 있다).
+        func appendCrossfaded(_ chunk: [Float], overlap: Int) {
+            let n = min(overlap, output.count, chunk.count)
+            guard n > 0 else {
+                output.append(contentsOf: chunk)
+                return
+            }
+            let overlapStart = output.count - n
+            for k in 0..<n {
+                let t = Float(k) / Float(n)
+                output[overlapStart + k] = output[overlapStart + k] * (1 - t) + chunk[k] * t
+            }
+            output.append(contentsOf: chunk[n...])
+        }
+
+        // 직전에 append된 런이 무음 없이 끝났고(=다음 런과 바로 이어붙을 수 있고), 크로스페이드
+        // 대상이 될 수 있도록 자기 끝을 페이드아웃하지 않은 채로 끝났는지.
+        var previousRunEndsAdjacentUnfaded = false
+
         var i = startIndex
         while i < melodySteps.count {
             let step = melodySteps[i]
@@ -153,13 +186,16 @@ extension PracticeView {
                 }
                 output.append(contentsOf: [Float](repeating: 0, count: segEnd - segStart))
                 cursor = segEnd
+                previousRunEndsAdjacentUnfaded = false
                 i += 1
                 continue
             }
 
-            if segStart > cursor {
+            let hasGapBeforeThisRun = segStart > cursor
+            if hasGapBeforeThisRun {
                 output.append(contentsOf: [Float](repeating: 0, count: segStart - cursor))
             }
+            let shouldCrossfadeIn = previousRunEndsAdjacentUnfaded && !hasGapBeforeThisRun
 
             // 이 스텝부터 시작해서, "같은 멜로디 음 + 브리징 가능한 간격"으로 이어지는 다음
             // 스텝들을 계속 흡수한다 — 원래 여러 스텝으로 갈라져 있던 하나의 held 음을 런
@@ -179,9 +215,40 @@ extension PracticeView {
                 j += 1
             }
 
-            let runRaw = Array(recentVoiceBuffer[segStart..<runEnd])
-            output.append(contentsOf: pitchShiftedChunk(raw: runRaw, sourceMIDINote: step.midiNote, targetFrequency: target.frequency, fadeIn: true, fadeOut: true))
+            // 다음 스텝(다른 음이어도 상관없다)이 무음 간격 없이 바로 이어지고 그 성부의
+            // 화음도 있으면, 여기서 페이드아웃하지 않고 다음 런과 크로스페이드로 잇는다.
+            var shouldCrossfadeOut = false
+            if j < melodySteps.count, let nextOnset = melodySteps[j].onsetTime, let nextDuration = melodySteps[j].duration, nextDuration > 0 {
+                let nextSegStart = max(0, Int(nextOnset * rate))
+                let nextSegEnd = min(bufferEnd, Int((nextOnset + nextDuration) * rate))
+                if nextSegStart < nextSegEnd, nextSegStart <= runEnd,
+                   melodySteps[j].harmony?.first(where: { $0.interval == interval }) != nil {
+                    shouldCrossfadeOut = true
+                }
+            }
+
+            // 크로스페이드로 이어붙일 땐, 직전 런이 이미 자기 몫으로 처리한 꼬리 구간
+            // (crossfadeCount 샘플)을 이 런도 한 번 더 원본에서 끌어와 자기 비율로 다시
+            // 피치시프트한다 — 같은 원본을 두 배율로 각각 렌더링한 뒤 그 겹치는 구간만
+            // 섞는 게 진짜 크로스페이드다. 이렇게 "겹쳐서 빌려온" 만큼을 뒤에서
+            // `appendCrossfaded`가 다시 걷어내므로(섞은 뒤 청크 앞부분을 버림), 트랙 전체
+            // 길이(=`recentVoiceBuffer`와의 샘플 대 샘플 대응)는 그대로 보존된다.
+            let overlapBorrowed = shouldCrossfadeIn ? min(crossfadeCount, segStart) : 0
+            let runRaw = Array(recentVoiceBuffer[(segStart - overlapBorrowed)..<runEnd])
+            let chunk = pitchShiftedChunk(
+                raw: runRaw,
+                sourceMIDINote: step.midiNote,
+                targetFrequency: target.frequency,
+                fadeIn: !shouldCrossfadeIn,
+                fadeOut: !shouldCrossfadeOut
+            )
+            if shouldCrossfadeIn {
+                appendCrossfaded(chunk, overlap: overlapBorrowed)
+            } else {
+                output.append(contentsOf: chunk)
+            }
             cursor = runEnd
+            previousRunEndsAdjacentUnfaded = shouldCrossfadeOut
             i = j
         }
 
