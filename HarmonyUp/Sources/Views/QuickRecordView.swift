@@ -11,12 +11,46 @@ import SwiftUI
 /// 상태는 반대로 카드형 컨테이너를 스스로 그려서(부모가 더는 감싸주지 않으므로) 결과가
 /// 붕 떠 보이지 않게 한다.
 struct QuickRecordView: View {
+    /// 명세서(v1.0) "3단계 프로그레시브 로딩" — 빈 오선보 대신 상태 텍스트+진행률로 체감 대기
+    /// 시간을 줄인다. 실제 연산 두 단계(음성 분석=`RecordingAnalyzer.analyze`, 화음 생성=
+    /// `ChordGenerator.harmonizeSequence`)는 이 카드 진행률에 그대로 반영되지만, 세 번째
+    /// "악보 그리는 중"(VexFlow WKWebView 렌더링)은 결과가 이미 화면에 나온 뒤 악보 카드 안
+    /// 자체 스피너로 보여준다(같은 문구를 씀) — 로딩 카드 하나로 완전히 통합하려면 악보 뷰를
+    /// 결과 노출 전에 미리 마운트해야 해서 화면 구조를 더 크게 손대야 한다. 지금은 실제로 걸리는
+    /// 시간(수백 ms~수 초)에 비해 이 정도로도 체감 개선 효과가 충분하다고 판단해 범위를 좁혔다.
+    enum AnalysisStage: Equatable {
+        case voiceAnalysis
+        case harmonyGeneration
+
+        var statusText: String {
+            switch self {
+            case .voiceAnalysis: return "음성 분석 중"
+            case .harmonyGeneration: return "화음 생성 중"
+            }
+        }
+
+        var progress: Double {
+            switch self {
+            case .voiceAnalysis: return 0.5
+            case .harmonyGeneration: return 1.0
+            }
+        }
+    }
+
     enum Phase: Equatable {
         case idle
         case recording
-        case analyzing
+        case analyzing(AnalysisStage)
         case result(noteCount: Int)
         case error(String)
+
+        /// 녹음/취소 버튼처럼 "지금 한창 처리 중이라 건드리면 안 되는" 상태 판정에 쓰는 공용 헬퍼.
+        var isRecordingOrAnalyzing: Bool {
+            switch self {
+            case .recording, .analyzing: return true
+            case .idle, .result, .error: return false
+            }
+        }
     }
 
     let phase: Phase
@@ -51,8 +85,8 @@ struct QuickRecordView: View {
                 idleContent
             case .recording:
                 recordingContent
-            case .analyzing:
-                analyzingContent
+            case .analyzing(let stage):
+                analyzingContent(stage: stage)
             case .result(let noteCount):
                 resultContent(noteCount: noteCount)
             case .error(let message):
@@ -67,10 +101,10 @@ struct QuickRecordView: View {
     private var idleContent: some View {
         VStack(spacing: prominent ? Theme.Spacing.xl * 1.4 : Theme.Spacing.xl) {
             VStack(spacing: Theme.Spacing.sm) {
-                Text("노래 한 소절을 녹음해보세요")
+                Text("좋아하는 노래를 한 소절 불러볼까요?")
                     .font(Theme.Typography.largeTitleBold)
                     .multilineTextAlignment(.center)
-                Text("버튼을 누르고 노래나 허밍을 최대 \(Int(maxDuration))초까지 불러주세요")
+                Text("노래나 허밍 모두 좋아요. 아래 버튼을 눌러 시작해 보세요.")
                     .font(Theme.Typography.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -163,11 +197,13 @@ struct QuickRecordView: View {
 
     // MARK: - 분석 중 / 결과 / 에러 — 카드 크롬을 스스로 그린다(부모가 더는 감싸주지 않으므로)
 
-    private var analyzingContent: some View {
-        HStack(spacing: Theme.Spacing.sm) {
-            ProgressView()
-            Text("녹음을 분석하는 중…")
+    private func analyzingContent(stage: AnalysisStage) -> some View {
+        VStack(spacing: Theme.Spacing.sm) {
+            Text(stage.statusText)
                 .font(Theme.Typography.subheadline)
+            ProgressView(value: stage.progress)
+                .tint(Theme.tint)
+                .animation(.easeInOut(duration: 0.3), value: stage.progress)
         }
         .frame(maxWidth: .infinity)
         .padding(Theme.Spacing.lg)

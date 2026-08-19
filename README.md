@@ -90,6 +90,8 @@
 - [x] **디자인 폴리시 — 채점 카드 접기 + 성부 정체성 색 통일 + 코드 정리**: 채점 카드를 접힌 상태(작은 디스클로저 행)로 시작해 탭해야 펼쳐지게 변경(크리틱 P1 후속, 사용자가 "접힌 상태로 시작" 선택). `Theme.intervalColor(for:)` 신규 — HistoryView 차트에만 있던 성부별 색(베이스=blue/3도=teal/5도=purple)을 PracticeView 채점 라벨까지 통일(버튼 틴트는 안 건드림, 순수 장식용). `.orange`를 `Theme.warning` 토큰으로 승격, 중복돼있던 `voiceToggle`을 `VoiceToggleChip` 하나로 통합, 채점 저장 후 확인 메시지 추가(크리틱 P3). 유닛테스트 120개 유지, 실기기(Ian's iPad) 설치+실행 완료(docs/CONCEPTS.md 87절)
 - [ ] **로드맵 Phase 8 Task 3·6 — 타임스트레치/글래스 카드 레이어링**: 각각 진행 여부 확인 후 진행 예정(Task 4는 디자인 반려로 보류)
 - [ ] **로드맵 Phase 9**: 다듬기 계속 진행 중(85~87절)
+- [x] **기능 명세서(v1.0) 대조 착수 — 녹음 60초 연장 + 3단계 프로그레시브 로딩(2단계 구현) + 12초 타임아웃**: 외부 명세서와 기존 구현을 항목별로 대조해 차이점/작업 목록 정리, 그중 "1단계: 녹음 및 분석" 구간부터 먼저 반영. `quickRecordMaxDuration` 30→60초, `QuickRecordView.Phase.analyzing`에 `AnalysisStage`(음성 분석 중/화음 생성 중, 진행률 바) 추가, `RecordingAnalyzer.analyze`를 12초 타임아웃과 경합시켜 실패 시 기존 재시도 버튼으로 안내. "악보 그리는 중" 3번째 단계는 화면 마운트 구조 변경이 필요해 이번 범위에서 제외(기존 악보 카드 자체 스피너가 계속 담당). 유닛테스트 120개 유지, 시뮬레이터 빌드+테스트 통과. **실기기 확인 필요.** 남은 명세서 항목(디자인 시스템/2단 분할 퀵 스왑/콜앤리스폰스 큐 등)은 순차 진행 예정(docs/CONCEPTS.md 88절)
+- [x] **`PracticeView.swift` 파일 분리**: 1400줄 넘게 불어난 파일을 책임별로 `VoiceToggleChip.swift`/`PracticeView.swift`(상태+body)/`PracticeView+Layout.swift`/`PracticeView+VoiceHarmony.swift`/`PracticeView+Scoring.swift`/`PracticeView+Capture.swift` 6개로 분리. 여러 파일에 걸쳐 쓰이는 상태/메서드는 `private`(파일 스코프)를 걷어내고 internal로 낮춤 — 저장 프로퍼티는 extension에 선언할 수 없어 전부 `PracticeView.swift`에 유지. `xcodegen generate`로 새 파일 등록 후 빌드+유닛테스트 120개 통과(docs/CONCEPTS.md 89절)
 
 ## 구성 요소 (`HarmonyUp/Sources/PitchEngine/`)
 
