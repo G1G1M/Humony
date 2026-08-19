@@ -88,6 +88,14 @@ struct PracticeView: View {
     @State var lockedScoringTargets: [ChordGenerator.Interval: ChordGenerator.HarmonyNote] = [:]
     @State var latestScores: [ChordGenerator.Interval: PitchScorer.Score] = [:]
     @State var scoreSampleBuffers: [ChordGenerator.Interval: [PitchScorer.Score]] = [:]
+    // 명세서(v1.0) "3프레임(약 140ms) 유지 확정 시 경쾌한 햅틱" — 단음 캡처 모드의 "3프레임
+    // 연속 유지" 확정 관례(CLAUDE.md)와 같은 프레임 수 기준을 채점에도 적용한다. 허용오차
+    // 진입 프레임이 연속될 때만 세되, 한 번 울리면 그 연속 구간 안에서는 다시 안 울리게
+    // `onPitchHapticFired`로 막는다(계속 정확한 음을 유지하는 동안 매 프레임 울리면 시끄럽다) —
+    // 다시 벗어났다 맞히면 새 연속 구간으로 취급해 다시 한 번 울린다.
+    @State var onPitchStreak: [ChordGenerator.Interval: Int] = [:]
+    @State var onPitchHapticFired: [ChordGenerator.Interval: Bool] = [:]
+    let scoringSuccessHaptic = UINotificationFeedbackGenerator()
 
     // 첫 녹음 분석이 끝났는지 — 점진적 공개("내 목소리로 화음"/"따라 부르기 채점" 카드 등장
     // 여부) 판단에 쓴다. melodySteps 자체(음이름+옥타브+화음+시작시각/길이)는 지금은 화면에

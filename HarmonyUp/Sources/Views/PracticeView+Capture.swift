@@ -78,6 +78,9 @@ extension PracticeView {
                 if let score {
                     // 이번 시도가 끝나면 PracticeSummary로 압축해서 저장한다.
                     scoreSampleBuffers[interval, default: []].append(score)
+                    updateOnPitchStreak(interval: interval, isOnPitch: score.isOnPitch)
+                } else {
+                    updateOnPitchStreak(interval: interval, isOnPitch: false)
                 }
             }
             isCapturing = true
@@ -301,6 +304,8 @@ extension PracticeView {
         lockedScoringTargets = [:]
         latestScores = [:]
         scoreSampleBuffers = [:]
+        onPitchStreak = [:]
+        onPitchHapticFired = [:]
         pitchSmoother.reset()
         melodySession.reset()
         hasCapturedNote = false

@@ -102,7 +102,8 @@ extension PracticeView {
                 PitchMeterView(
                     centsOffset: score?.centsOffset,
                     isOnPitch: score?.isOnPitch ?? false,
-                    toleranceCents: PitchScorer.onPitchToleranceCents
+                    toleranceCents: PitchScorer.onPitchToleranceCents,
+                    intervalColor: Theme.intervalColor(for: interval)
                 )
                 if let score {
                     Text(String(format: "%+.0f cent  %@", score.centsOffset, score.isOnPitch ? "✅ 정확" : "벗어남"))
@@ -137,9 +138,28 @@ extension PracticeView {
         activeScoringInterval = interval
         lastSavedInterval = nil // 새 채점을 시작하면 직전 저장 확인 메시지는 지운다
         pitchSmoother.reset() // 이전 채점(또는 다른 음)에서 쓰던 값이 새 채점에 섞여 들어가지 않도록
+        onPitchStreak[interval] = 0
+        onPitchHapticFired[interval] = false
+        scoringSuccessHaptic.prepare() // 실제 발화 전에 미리 준비해서 첫 확정 순간 지연 없이 울리게 한다.
 
         // "채점하기"를 눌렀는데 마이크가 꺼져 있으면 자동으로 켜준다.
         beginCapturingIfNeeded()
+    }
+
+    /// 명세서(v1.0) "3프레임(약 140ms) 유지 확정 시 경쾌한 햅틱" 구현. 허용오차 진입 프레임이
+    /// 3번 연속(단음 캡처 확정과 같은 프레임 수 관례)이면 성공 햅틱을 한 번 울리고, 그 연속
+    /// 구간 동안은 다시 안 울린다 — 벗어났다가 다시 맞히면 새 연속 구간으로 보고 재발화한다.
+    func updateOnPitchStreak(interval: ChordGenerator.Interval, isOnPitch: Bool) {
+        guard isOnPitch else {
+            onPitchStreak[interval] = 0
+            onPitchHapticFired[interval] = false
+            return
+        }
+        let streak = (onPitchStreak[interval] ?? 0) + 1
+        onPitchStreak[interval] = streak
+        guard streak >= 3, onPitchHapticFired[interval] != true else { return }
+        onPitchHapticFired[interval] = true
+        scoringSuccessHaptic.notificationOccurred(.success)
     }
 
     /// 지금까지 쌓인 채점 샘플들을 하나의 요약(PracticeSummary.Aggregate)으로 압축해서

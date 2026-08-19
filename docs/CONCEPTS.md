@@ -2301,3 +2301,21 @@ Swift의 `private`는 "같은 타입"이 아니라 "같은 파일"을 기준으�
 ### 검증
 
 유닛테스트 120개 유지(JS/제스처 설정 변경이라 새 유닛테스트 대상 로직 없음), 시뮬레이터 빌드+테스트 통과. **실기기에서 스크롤 체감(부드러움, 수동 스와이프 후 재개 타이밍, 카드 내 세로 스크롤과의 충돌 여부) 확인 필요.**
+
+## 91. 기능 명세서(v1.0) 3단계 반영 — 튜너 Glow + 확정 햅틱
+
+### 배경
+
+명세서 "3단계: 발성 채점 훈련" 중 "실시간 피치 피드백(Glow & Haptic)" — 허용오차 진입 시 튜너 바늘/눈금이 성부 고유 색으로 빛나고, 3프레임(약 140ms) 연속 유지 시 햅틱으로 성취감을 준다는 항목을 반영했다. 콜앤리스폰스 3단계 큐(듣기→전환햅틱→부르기 텍스트/헤일로 전환)는 채점 시작 흐름 자체를 다시 설계해야 하는 더 큰 항목이라 이번 범위에서는 제외했다.
+
+### Glow
+
+`PitchMeterView`에 `intervalColor: Color` 파라미터 추가(호출부가 `Theme.intervalColor(for: interval)`를 넘긴다). `isOnPitch`가 true면 허용오차 음영 구간과 바늘(원)이 `Theme.pitchGood`(초록 고정) 대신 그 성부 고유색으로 바뀌고, `.shadow(color:radius:)`로 빛나는 효과를 준다 — `isOnPitch` 값 변화에 `.animation`을 걸어서 빛이 갑자기 나타나지 않고 부드럽게 켜지고 꺼진다.
+
+### 확정 햅틱(3프레임 스트릭)
+
+`onPitchStreak`/`onPitchHapticFired`(둘 다 `[Interval: _]`, interval별 독립)를 추가해, 채점 콜백(`PracticeView+Capture.swift`의 audioCapture 클로저)이 매 프레임 `updateOnPitchStreak(interval:isOnPitch:)`를 부른다 — 허용오차 밖이면 스트릭 리셋, 안이면 카운트 올리고 3에 도달한 첫 프레임에만 `UINotificationFeedbackGenerator().notificationOccurred(.success)`를 울린다(`onPitchHapticFired`로 그 연속 구간 안에서 중복 발화 방지 — 계속 정확한 음을 유지하는 동안 매 프레임 울리면 오히려 거슬린다). "3프레임 연속" 기준은 이 프로젝트가 단음 캡처 확정에 이미 쓰고 있던 것과 같은 관례(CLAUDE.md)를 그대로 재사용했다. `toggleScoring`이 채점을 새로 시작할 때 두 상태를 리셋 + `scoringSuccessHaptic.prepare()`로 미리 준비(다운비트/업비트 햅틱과 같은 패턴)해서 첫 확정 순간에도 지연이 없게 한다.
+
+### 검증
+
+유닛테스트 120개 유지(전부 UI/햅틱 로직이라 새 유닛테스트 대상 없음), 시뮬레이터 빌드+테스트 통과. **실기기에서 Glow가 자연스럽게 보이는지, 햅틱 타이밍이 "3프레임"에 맞게 체감되는지 확인 필요.**
