@@ -2636,3 +2636,31 @@ v2 전용 동작(경과음 구간 코드 유지, 근음 진행 선호)을 검증
 ### 검증
 
 유닛테스트 119개 유지, 아이패드 시뮬레이터 빌드+테스트 통과. **실기기 재확인 필요 — 특히 빠른 곡에서 밀림이 없어졌는지가 핵심.**
+
+## 107. `harmonizedTrack`을 순수 함수로 분리 — "오류 없이 계속 다듬으려면" 구조 개선
+
+### 배경
+
+106절에서 "아까보단 낫다"는 확인을 받은 뒤, 사용자가 "그럼 여기서 어떻게 해야 전처럼 오류 안 뜨고 다듬을 수 있을까?"라고 물었다 — 특정 버그 수정이 아니라 **앞으로 같은 실수를 반복하지 않을 구조**를 요청한 것.
+
+### 왜 매번 실기기에서야 문제가 드러났나
+
+이번 세션(93~106절) 내내 `PitchShifter`/`VoiceDoubler`/`AudioGain`/`ChordGenerator`/`MelodySegmenter`는 전부 `PitchEngine/` 아래 순수 함수+XCTest(총 119개)로 있었고, 단 한 번도 테스트가 실패하지 않았다. 반면 실제로 문제가 반복됐던 자리(간격 처리, 여러 음 이어붙이기 — `harmonizedTrack`)는 `PracticeView`의 `@State`(`melodySteps`/`recentVoiceBuffer` 등)에 직접 묶인 뷰 확장 메서드였다 — 유닛테스트가 아예 불가능한 구조였다. 그래서 105절의 크로스페이드 길이 버그 같은 문제가 빌드+기존 119개 테스트를 전부 통과하고도 실기기 소리로만 발견됐다.
+
+### 수정: `HarmonyTrackBuilder`로 분리
+
+신규 `HarmonyUp/Sources/PitchEngine/HarmonyTrackBuilder.swift` — `harmonizedTrack`의 로직(106절 상태, 스텝별 독립 처리)을 그대로 옮기되, `self.melodySteps`/`self.recentVoiceBuffer`/`self.harmonySegmentFadeDuration`/`isVoiceDoublingEnabled` 같은 암묵적 의존을 전부 명시적 파라미터로 바꿨다. `PracticeView+VoiceHarmony.harmonizedTrack`은 이제 이 함수를 호출하는 얇은 래퍼다 — 동작은 전혀 안 바뀌었다(기존 119개 테스트가 그대로 통과하는 것으로 확인).
+
+`HarmonyTrackBuilderTests.swift` 신규 — 이번에 실제로 겪은 버그 클래스를 회귀 테스트로 박아뒀다:
+- **길이 보존 불변식**: 스텝 1/2/5/20개 각각에서 `build(...).count == recentVoiceBuffer.count`. 105절 버그가 정확히 이 불변식을 깼었다 — 이 테스트 하나만 있었어도 그 버그는 실기기 확인 전에 잡혔을 것이다.
+- 더블링 켠 상태에서도 길이 유지되는지.
+- 빈 멜로디/범위 밖 `startStepIndex`가 안전하게 빈 배열을 돌려주는지.
+- 화음 없는 스텝(쉼표) 구간이 실제로 무음인지.
+
+### 앞으로의 규칙(CLAUDE.md에도 기록)
+
+이 로직을 다시 손댈 때는: (1) 바꾸려는 불변식을 먼저 테스트로 써서 통과시킨 뒤 실기기로 넘어갈 것, (2) 여러 개념을 한 커밋에 동시에 바꾸지 말 것, (3) 복잡한 해법보다 단순한 해법을 우선할 것 — 복잡도 자체가 이번 세션에서 새 버그의 원인이었다.
+
+### 검증
+
+`xcodegen generate`로 새 파일 등록 후 시뮬레이터 빌드+유닛테스트 **124개**(기존 119 + 신규 5) 전부 통과 — 아이패드 시뮬레이터. 리팩터링만으로 동작 변화가 없음을 기존 테스트 전부 통과로 확인.

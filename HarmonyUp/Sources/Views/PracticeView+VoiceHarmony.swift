@@ -93,55 +93,20 @@ extension PracticeView {
     /// 없으면(온음계 밖 음 등, 악보에도 쉼표로 표시되는 것과 같은 경우) 무음으로 채워서 재생
     /// 타이밍(재생헤드 매핑, 멜로디 트랙과의 동기)은 그대로 유지한다 — 스텝 사이의 빈틈도
     /// 무음으로 메워서, 결과 트랙 길이가 `recorded`(멜로디 트랙)와 정확히 같게 만든다.
+    /// 실제 조합 로직은 `HarmonyTrackBuilder`(PitchEngine, 순수 함수+유닛테스트)로 옮겼다 —
+    /// 이 메서드는 `@State`(melodySteps/recentVoiceBuffer 등)를 그 함수의 명시적 파라미터로
+    /// 풀어주는 얇은 래퍼일 뿐이다. 왜 이렇게 뽑았는지는 `HarmonyTrackBuilder.swift` 문서 참고.
     func harmonizedTrack(interval: ChordGenerator.Interval, startStepIndex: Int?, startTime: Double, rate: Double) -> [Float] {
-        let startIndex = startStepIndex ?? 0
-        guard melodySteps.indices.contains(startIndex) else { return [] }
-
-        // 세그먼트 경계에서 나는 클릭음을 없애는 짧은 페이드 — 클릭 방지에 필요한 최소한만
-        // 쓴다(harmonySegmentFadeDuration 선언부 참고).
-        let segmentFadeCount = max(1, Int(rate * harmonySegmentFadeDuration))
-        let bufferEnd = recentVoiceBuffer.count
-        var output: [Float] = []
-        var cursor = max(0, min(bufferEnd, Int(startTime * rate)))
-
-        // 105절까지 있던 간격 브리징/런 묶음/크로스페이드를 전부 걷어내고, 가장 단순한 형태로
-        // 되돌렸다(106절) — "노래가 빠를수록(=음 전환이 잦을수록) 화음이 더 밀린다"는 실기기
-        // 제보 때문. 그 복잡한 로직들이 전환 횟수에 비례해서 아주 미세한 오차를 누적시켰을
-        // 가능성이 높다고 판단(정확한 버그 지점은 특정 못 함 — 사용자가 "더 이상의 오류는
-        // 없었으면 좋겠다"며 명시적으로 되돌리기를 요청). 이제 멜로디 스텝 하나하나를 완전히
-        // 독립적으로, 자기 자신의 시작 시각·길이 그대로만 피치시프트해서 순서대로 이어붙인다 —
-        // 화음의 타이밍이 항상 멜로디 스텝과 정확히 1:1로 대응해서, 전환이 아무리 많아도
-        // 누적되어 어긋날 여지가 구조적으로 없다. 대신 "한 음을 길게 끌었는데 중간에 살짝
-        // 끊겨 들리는" 정도는 다시 나올 수 있지만(98·99·104·105절이 다루던 문제), 지금 겪는
-        // "밀림"보다는 덜 거슬리는 문제라 트레이드오프로 받아들인다. 이 되돌린 로직들은 git
-        // 히스토리(99·104·105절 커밋)에 그대로 남아있어 필요하면 다시 가져올 수 있다.
-        for i in startIndex..<melodySteps.count {
-            let step = melodySteps[i]
-            guard let onset = step.onsetTime, let duration = step.duration, duration > 0 else { continue }
-            let segStart = max(0, Int(onset * rate))
-            let segEnd = min(bufferEnd, Int((onset + duration) * rate))
-            guard segStart < segEnd else { continue }
-
-            if segStart > cursor {
-                output.append(contentsOf: [Float](repeating: 0, count: segStart - cursor))
-            }
-
-            let segment = Array(recentVoiceBuffer[segStart..<segEnd])
-            if let target = step.harmony?.first(where: { $0.interval == interval }) {
-                let ratio = target.frequency / NoteNameConverter.frequency(forMIDINote: step.midiNote)
-                let shifted = PitchShifter.shift(samples: segment, pitchRatio: ratio, formantRatio: interval.formantRatio, sampleRate: rate)
-                let doubled = isVoiceDoublingEnabled ? VoiceDoubler.apply(to: shifted, sampleRate: rate, interval: interval) : shifted
-                output.append(contentsOf: AudioGain.applyFadeInOut(doubled, fadeSampleCount: min(segmentFadeCount, doubled.count / 2)))
-            } else {
-                output.append(contentsOf: [Float](repeating: 0, count: segment.count))
-            }
-            cursor = segEnd
-        }
-
-        if cursor < bufferEnd {
-            output.append(contentsOf: [Float](repeating: 0, count: bufferEnd - cursor))
-        }
-        return output
+        HarmonyTrackBuilder.build(
+            melodySteps: melodySteps,
+            recentVoiceBuffer: recentVoiceBuffer,
+            interval: interval,
+            startStepIndex: startStepIndex,
+            startTime: startTime,
+            rate: rate,
+            segmentFadeDuration: harmonySegmentFadeDuration,
+            isVoiceDoublingEnabled: isVoiceDoublingEnabled
+        )
     }
 
     /// 녹음 분석이 끝나자마자(재생 버튼을 누르기 전에) 성부별 화음 트랙을 미리 다 계산해서
@@ -156,11 +121,36 @@ extension PracticeView {
     func precomputeHarmonyTracks() {
         precomputedHarmonyTracks = [:]
         let rate = recentVoiceSampleRate
+        // 실기기 재현: "다시 녹음(연습 화면에서 새로 녹음하기/다시 녹음하기)을 하고 나면 그
+        // 다음부터 화음이 뒤로 밀려 들린다" — 원인은 이 Task에 `stopQuickRecording`의
+        // `activeAnalysisToken`과 같은 세대 보호가 전혀 없었던 것. 이 Task가 아직 도는
+        // 도중(WORLD 연산은 가볍지 않다) 사용자가 재녹음을 끝내버리면: (1) 매 반복마다
+        // `self.melodySteps`/`self.recentVoiceBuffer`를 그때그때 실시간으로 읽어서, 성부
+        // 일부는 이전 녹음으로 일부는 새 녹음으로 계산되는 상태가 섞일 수 있었고, (2) 설령
+        // 안 섞이더라도 이 오래된 Task가 이미 최신(두 번째 녹음의) 계산을 끝낸 새 Task보다
+        // 늦게 끝나면 그 낡은 결과로 캐시를 통째로 덮어써버릴 수 있었다. `stopQuickRecording`의
+        // 패턴을 그대로 가져와, (a) Task 시작 전에 melodySteps/recentVoiceBuffer를 스냅샷으로
+        // 떠서 이 Task 안에서는 항상 "그 순간의 녹음" 하나로만 계산하게 하고, (b) 세대 토큰으로
+        // 이 결과가 아직 최신 시도인지 확인한 뒤에만 캐시에 반영한다.
+        harmonyPrecomputeGeneration += 1
+        let generation = harmonyPrecomputeGeneration
+        let stepsSnapshot = melodySteps
+        let bufferSnapshot = recentVoiceBuffer
         Task {
             var computed: [ChordGenerator.Interval: [Float]] = [:]
             for interval in ChordGenerator.Interval.allCases {
-                computed[interval] = harmonizedTrack(interval: interval, startStepIndex: nil, startTime: 0, rate: rate)
+                computed[interval] = HarmonyTrackBuilder.build(
+                    melodySteps: stepsSnapshot,
+                    recentVoiceBuffer: bufferSnapshot,
+                    interval: interval,
+                    startStepIndex: nil,
+                    startTime: 0,
+                    rate: rate,
+                    segmentFadeDuration: harmonySegmentFadeDuration,
+                    isVoiceDoublingEnabled: isVoiceDoublingEnabled
+                )
             }
+            guard harmonyPrecomputeGeneration == generation else { return } // 그 사이 재녹음으로 더 최신 시도가 시작됐으면 이 결과는 버린다
             precomputedHarmonyTracks = computed
         }
     }
