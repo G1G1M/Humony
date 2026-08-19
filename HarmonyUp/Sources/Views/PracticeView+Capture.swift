@@ -154,6 +154,15 @@ extension PracticeView {
                 return
             }
             quickRecordPhase = .analyzing(.harmonyGeneration)
+            // "진행률 바가 반만 채워진 채로 있다가 그냥 다음으로 넘어간다" 실기기 피드백 —
+            // 화음 생성(harmonizeSequence 등) 자체는 거의 즉시 끝나서, 이 줄 바로 다음에
+            // applyQuickRecordResult가 quickRecordPhase를 곧장 .result로 바꿔버리면 SwiftUI가
+            // .harmonyGeneration(진행률 100%) 상태를 한 프레임도 그리지 못하고 넘어갈 수 있다 —
+            // 사용자 눈엔 "50%에서 바로 사라짐"으로 보인다. 진행률 바가 100%까지 차오르는 걸
+            // (ShimmerProgressBar의 0.3초 채움 애니메이션 포함) 실제로 볼 수 있을 만큼만 최소
+            // 대기한다.
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            guard activeAnalysisToken == token else { return } // 대기하는 사이 새 시도가 시작됐으면 여기서도 무시
             applyQuickRecordResult(analyzed)
         }
     }
