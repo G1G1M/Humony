@@ -103,6 +103,17 @@ extension PracticeView {
                         }
                         .disabled(quickRecordPhase.isRecordingOrAnalyzing)
                     }
+                    // 명세서(v1.0) "퀵 스왑" — 조작부/악보부 좌우 위치를 즉시 전환. 왼손잡이나
+                    // DAW(조작부가 늘 한쪽에 고정된 환경) 사용자 습관에 맞출 수 있게.
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                isControlPanelLeading.toggle()
+                            }
+                        } label: {
+                            Label("조작부·악보 위치 바꾸기", systemImage: "rectangle.2.swap")
+                        }
+                    }
                 }
             }
         }
@@ -122,45 +133,63 @@ extension PracticeView {
         .padding()
     }
 
-    /// 2단계 — 왼쪽(녹음 상태+내 목소리로 화음+채점)/오른쪽(악보, 상시 큼) 두 열.
+    /// 2단계 — 조작부(녹음 상태+내 목소리로 화음+채점)/악보부(상시 큼) 두 열. 명세서(v1.0)
+    /// "2단 분할 반응형 레이아웃"에 맞춰 6:4(악보:조작) 비율로 나누고, 헤더의 스왑 버튼
+    /// (`isControlPanelLeading`)으로 좌우를 즉시 바꿀 수 있다. 두 열이 각자 독립된 컨테이너라
+    /// (조작부는 자체 `ScrollView`, 악보부는 `sheetMusicPanel`이 내부에서 스크롤) 한쪽을
+    /// 스크롤해도 다른 쪽은 그대로 고정돼 있다 — 명세서의 "독립 스크롤"은 이 구조 자체로
+    /// 이미 충족된다.
     var regularSplitStage: some View {
-        HStack(alignment: .top, spacing: Theme.Spacing.lg) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
-                    // showsInlineRetry: false — "다시 녹음"은 이제 툴바가 전담한다. 이 카드 안에도
-                    // 같은 이름의 버튼을 남겨두면 툴바 버전과 의미가 갈려서(하나는 컨텍스트 유지,
-                    // 하나는 완전 리셋) 헷갈린다.
-                    captureHero(prominent: false, showsInlineRetry: false)
+        GeometryReader { geo in
+            // 조작부 폭은 전체의 40%를 기본으로 하되, 아이폰 카드 폭(380, 컴팩트 레이아웃과
+            // 동일)보다 너무 좁아지거나(작은 Split View) 너무 넓어지지(초대형 아이패드 가로)
+            // 않게 300~480 범위로 clamp한다 — 명세서 6:4 비율의 의도(조작 영역이 항상 쓰기
+            // 편한 폭)를 다양한 실제 화면 크기에서도 지키기 위한 안전장치.
+            let controlWidth = min(480, max(300, geo.size.width * 0.4))
 
-                    if melodySession.suggestedHarmony != nil {
-                        voiceHarmonyPanel
-                        scoringCard
-                    }
+            HStack(alignment: .top, spacing: Theme.Spacing.lg) {
+                if isControlPanelLeading {
+                    controlColumn
+                        .frame(width: controlWidth)
+                    Divider()
+                    scoreColumn
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    scoreColumn
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    Divider()
+                    controlColumn
+                        .frame(width: controlWidth)
                 }
-                .padding()
-                .animation(.easeOut(duration: 0.3), value: hasHarmony)
             }
-            // 아이폰 카드 폭과 비슷하게 고정 — QuickRecordView 등 기존 서브뷰가 이 폭에서
-            // 이미 잘 보이도록 만들어져 있어서(컴팩트 레이아웃과 같은 폭), 그대로 재사용해도
-            // 어색하지 않다.
-            .frame(width: 380)
-
-            // 두 패널을 선으로 구분 — 프로토타입(아티팩트)에서 왼쪽/오른쪽 패널을 나누던
-            // 얇은 세로선과 같은 관례. 카드형 배경(모서리 둥근 회색 배경)만으로는 두 패널이
-            // 어디서 나뉘는지 애매했다는 피드백을 반영.
-            Divider()
-
-            rightPanel
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding()
         }
-        .padding()
     }
 
-    /// "다시 녹음" 중(우측 악보는 새 분석이 끝날 때까지 대기 상태)이면 진행 표시를, 아니면
+    /// 조작부 — 캡처+내 목소리로 화음+채점. 스왑 시에도 내용은 그대로, 위치만 바뀐다.
+    private var controlColumn: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                // showsInlineRetry: false — "다시 녹음"은 이제 툴바가 전담한다. 이 카드 안에도
+                // 같은 이름의 버튼을 남겨두면 툴바 버전과 의미가 갈려서(하나는 컨텍스트 유지,
+                // 하나는 완전 리셋) 헷갈린다.
+                captureHero(prominent: false, showsInlineRetry: false)
+
+                if melodySession.suggestedHarmony != nil {
+                    voiceHarmonyPanel
+                    scoringCard
+                }
+            }
+            .padding()
+            .animation(.easeOut(duration: 0.3), value: hasHarmony)
+        }
+    }
+
+    /// "다시 녹음" 중(악보부는 새 분석이 끝날 때까지 대기 상태)이면 진행 표시를, 아니면
     /// 실제 악보를 보여준다 — 이전 녹음의 악보를 그대로 둔 채 새로 녹음하면 "지금 보이는 게
     /// 방금 부른 거냐, 예전 거냐" 헷갈릴 수 있어서 명확히 구분했다.
     @ViewBuilder
-    var rightPanel: some View {
+    var scoreColumn: some View {
         if quickRecordPhase.isRecordingOrAnalyzing {
             sheetMusicRerecordingPlaceholder
         } else {

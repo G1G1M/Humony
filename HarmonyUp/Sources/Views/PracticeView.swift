@@ -119,6 +119,10 @@ struct PracticeView: View {
     // 악보 카드는 다른 카드들과 나란히 있어서 고정 높이 안에 좁게 보인다 — 렌더링이 제대로
     // 되는지 크게 확인하고 싶을 때 이 상태로 전체화면 뷰(SheetMusicFullScreenView)를 띄운다.
     @State var showingFullScreenScore = false
+    // 명세서(v1.0) "퀵 스왑" — 아이패드/가로모드 2단 분할에서 조작부(캡처+내목소리화음+채점)와
+    // 악보부의 좌우 위치를 헤더 버튼으로 즉시 전환한다(왼손/오른손잡이·DAW 사용자 습관 대응).
+    // true면 조작부가 왼쪽(기존 기본 배치), false면 오른쪽.
+    @State var isControlPanelLeading = true
 
     // "내 목소리로 화음 만들기" — 합성음(TonePlayer) 대신 사용자 목소리를 그대로 베이스/3도/5도로
     // 옮겨서 재생한다. 빠른 녹음이 끝나면 녹음 전체가 그대로 여기 채워진다(applyQuickRecordResult).
