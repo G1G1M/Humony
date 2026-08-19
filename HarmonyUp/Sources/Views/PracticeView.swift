@@ -155,6 +155,13 @@ struct PracticeView: View {
     // 들린다"는 인상을 만들었다. 클릭음 방지에 필요한 최소한(2ms)까지만 줄였다 — 이보다
     // 짧으면 세그먼트 경계의 진폭 불연속이 다시 들릴 위험이 있다.
     let harmonySegmentFadeDuration: Double = 0.002
+    // "이어지는 음이 화음에서 끊김" 수정 — `harmonizedTrack`이 두 스텝 사이 간격을 무음으로
+    // 메우는 대신, 그 간격의 앞뒤가 정확히 같은 멜로디 음이면(=발성 흔들림으로 잘못 갈라진
+    // 하나의 held 음일 가능성이 높음) 그 구간도 피치시프트해서 이어 붙인다. 이 상한(0.4초)보다
+    // 긴 간격은 진짜 쉼표/다음 음 대기로 보고 기존처럼 무음 처리한다 — 실측 근거가 있는
+    // `MelodySegmenter.sameNoteMergeGapThreshold`(0.18초)보다 여유 있게 위로 잡아서, 병합
+    // 임계값을 통과 못 한 조금 더 긴 간격까지 이 2차 안전망이 커버하게 했다.
+    let maxHarmonyGapBridgeDuration: Double = 0.4
 
     let audioCapture = AudioCapture()
     let melodySession = MelodySession()

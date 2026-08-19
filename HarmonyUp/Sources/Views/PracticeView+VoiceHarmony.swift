@@ -104,6 +104,26 @@ extension PracticeView {
         let bufferEnd = recentVoiceBuffer.count
         var output: [Float] = []
         var cursor = max(0, min(bufferEnd, Int(startTime * rate)))
+        // 직전에 실제로 화음을 재생한 스텝의 멜로디 원음(MIDI) — 간격 브리징 판단에 쓴다.
+        var lastPlayedMIDINote: Int?
+
+        // 원본 구간(raw)을 targetFrequency로 피치시프트 + (필요시)더블링 + 페이드까지 마친 청크로
+        // 만든다. 실제 스텝 구간과, 아래에서 "이어 부른 같은 음"으로 판단해 무음 대신 메우는
+        // 간격(gap) 구간 둘 다 이 헬퍼 하나를 공유한다.
+        func pitchShiftedChunk(raw: [Float], sourceMIDINote: Int, targetFrequency: Double) -> [Float] {
+            let ratio = targetFrequency / NoteNameConverter.frequency(forMIDINote: sourceMIDINote)
+            let shifted = PitchShifter.shift(samples: raw, pitchRatio: ratio, formantRatio: interval.formantRatio, sampleRate: rate)
+            // 더블링은 반드시 이 청크 하나의 구간 안에서만 적용한다 — 예전엔 스텝별로 피치시프트한
+            // 조각들을 전부 이어붙인 "성부 전체 트랙"에 한 번에 더블링을 걸었는데, 그러면
+            // 각 음의 시작 지점(더블링 지연 15~35ms 구간)에 "직전 음의 피치로 지연·디튠된
+            // 복사본"이 새어 들어와서 음이 바뀔 때마다 화음이 어긋나 들렸다("화음이 안 맞는
+            // 느낌이 너무 강하다" 실사용 피드백으로 발견, 근거: VoiceDoubler.double이 델레이
+            // 오프셋만큼 과거 샘플을 그대로 참조하는데, 그 "과거"가 이 음이 아니라 이전
+            // 음이었던 것). 세그먼트 단위로만 더블링하면 지연 참조가 항상 같은 음 안에서만
+            // 일어나서 이 누출이 원천적으로 없어진다.
+            let doubled = isVoiceDoublingEnabled ? VoiceDoubler.apply(to: shifted, sampleRate: rate, interval: interval) : shifted
+            return AudioGain.applyFadeInOut(doubled, fadeSampleCount: min(segmentFadeCount, doubled.count / 2))
+        }
 
         for i in startIndex..<melodySteps.count {
             let step = melodySteps[i]
@@ -112,28 +132,35 @@ extension PracticeView {
             let segEnd = min(bufferEnd, Int((onset + duration) * rate))
             guard segStart < segEnd else { continue }
 
+            let target = step.harmony?.first(where: { $0.interval == interval })
+
             if segStart > cursor {
-                output.append(contentsOf: [Float](repeating: 0, count: segStart - cursor))
+                let gapSampleCount = segStart - cursor
+                // 실기기 피드백("한 음을 길게 끌면 멜로디는 이어 들리는데 화음은 끊겨 들림 —
+                // '미미'가 아니라 '미~'로 들려야 함") — `MelodySegmenter`가 발성 흔들림 때문에
+                // 진짜 하나로 이어 부른 음을 별개 스텝 2개로 갈랐을 때(95·98절에서 병합 임계값을
+                // 올렸지만 그래도 여전히 남는 경우), 이 간격 앞뒤가 정확히 같은 멜로디 음이면
+                // "정말 이어 부른 한 음일" 가능성이 높다 — 무음으로 메우는 대신 그 구간도
+                // 똑같이 피치시프트해서 이어 붙인다. 다른 음이거나(진짜 다음 음/쉼표) 간격이
+                // `maxHarmonyGapBridgeDuration`보다 길면(진짜 쉼표) 기존처럼 무음으로 둔다 —
+                // 진짜 쉼표까지 이어 붙이면 안 쉬어야 할 자리에서 화음이 계속 나서 더 이상하게 들린다.
+                let maxBridgeableGapSamples = Int(rate * maxHarmonyGapBridgeDuration)
+                if let target, let lastPlayedMIDINote, lastPlayedMIDINote == step.midiNote,
+                   gapSampleCount <= maxBridgeableGapSamples {
+                    let gapRaw = Array(recentVoiceBuffer[cursor..<segStart])
+                    output.append(contentsOf: pitchShiftedChunk(raw: gapRaw, sourceMIDINote: step.midiNote, targetFrequency: target.frequency))
+                } else {
+                    output.append(contentsOf: [Float](repeating: 0, count: gapSampleCount))
+                }
             }
 
             let segment = Array(recentVoiceBuffer[segStart..<segEnd])
-            if let target = step.harmony?.first(where: { $0.interval == interval }) {
-                let ratio = target.frequency / NoteNameConverter.frequency(forMIDINote: step.midiNote)
-                let shifted = PitchShifter.shift(samples: segment, pitchRatio: ratio, formantRatio: interval.formantRatio, sampleRate: rate)
-                // 더블링은 반드시 이 음 하나의 구간 안에서만 적용한다 — 예전엔 스텝별로 피치시프트한
-                // 조각들을 전부 이어붙인 "성부 전체 트랙"에 한 번에 더블링을 걸었는데, 그러면
-                // 각 음의 시작 지점(더블링 지연 15~35ms 구간)에 "직전 음의 피치로 지연·디튠된
-                // 복사본"이 새어 들어와서 음이 바뀔 때마다 화음이 어긋나 들렸다("화음이 안 맞는
-                // 느낌이 너무 강하다" 실사용 피드백으로 발견, 근거: VoiceDoubler.double이 델레이
-                // 오프셋만큼 과거 샘플을 그대로 참조하는데, 그 "과거"가 이 음이 아니라 이전
-                // 음이었던 것). 세그먼트 단위로만 더블링하면 지연 참조가 항상 같은 음 안에서만
-                // 일어나서 이 누출이 원천적으로 없어진다 — 대신 음 길이가 지연시간보다 짧으면
-                // (아주 빠른 음) 그 음에는 더블링 효과가 거의/전혀 안 들어가는데, 옆 음의 피치가
-                // 새어 들어오는 것보다는 이쪽이 훨씬 자연스럽다.
-                let doubled = isVoiceDoublingEnabled ? VoiceDoubler.apply(to: shifted, sampleRate: rate, interval: interval) : shifted
-                output.append(contentsOf: AudioGain.applyFadeInOut(doubled, fadeSampleCount: min(segmentFadeCount, doubled.count / 2)))
+            if let target {
+                output.append(contentsOf: pitchShiftedChunk(raw: segment, sourceMIDINote: step.midiNote, targetFrequency: target.frequency))
+                lastPlayedMIDINote = step.midiNote
             } else {
                 output.append(contentsOf: [Float](repeating: 0, count: segment.count))
+                lastPlayedMIDINote = nil
             }
             cursor = segEnd
         }
