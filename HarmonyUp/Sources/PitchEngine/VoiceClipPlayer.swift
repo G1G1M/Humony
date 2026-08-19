@@ -90,6 +90,20 @@ final class VoiceClipPlayer {
             }
         }
 
+        // 명세서 밖 실기기 피드백("노래가 뒤로 갈수록 화음 박자가 밀린다") 대응 — 예전엔
+        // "Swift 메서드 호출 간격은 마이크로초 단위라 사실상 동시"라고 보고 `at: nil`로 스케줄한
+        // 뒤 각 플레이어의 `play()`를 순서대로 불렀다. 그런데 `at: nil`은 "그 `play()` 호출이
+        // 실제로 처리되는 시점"에 시작하는 것이라, 성부(플레이어) 4개를 위 for문에서 준비하고
+        // 아래에서 하나씩 play()를 부르는 사이에 생기는 아주 작은 호출/스케줄링 지연조차 실기기
+        // 조건(다른 오디오 처리와 CPU를 다투는 상황)에서는 성부마다 조금씩 다르게 튈 수 있다 —
+        // 모든 플레이어가 정확히 같은 하드웨어 시각(host time)에 시작하도록 명시적
+        // `AVAudioTime`을 만들어 전부 같은 값으로 스케줄한다. 0.1초 여유를 두는 이유: 이 시각이
+        // 지금(now)보다 뒤여야 하고, 아래 스케줄/play() 호출들이 전부 끝난 뒤에 도달해야 의미가
+        // 있다 — 너무 타이트하면 이미 지나버린 시각이 되어 오히려 즉시 재생(비동기 오차 재도입)으로
+        // 폴백될 수 있다.
+        let startHostTime = mach_absolute_time() + AVAudioTime.hostTime(forSeconds: 0.1)
+        let startTime = AVAudioTime(hostTime: startHostTime)
+
         for (index, track) in tracks.enumerated() {
             let player = players[index]
             player.pan = track.pan
@@ -109,14 +123,14 @@ final class VoiceClipPlayer {
 
             // completionCallbackType을 .dataPlayedBack으로 지정해야 "버퍼를 재생 큐에 넘겼다"가
             // 아니라 "실제로 스피커에서 소리가 다 나갔다" 시점에 콜백이 온다.
-            player.scheduleBuffer(buffer, at: nil, options: [], completionCallbackType: .dataPlayedBack) { _ in
+            player.scheduleBuffer(buffer, at: startTime, options: [], completionCallbackType: .dataPlayedBack) { _ in
                 onTrackFinished()
             }
         }
 
-        // 여러 노드를 정확히 같은 샘플에서 시작시키는 건(AVAudioTime 기반) 이 용도(4개 성부를
-        // 몇 ms 오차 안에 함께 재생)엔 과한 정교함이라, 단순하게 바로 이어서 play()를 부른다 —
-        // Swift 메서드 호출 간격은 마이크로초 단위라 사람 귀로는 사실상 동시로 들린다.
+        // scheduleBuffer(at:)에 이미 공통 시작 시각을 줬으므로, 여기서 play()는 "그 시각이
+        // 오면 재생을 시작할 준비가 됐다"는 뜻일 뿐 — 실제 시작은 4개 플레이어 전부 위에서 준
+        // 같은 startTime에 동시에 일어난다.
         for index in 0..<tracks.count {
             players[index].play()
         }
