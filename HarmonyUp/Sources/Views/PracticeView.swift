@@ -139,6 +139,10 @@ struct PracticeView: View {
     // 길이가 같아서(공백은 무음으로 채움), 시작 샘플 인덱스로 자르기만 해도 그 지점부터
     // recomputing한 것과 동일한 결과가 나온다.
     @State var precomputedHarmonyTracks: [ChordGenerator.Interval: [Float]] = [:]
+    // 재녹음이 이전 사전계산 Task보다 먼저 끝나버려서 그 낡은 결과가 새 캐시를 덮어쓰는 걸
+    // 막는 세대 토큰 — `activeAnalysisToken`(녹음 분석)과 같은 패턴을 화음 사전계산에도 적용.
+    // "재녹음 이후부터 화음이 밀려 들린다" 실기기 재현으로 발견(`precomputeHarmonyTracks` 참고).
+    @State var harmonyPrecomputeGeneration = 0
     // "전체 화음"/"화음만 듣기"로 나뉘어 있던 두 버튼을, 성부별로 켜고 끌 수 있는 토글 하나로
     // 일반화했다(로드맵 Phase 4, docs/CONCEPTS.md 53절) — 리드 멜로디도 다른 성부와 동등하게
     // 뮤트 대상이 된다. 기본값은 전부 켜짐(예전 "전체 화음" 버튼과 동일한 동작).

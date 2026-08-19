@@ -2664,3 +2664,25 @@ v2 전용 동작(경과음 구간 코드 유지, 근음 진행 선호)을 검증
 ### 검증
 
 `xcodegen generate`로 새 파일 등록 후 시뮬레이터 빌드+유닛테스트 **124개**(기존 119 + 신규 5) 전부 통과 — 아이패드 시뮬레이터. 리팩터링만으로 동작 변화가 없음을 기존 테스트 전부 통과로 확인.
+
+## 108. 재녹음 후 화음이 밀리는 진짜 원인 — `precomputeHarmonyTracks()` 레이스 컨디션
+
+### 배경
+
+107절 직후 "재녹음(연습 화면에서 새로 녹음하기/그 안에서 다시 녹음하기)을 하고 재생하면 화음이 밀려서 들린다"는 재현 조건을 확인받았다. 106절에서 이미 `harmonizedTrack`(→ `HarmonyTrackBuilder`)을 가장 단순한 스텝별 독립 처리로 되돌렸는데도 증상이 남아있었다는 건, 원인이 화음 계산 로직 자체가 아니라 **그 계산을 언제/어떤 데이터로 도는지**에 있다는 뜻이었다.
+
+### 원인
+
+`precomputeHarmonyTracks()`의 `Task`에는 녹음 분석 쪽의 `activeAnalysisToken`과 같은 세대 보호가 전혀 없었다. WORLD 연산은 가볍지 않아 이 `Task`가 3개 성부를 계산하는 데 시간이 걸리는데, 그 도중 사용자가 재녹음을 끝내버리면:
+1. 이 `Task`는 매 반복마다 `self.melodySteps`/`self.recentVoiceBuffer`를 그때그때 실시간으로 읽으므로, 일부 성부는 이전 녹음으로 일부는 새 녹음으로 계산되는 상태가 섞일 수 있었고,
+2. 설령 안 섞이더라도 이 오래된 `Task`가 이미 최신(두 번째 녹음) 계산을 끝낸 새 `Task`보다 늦게 끝나면 그 낡은 결과로 캐시(`precomputedHarmonyTracks`) 전체를 덮어써버릴 수 있었다.
+
+"재녹음 이후부터만" 밀리는 증상과 정확히 들어맞는다 — 첫 녹음 때는 경쟁할 이전 `Task`가 없기 때문이다.
+
+### 수정
+
+`stopQuickRecording`의 `activeAnalysisToken` 패턴을 그대로 가져왔다. `PracticeView`에 `@State var harmonyPrecomputeGeneration = 0` 추가. `precomputeHarmonyTracks()`는 이제 `Task` 시작 전에 `melodySteps`/`recentVoiceBuffer`를 스냅샷으로 떠서 그 `Task` 안에서는 항상 "그 순간의 녹음" 하나로만 계산하고, `Task` 종료 시 자기 세대가 여전히 최신인지 확인한 뒤에만 결과를 캐시에 반영한다(낡으면 조용히 버림).
+
+### 검증
+
+시뮬레이터 빌드 성공, 유닛테스트 124개 전부 통과(로직 자체는 `HarmonyTrackBuilder` 그대로, 호출 타이밍/데이터 스냅샷만 바뀜이라 회귀 없음). 실기기에서 재녹음 후 밀림이 실제로 사라졌는지 확인 필요.
