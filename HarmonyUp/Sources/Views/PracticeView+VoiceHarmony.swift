@@ -1,5 +1,13 @@
 import SwiftUI
 
+/// 화음이 멜로디와 싱크가 안 맞는다는 실기기 피드백(95·96절 이후에도 남음)에 대한 다음 실험 —
+/// `VoiceDoubler`(성부 두께감을 위한 지연+디튠 복사본 믹싱) 자체가 원본 위에 15~35ms 지연된
+/// 겹침을 한 겹 더 얹는 구조라, 그 겹침이 여전히 어택을 미세하게 부드럽게 만드는 요인일 수
+/// 있다는 가설을 검증하기 위해 끈다. `false`로 끄면 "합창처럼 두꺼운" 느낌은 줄지만 가장
+/// 깨끗하고 즉각적인 어택을 들을 수 있다 — 청취 결과로 다음(재도입/약하게/PSOLA 회귀 검토)을
+/// 정한다(docs/CONCEPTS.md 참고).
+private let isVoiceDoublingEnabled = false
+
 /// `PracticeView`의 "내 목소리로 화음" 재생 책임 — 성부별 화음 트랙 계산(WORLD 피치시프트),
 /// 재생, 카라오케 재생헤드 동기화/햅틱까지. 나머지 책임은 `PracticeView.swift`(상태/body),
 /// `PracticeView+Layout.swift`(레이아웃), `PracticeView+Scoring.swift`(채점),
@@ -122,7 +130,7 @@ extension PracticeView {
                 // 일어나서 이 누출이 원천적으로 없어진다 — 대신 음 길이가 지연시간보다 짧으면
                 // (아주 빠른 음) 그 음에는 더블링 효과가 거의/전혀 안 들어가는데, 옆 음의 피치가
                 // 새어 들어오는 것보다는 이쪽이 훨씬 자연스럽다.
-                let doubled = VoiceDoubler.apply(to: shifted, sampleRate: rate, interval: interval)
+                let doubled = isVoiceDoublingEnabled ? VoiceDoubler.apply(to: shifted, sampleRate: rate, interval: interval) : shifted
                 output.append(contentsOf: AudioGain.applyFadeInOut(doubled, fadeSampleCount: min(segmentFadeCount, doubled.count / 2)))
             } else {
                 output.append(contentsOf: [Float](repeating: 0, count: segment.count))
