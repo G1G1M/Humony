@@ -203,13 +203,8 @@ extension PracticeView {
     }
 
     var sheetMusicRerecordingPlaceholder: some View {
-        VStack(spacing: Theme.Spacing.sm) {
-            ProgressView()
-            Text(isReanalyzing ? "새로 부른 노래를 분석하는 중이에요" : "다시 녹음하는 중이에요")
-                .font(Theme.Typography.subheadline)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        PulsingLoadingLabel(message: isReanalyzing ? "새로 부른 노래를 분석하는 중이에요" : "다시 녹음하는 중이에요")
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - 두 레이아웃이 공유하는 섹션
@@ -392,12 +387,7 @@ extension PracticeView {
                 contentVersion: scoreContentVersion
             )
             if isScoreRendering {
-                VStack(spacing: Theme.Spacing.sm) {
-                    ProgressView()
-                    Text("악보를 만드는 중이에요")
-                        .font(Theme.Typography.caption)
-                        .foregroundStyle(.secondary)
-                }
+                PulsingLoadingLabel(message: "악보를 만드는 중이에요")
             }
         }
     }

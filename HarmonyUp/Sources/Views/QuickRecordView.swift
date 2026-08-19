@@ -201,9 +201,9 @@ struct QuickRecordView: View {
         VStack(spacing: Theme.Spacing.sm) {
             Text(stage.statusText)
                 .font(Theme.Typography.subheadline)
-            ProgressView(value: stage.progress)
-                .tint(Theme.tint)
-                .animation(.easeInOut(duration: 0.3), value: stage.progress)
+            // 정적인 ProgressView 대신 채워진 부분 위로 빛이 스윽 지나가는 shimmer — "지금
+            // 진행되고 있다"는 느낌을 강조해달라는 피드백 반영(LoadingIndicators.swift 참고).
+            ShimmerProgressBar(progress: stage.progress)
         }
         .frame(maxWidth: .infinity)
         .padding(Theme.Spacing.lg)

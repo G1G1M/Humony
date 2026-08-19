@@ -54,12 +54,7 @@ struct SheetMusicFullScreenView: View {
                 ZStack {
                     VexFlowScoreView(steps: steps, mutedVoices: $mutedVoices, activeStepIndex: nil, onSeekToStep: { _ in }, isRendering: $isScoreRendering, contentVersion: scoreContentVersion)
                     if isScoreRendering {
-                        VStack(spacing: Theme.Spacing.sm) {
-                            ProgressView()
-                            Text("악보를 만드는 중이에요")
-                                .font(Theme.Typography.caption)
-                                .foregroundStyle(.secondary)
-                        }
+                        PulsingLoadingLabel(message: "악보를 만드는 중이에요")
                     }
                 }
             }

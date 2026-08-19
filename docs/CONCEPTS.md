@@ -2434,3 +2434,22 @@ WORLD는 피치시프트뿐 아니라 F0/스펙트럼 포락선(포먼트)/비�
 ### 검증
 
 유닛테스트 120개 유지(`formantRatio` 정확한 수치를 직접 검증하는 테스트는 없었음 — `PitchShifterTests`는 `PitchShifter.shift`를 명시적 값으로 직접 테스트해서 이 변경과 무관), 시뮬레이터 빌드+테스트 통과. **실기기 청취로 (1) 더 자연스럽게 들리는지 (2) 싱크 문제가 없어졌는지 확인 필요 — 만약 여전히 부족하면 다음 후보는 더블링 끄기 또는 PSOLA 회귀 순으로 검토.**
+
+## 97. 로딩 표시 애니메이션 강화 — shimmer 진행률 바 + breathing pulse 스피너
+
+### 배경
+
+녹음 종료~악보 렌더링 사이 로딩 표시 4곳(`QuickRecordView` 진행률 바, 아이패드 2단 분할 재녹음 자리, 악보 카드 스피너, 전체화면 악보 스피너)이 전부 기본 `ProgressView`뿐이라 "지금 진행 중"이라는 느낌이 약하다는 피드백. AskUserQuestion으로 4가지 애니메이션 스타일(숨쉬듯 펄스/점 3개 순환/헤일로 링/진행률 바 반짝임)을 프리뷰와 함께 제시 → **"진행률 바 반짝임(수치형 전용)"** 선택 — 수치형(퍼센트 있는 곳)엔 shimmer, 나머지 스피너형은 숨쉬듯 펄스로 통일.
+
+### 구현
+
+`LoadingIndicators.swift` 신규(기존 `PitchMeterView.swift`/`VoiceToggleChip.swift`처럼 재사용 뷰는 자기 파일에 두는 관례를 따름) — 두 컴포넌트:
+
+- **`ShimmerProgressBar`**: `progress: Double` 하나만 받는 캡슐형 바. 배경 트랙(`Theme.tint.opacity(0.15)`) 위에 채워진 부분(`Theme.tint`)을 그리고, 그 위에 반투명 흰색 `LinearGradient`(폭의 절반)를 `offset(x:)`로 좌→우 반복 이동(`.linear(duration: 1.1).repeatForever(autoreverses: false)`)시켜 반짝임을 낸다. `QuickRecordView.analyzingContent`의 `ProgressView(value: stage.progress)`를 그대로 대체.
+- **`PulsingLoadingLabel`**: `message: String`만 받아 기존 `VStack { ProgressView(); Text(...) }` 조합을 대체. `@State isPulsing`을 `onAppear`에서 `.easeInOut(duration: 1.1).repeatForever(autoreverses: true)`로 토글해 `scaleEffect`/`opacity`를 반복 펄스(1.04↔0.96 / 1.0↔0.55). `PracticeView+Layout.sheetMusicRerecordingPlaceholder`/`scoreViewWithLoadingOverlay`, `SheetMusicFullScreenView`의 로딩 오버레이 3곳에 동일 적용.
+
+두 컴포넌트 모두 `@Environment(\.accessibilityReduceMotion)`을 존중한다 — 켜져 있으면 shimmer는 아예 안 그리고(오버레이 자체를 생략), pulse는 애니메이션을 시작하지 않는 대신 "펄스 꺼짐" 쪽 낮은 opacity/scale에 고정되지 않도록 명시적으로 정상 크기(1.0)/완전 불투명(1.0)으로 고정한다(앱 전역에서 이미 존중하는 설정, `PracticeView.cardAppearTransition`과 같은 원칙).
+
+### 검증
+
+`xcodegen generate`로 새 파일 등록 후 시뮬레이터 빌드+유닛테스트 120개 통과 확인(**아이패드 시뮬레이터로 테스트, `feedback_harmonyup_ipad_only_builds` 메모리 지침 최초 적용**). 순수 UI 변경이라 신규 유닛테스트는 없음. **실기기 확인 필요.**
