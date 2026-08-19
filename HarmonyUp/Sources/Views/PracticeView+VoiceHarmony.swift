@@ -98,158 +98,44 @@ extension PracticeView {
         guard melodySteps.indices.contains(startIndex) else { return [] }
 
         // 세그먼트 경계에서 나는 클릭음을 없애는 짧은 페이드 — 클릭 방지에 필요한 최소한만
-        // 쓴다(harmonySegmentFadeDuration 선언부 참고 — 너무 길면 매 음의 공격이 부드러워져
-        // "화음이 박자보다 밀려 들린다"는 인상을 만든다).
+        // 쓴다(harmonySegmentFadeDuration 선언부 참고).
         let segmentFadeCount = max(1, Int(rate * harmonySegmentFadeDuration))
         let bufferEnd = recentVoiceBuffer.count
-        let maxBridgeableGapSamples = Int(rate * maxHarmonyGapBridgeDuration)
         var output: [Float] = []
         var cursor = max(0, min(bufferEnd, Int(startTime * rate)))
 
-        // raw 구간을 targetFrequency로 피치시프트 + (필요시)더블링 + 페이드까지 마친 청크로
-        // 만든다. fadeIn/fadeOut을 따로 받는 이유는 아래에서 "이어 부른 여러 음을 하나로
-        // 묶은 런(run)"을 통째로 한 번만 시프트하기 때문 — 런의 맨 처음에만 페이드 인,
-        // 맨 끝에만 페이드 아웃을 걸어야 안쪽(원래 음 경계였던 자리)에 미세한 골이 안 남고
-        // 진짜로 끊김 없이 이어 들린다("이음표처럼 이어져야 할 음이 화음에서 여전히 살짝
-        // 끊겨 들린다"는 재확인 피드백 — 예전엔 브리지 구간도 별도 청크로 취급해 그 경계마다
-        // 짧게라도 페이드가 걸렸었다).
-        func pitchShiftedChunk(raw: [Float], sourceMIDINote: Int, targetFrequency: Double, fadeIn: Bool, fadeOut: Bool) -> [Float] {
-            let ratio = targetFrequency / NoteNameConverter.frequency(forMIDINote: sourceMIDINote)
-            let shifted = PitchShifter.shift(samples: raw, pitchRatio: ratio, formantRatio: interval.formantRatio, sampleRate: rate)
-            // 더블링은 반드시 이 청크 하나의 구간 안에서만 적용한다 — 예전엔 스텝별로 피치시프트한
-            // 조각들을 전부 이어붙인 "성부 전체 트랙"에 한 번에 더블링을 걸었는데, 그러면
-            // 각 음의 시작 지점(더블링 지연 15~35ms 구간)에 "직전 음의 피치로 지연·디튠된
-            // 복사본"이 새어 들어와서 음이 바뀔 때마다 화음이 어긋나 들렸다("화음이 안 맞는
-            // 느낌이 너무 강하다" 실사용 피드백으로 발견, 근거: VoiceDoubler.double이 델레이
-            // 오프셋만큼 과거 샘플을 그대로 참조하는데, 그 "과거"가 이 음이 아니라 이전
-            // 음이었던 것). 청크(런) 단위로만 더블링하면 지연 참조가 항상 같은 런 안에서만
-            // 일어나서 이 누출이 원천적으로 없어진다.
-            let doubled = isVoiceDoublingEnabled ? VoiceDoubler.apply(to: shifted, sampleRate: rate, interval: interval) : shifted
-            return AudioGain.applyFadeInOut(
-                doubled,
-                fadeInCount: fadeIn ? segmentFadeCount : 0,
-                fadeOutCount: fadeOut ? segmentFadeCount : 0
-            )
-        }
-
-        // 같은 음 안에서(런 안쪽) 골이 없어져도, 서로 다른 음끼리 붙어서(레가토로 이어 부른
-        // 멜로디는 음 사이에 거의 틈이 없다) 넘어갈 때마다 여전히 fade-out→fade-in이 한 번씩
-        // 걸려서 "뚝뚝 끊긴다"는 재확인 피드백을 받음 — 노래 한 곡엔 이런 음 전환이 수십 번
-        // 있을 수 있어서, 짧은 골이라도 자주 반복되면 전체적으로 "덜컹거리는" 느낌이 쌓인다.
-        // 무음(진짜 쉼표) 없이 유성음끼리 바로 붙는 전환은 fade-out/fade-in 대신 **크로스페이드**
-        // (직전 런의 꼬리와 다음 런의 머리를 선형으로 겹쳐 섞기)로 이어서, 신호가 한 번도
-        // 0으로 안 떨어지고 자연스럽게 넘어가게 한다. 진짜 쉼표(간격이 있는 경우)는 그대로
-        // 무음으로 채우고 그 앞뒤에만 클릭 방지 페이드를 건다.
-        let crossfadeCount = segmentFadeCount
-
-        // `output`의 꼬리와 `chunk`의 머리를 선형 크로스페이드로 섞어 이어붙인다. `overlap`은
-        // 반드시 `chunk`를 만들 때 실제로 원본에서 더 끌어온(overlapBorrowed) 만큼과 정확히
-        // 같아야 한다 — 그래야 여기서 버리는 `chunk`의 앞부분 길이가 그 "더 끌어온" 길이와
-        // 정확히 상쇄돼서 트랙 전체 길이가 보존된다(둘이 어긋나면 트랙이 조금씩 짧아지면서
-        // `recentVoiceBuffer`와의 샘플 대응이 깨져 재생이 갈수록 밀리는 버그로 이어질 수 있다).
-        func appendCrossfaded(_ chunk: [Float], overlap: Int) {
-            let n = min(overlap, output.count, chunk.count)
-            guard n > 0 else {
-                output.append(contentsOf: chunk)
-                return
-            }
-            let overlapStart = output.count - n
-            for k in 0..<n {
-                let t = Float(k) / Float(n)
-                output[overlapStart + k] = output[overlapStart + k] * (1 - t) + chunk[k] * t
-            }
-            output.append(contentsOf: chunk[n...])
-        }
-
-        // 직전에 append된 런이 무음 없이 끝났고(=다음 런과 바로 이어붙을 수 있고), 크로스페이드
-        // 대상이 될 수 있도록 자기 끝을 페이드아웃하지 않은 채로 끝났는지.
-        var previousRunEndsAdjacentUnfaded = false
-
-        var i = startIndex
-        while i < melodySteps.count {
+        // 105절까지 있던 간격 브리징/런 묶음/크로스페이드를 전부 걷어내고, 가장 단순한 형태로
+        // 되돌렸다(106절) — "노래가 빠를수록(=음 전환이 잦을수록) 화음이 더 밀린다"는 실기기
+        // 제보 때문. 그 복잡한 로직들이 전환 횟수에 비례해서 아주 미세한 오차를 누적시켰을
+        // 가능성이 높다고 판단(정확한 버그 지점은 특정 못 함 — 사용자가 "더 이상의 오류는
+        // 없었으면 좋겠다"며 명시적으로 되돌리기를 요청). 이제 멜로디 스텝 하나하나를 완전히
+        // 독립적으로, 자기 자신의 시작 시각·길이 그대로만 피치시프트해서 순서대로 이어붙인다 —
+        // 화음의 타이밍이 항상 멜로디 스텝과 정확히 1:1로 대응해서, 전환이 아무리 많아도
+        // 누적되어 어긋날 여지가 구조적으로 없다. 대신 "한 음을 길게 끌었는데 중간에 살짝
+        // 끊겨 들리는" 정도는 다시 나올 수 있지만(98·99·104·105절이 다루던 문제), 지금 겪는
+        // "밀림"보다는 덜 거슬리는 문제라 트레이드오프로 받아들인다. 이 되돌린 로직들은 git
+        // 히스토리(99·104·105절 커밋)에 그대로 남아있어 필요하면 다시 가져올 수 있다.
+        for i in startIndex..<melodySteps.count {
             let step = melodySteps[i]
-            guard let onset = step.onsetTime, let duration = step.duration, duration > 0 else {
-                i += 1
-                continue
-            }
+            guard let onset = step.onsetTime, let duration = step.duration, duration > 0 else { continue }
             let segStart = max(0, Int(onset * rate))
             let segEnd = min(bufferEnd, Int((onset + duration) * rate))
-            guard segStart < segEnd else {
-                i += 1
-                continue
-            }
+            guard segStart < segEnd else { continue }
 
-            guard let target = step.harmony?.first(where: { $0.interval == interval }) else {
-                // 이 성부의 화음이 없는 스텝(쉼표) — 무음.
-                if segStart > cursor {
-                    output.append(contentsOf: [Float](repeating: 0, count: segStart - cursor))
-                }
-                output.append(contentsOf: [Float](repeating: 0, count: segEnd - segStart))
-                cursor = segEnd
-                previousRunEndsAdjacentUnfaded = false
-                i += 1
-                continue
-            }
-
-            let hasGapBeforeThisRun = segStart > cursor
-            if hasGapBeforeThisRun {
+            if segStart > cursor {
                 output.append(contentsOf: [Float](repeating: 0, count: segStart - cursor))
             }
-            let shouldCrossfadeIn = previousRunEndsAdjacentUnfaded && !hasGapBeforeThisRun
 
-            // 이 스텝부터 시작해서, "같은 멜로디 음 + 브리징 가능한 간격"으로 이어지는 다음
-            // 스텝들을 계속 흡수한다 — 원래 여러 스텝으로 갈라져 있던 하나의 held 음을 런
-            // (run) 하나로 묶어서, 이 런 전체를 한 번의 피치시프트 호출로 처리한다(런 안쪽엔
-            // 페이드가 전혀 없다). v1 화성 모델(102절)에서는 같은 멜로디 음이면 화음 목표도
-            // 항상 같으므로, 멜로디 음이 같은지만 확인하면 충분하다.
-            var runEnd = segEnd
-            var j = i + 1
-            while j < melodySteps.count {
-                let nextStep = melodySteps[j]
-                guard let nextOnset = nextStep.onsetTime, let nextDuration = nextStep.duration, nextDuration > 0,
-                      nextStep.midiNote == step.midiNote else { break }
-                let nextSegStart = max(0, Int(nextOnset * rate))
-                let nextSegEnd = min(bufferEnd, Int((nextOnset + nextDuration) * rate))
-                guard nextSegStart < nextSegEnd, nextSegStart - runEnd <= maxBridgeableGapSamples else { break }
-                runEnd = nextSegEnd
-                j += 1
-            }
-
-            // 다음 스텝(다른 음이어도 상관없다)이 무음 간격 없이 바로 이어지고 그 성부의
-            // 화음도 있으면, 여기서 페이드아웃하지 않고 다음 런과 크로스페이드로 잇는다.
-            var shouldCrossfadeOut = false
-            if j < melodySteps.count, let nextOnset = melodySteps[j].onsetTime, let nextDuration = melodySteps[j].duration, nextDuration > 0 {
-                let nextSegStart = max(0, Int(nextOnset * rate))
-                let nextSegEnd = min(bufferEnd, Int((nextOnset + nextDuration) * rate))
-                if nextSegStart < nextSegEnd, nextSegStart <= runEnd,
-                   melodySteps[j].harmony?.first(where: { $0.interval == interval }) != nil {
-                    shouldCrossfadeOut = true
-                }
-            }
-
-            // 크로스페이드로 이어붙일 땐, 직전 런이 이미 자기 몫으로 처리한 꼬리 구간
-            // (crossfadeCount 샘플)을 이 런도 한 번 더 원본에서 끌어와 자기 비율로 다시
-            // 피치시프트한다 — 같은 원본을 두 배율로 각각 렌더링한 뒤 그 겹치는 구간만
-            // 섞는 게 진짜 크로스페이드다. 이렇게 "겹쳐서 빌려온" 만큼을 뒤에서
-            // `appendCrossfaded`가 다시 걷어내므로(섞은 뒤 청크 앞부분을 버림), 트랙 전체
-            // 길이(=`recentVoiceBuffer`와의 샘플 대 샘플 대응)는 그대로 보존된다.
-            let overlapBorrowed = shouldCrossfadeIn ? min(crossfadeCount, segStart) : 0
-            let runRaw = Array(recentVoiceBuffer[(segStart - overlapBorrowed)..<runEnd])
-            let chunk = pitchShiftedChunk(
-                raw: runRaw,
-                sourceMIDINote: step.midiNote,
-                targetFrequency: target.frequency,
-                fadeIn: !shouldCrossfadeIn,
-                fadeOut: !shouldCrossfadeOut
-            )
-            if shouldCrossfadeIn {
-                appendCrossfaded(chunk, overlap: overlapBorrowed)
+            let segment = Array(recentVoiceBuffer[segStart..<segEnd])
+            if let target = step.harmony?.first(where: { $0.interval == interval }) {
+                let ratio = target.frequency / NoteNameConverter.frequency(forMIDINote: step.midiNote)
+                let shifted = PitchShifter.shift(samples: segment, pitchRatio: ratio, formantRatio: interval.formantRatio, sampleRate: rate)
+                let doubled = isVoiceDoublingEnabled ? VoiceDoubler.apply(to: shifted, sampleRate: rate, interval: interval) : shifted
+                output.append(contentsOf: AudioGain.applyFadeInOut(doubled, fadeSampleCount: min(segmentFadeCount, doubled.count / 2)))
             } else {
-                output.append(contentsOf: chunk)
+                output.append(contentsOf: [Float](repeating: 0, count: segment.count))
             }
-            cursor = runEnd
-            previousRunEndsAdjacentUnfaded = shouldCrossfadeOut
-            i = j
+            cursor = segEnd
         }
 
         if cursor < bufferEnd {
