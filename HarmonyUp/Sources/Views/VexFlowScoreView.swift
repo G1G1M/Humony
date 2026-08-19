@@ -32,6 +32,16 @@ struct VexFlowScoreView: UIViewRepresentable {
     /// 실기기에서 웹뷰 프로세스 자체가 늦게 뜨는 경우(76절)가 있어서, 이 시간 동안 화면이 그냥
     /// 비어 보이면 "먹통인가?" 싶을 수 있다. 호출부가 이 값으로 로딩 표시를 겹쳐 보여준다.
     @Binding var isRendering: Bool
+    /// 악보 "내용"이 실제로 바뀔 때만 올라가는 세대 번호 — 호출부가 `melodySteps`를 새로
+    /// 채우거나(applyQuickRecordResult) `mutedVoices`가 바뀔 때만 증가시킨다. 예전엔
+    /// `buildPayload()`가 만드는 JSON 문자열을 매번(재생 중엔 재생헤드 타이머 때문에 초당
+    /// 최대 20번) 다시 만들어서 이전 문자열과 통째로 비교했는데 — 실기기 재생 테스트에서
+    /// "악보가 이미 만들어졌는데도 로딩 표시가 재생 중 계속 뜬다"는 제보를 받았다(93절, 코드
+    /// 추적만으론 정확한 재현 경로를 못 찾음). 정수 하나만 비교하는 이 방식이면 "다시 그려야
+    /// 하는지" 판단이 문자열 직렬화 결과에 기대지 않고 오직 명시적으로 버전을 올린 시점에만
+    /// 참이 되므로, 그 의심 경로 자체를 구조적으로 없앤다 — 겸사겸사 내용이 안 바뀐 매 프레임마다
+    /// RhythmQuantizer+JSONEncoder를 헛되이 돌리던 것도 없어져서 재생 중 CPU 부담도 줄어든다.
+    let contentVersion: Int
 
     /// 카드에 줄 고정 높이 — "너무 작다"는 실기기 피드백으로 키웠다(docs/CONCEPTS.md 58절).
     /// 4성부가 전부 나올 때 필요한 높이보다는 작을 수 있는데, `score.html`이 세로 스크롤도
@@ -71,7 +81,13 @@ struct VexFlowScoreView: UIViewRepresentable {
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
-        context.coordinator.pendingPayload = buildPayload()
+        // 버전이 실제로 안 바뀌었으면(재생 중 activeStepIndex만 바뀌는 대부분의 호출) 굳이
+        // buildPayload()를 다시 돌리지 않는다 — 문자열을 만들어봤자 아래에서 안 쓰고 버려질
+        // 게 뻔하니, 판단 자체를 버전 비교(정수)로 먼저 끝낸다.
+        if context.coordinator.lastRenderedVersion != contentVersion {
+            context.coordinator.pendingPayload = buildPayload()
+        }
+        context.coordinator.pendingVersion = contentVersion
         context.coordinator.pendingStepIndex = activeStepIndex
         context.coordinator.onNoteTapped = onSeekToStep
         context.coordinator.isRenderingBinding = $isRendering
@@ -87,13 +103,14 @@ struct VexFlowScoreView: UIViewRepresentable {
         // 핸들러를 명시적으로 떼어낸다.
         weak var contentController: WKUserContentController?
         var pendingPayload: String?
+        var pendingVersion: Int?
         var pendingStepIndex: Int?
         var onNoteTapped: ((Int) -> Void)?
         var isRenderingBinding: Binding<Bool>?
         private var isPageLoaded = false
-        // 마지막으로 실제 renderScore를 호출한 페이로드 — 이 값이 그대로면(하이라이트만 움직인
+        // 마지막으로 실제 renderScore를 호출한 버전 — 이 값이 그대로면(하이라이트만 움직인
         // 경우) 악보를 다시 그리지 않고 setActiveStep만 부른다.
-        private var lastRenderedPayload: String?
+        var lastRenderedVersion: Int?
         // 마지막으로 실제 setActiveStep(...)을 보낸 스텝 인덱스 — 재생 중엔 SwiftUI가
         // activePlaybackStepIndex 말고 다른 상태(예: statusText) 변화로도 body를 재평가해서
         // updateUIView가 초당 최대 20번(재생헤드 타이머 주기)까지 불릴 수 있는데, 같은 인덱스를
@@ -150,14 +167,13 @@ struct VexFlowScoreView: UIViewRepresentable {
         }
 
         func renderIfReady() {
-            guard isPageLoaded, let webView, let payload = pendingPayload else { return }
-            if payload != lastRenderedPayload {
+            guard isPageLoaded, let webView else { return }
+            // 세대 번호(pendingVersion)가 다를 때만 다시 그린다 — 재생 중 대부분의 호출은
+            // activeStepIndex만 바뀐 것이라 버전이 그대로고, 이땐 `pendingPayload`도 애초에
+            // nil이다(updateUIView가 버전이 그대로면 payload를 만들지 않고 건너뛴다).
+            if pendingVersion != lastRenderedVersion, let payload = pendingPayload {
                 #if DEBUG
-                // "이미 렌더링된 악보인데 재생 중 로딩 표시가 계속 뜬다"는 실기기 제보 진단용 —
-                // 정상이라면 이 로그가 재생 중(스텝이 바뀔 때마다)엔 찍히지 않아야 한다. 만약
-                // 재생 중에도 반복해서 찍힌다면 payload(voices/mutedVoices 등)가 실제로 매번
-                // 달라지고 있다는 뜻이라 원인을 좁힐 수 있다.
-                print("[VexFlowScoreView] payload 변경 감지 — 악보 다시 그림 (이전 길이: \(lastRenderedPayload?.count ?? -1), 새 길이: \(payload.count))")
+                print("[VexFlowScoreView] 버전 변경 감지(\(String(describing: lastRenderedVersion)) -> \(String(describing: pendingVersion))) — 악보 다시 그림")
                 #endif
                 renderGeneration += 1
                 let generation = renderGeneration
@@ -168,7 +184,8 @@ struct VexFlowScoreView: UIViewRepresentable {
                     #endif
                     self?.finishRendering(generation: generation)
                 }
-                lastRenderedPayload = payload
+                lastRenderedVersion = pendingVersion
+                pendingPayload = nil // 다 썼으니 다음 판단에서 실수로 재사용되지 않게 비운다
                 // 방금 새로 그린 악보는 JS 쪽 noteState.activeIndex가 nil로 초기화돼 있다
                 // (render.js의 renderScore) — Swift 쪽 dedup 기록도 같이 리셋해서, 아래
                 // setActiveStep이 "값은 그대로니까 생략"하지 않고 반드시 한 번은 다시 보내게 한다.

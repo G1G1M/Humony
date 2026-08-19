@@ -116,6 +116,11 @@ struct PracticeView: View {
     // 첫 렌더가 끝날 때까지는 화면이 비어 보이는 대신 "만드는 중" 표시를 겹쳐 보여준다.
     // VexFlowScoreView.Coordinator가 renderScore 자바스크립트 호출이 끝나면 false로 되돌린다.
     @State var isScoreRendering = true
+    // 악보 "내용"이 실제로 바뀔 때만 올라가는 세대 번호 — `VexFlowScoreView.contentVersion`으로
+    // 그대로 전달된다. 재생 중엔 activePlaybackStepIndex만 바뀌어서 body가 초당 최대 20번
+    // 재평가돼도 이 값은 그대로라야 한다 — applyQuickRecordResult(새 녹음 반영)와 mutedVoices
+    // 변경(.onChange, 아래 body) 두 곳에서만 올린다.
+    @State var scoreContentVersion = 0
     // 악보 카드는 다른 카드들과 나란히 있어서 고정 높이 안에 좁게 보인다 — 렌더링이 제대로
     // 되는지 크게 확인하고 싶을 때 이 상태로 전체화면 뷰(SheetMusicFullScreenView)를 띄운다.
     @State var showingFullScreenScore = false
@@ -198,6 +203,9 @@ struct PracticeView: View {
         }
         .onChange(of: activePlaybackStepIndex) { _, newIndex in
             triggerStepHaptic(for: newIndex)
+        }
+        .onChange(of: mutedVoices) { _, _ in
+            scoreContentVersion += 1
         }
         .onAppear {
             #if DEBUG

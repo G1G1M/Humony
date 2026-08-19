@@ -269,6 +269,7 @@ extension PracticeView {
         // "다시 녹음"으로 새 악보 내용이 들어올 때도 다시 "만드는 중" 표시부터 보여준다 —
         // VexFlowScoreView.Coordinator가 새 페이로드의 renderScore 호출이 끝나면 false로 되돌림.
         isScoreRendering = true
+        scoreContentVersion += 1
         downbeatStepIndices = Self.downbeatStepIndices(from: melodySteps)
 
         // "내 목소리로 화음"/채점 카드가 그대로 재사용하는 recentVoiceBuffer를 녹음 전체로 채운다 —

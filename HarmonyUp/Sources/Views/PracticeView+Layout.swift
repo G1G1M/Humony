@@ -388,7 +388,8 @@ extension PracticeView {
                 mutedVoices: $mutedVoices,
                 activeStepIndex: activePlaybackStepIndex,
                 onSeekToStep: { seekPlayback(toStep: $0) },
-                isRendering: $isScoreRendering
+                isRendering: $isScoreRendering,
+                contentVersion: scoreContentVersion
             )
             if isScoreRendering {
                 VStack(spacing: Theme.Spacing.sm) {

@@ -17,6 +17,9 @@ struct SheetMusicFullScreenView: View {
     // 이 화면은 열릴 때마다 새 WKWebView를 만드니(PracticeView와 별개 인스턴스) 항상 true로
     // 시작 — 로딩 표시 원리는 PracticeView.isScoreRendering과 동일(76절 후속).
     @State private var isScoreRendering = true
+    // VexFlowScoreView.contentVersion — 여기선 mutedVoices가 바뀔 때만 다시 그리면 된다
+    // (steps는 이 화면이 열려 있는 동안 고정값). 자세한 이유는 PracticeView.scoreContentVersion 참고.
+    @State private var scoreContentVersion = 0
 
     var body: some View {
         NavigationStack {
@@ -49,7 +52,7 @@ struct SheetMusicFullScreenView: View {
                 // 탭-재생은 여기서는 아직 다루지 않는다(한 번에 하나씩 순서대로 만드는 이
                 // 프로젝트의 방식 그대로, 74절) — 다음 단계에서 이어붙인다.
                 ZStack {
-                    VexFlowScoreView(steps: steps, mutedVoices: $mutedVoices, activeStepIndex: nil, onSeekToStep: { _ in }, isRendering: $isScoreRendering)
+                    VexFlowScoreView(steps: steps, mutedVoices: $mutedVoices, activeStepIndex: nil, onSeekToStep: { _ in }, isRendering: $isScoreRendering, contentVersion: scoreContentVersion)
                     if isScoreRendering {
                         VStack(spacing: Theme.Spacing.sm) {
                             ProgressView()
@@ -67,6 +70,9 @@ struct SheetMusicFullScreenView: View {
             // P1). 크롬은 다른 화면들과 같은 시스템 배경을 쓰고, 오선지의 흰 종이만 그 안에서
             // 도드라지게 남긴다.
             .background(Color(uiColor: .systemGroupedBackground))
+            .onChange(of: mutedVoices) { _, _ in
+                scoreContentVersion += 1
+            }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
