@@ -67,7 +67,6 @@ struct SheetMusicFullScreenView: View {
             // P1). 크롬은 다른 화면들과 같은 시스템 배경을 쓰고, 오선지의 흰 종이만 그 안에서
             // 도드라지게 남긴다.
             .background(Color(uiColor: .systemGroupedBackground))
-            .navigationTitle("악보")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {

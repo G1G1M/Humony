@@ -46,7 +46,6 @@ extension PracticeView {
                     .animation(.easeOut(duration: 0.3), value: hasHarmony)
                 }
                 .background(Color(uiColor: .systemGroupedBackground))
-//                .navigationTitle("연습")
                 // 카드가 막 나타난 시점에 화면 아래로 스크롤해서, "방금 뭐가 생겼다"는 걸
                 // 사용자가 놓치지 않고 바로 보게 한다. hasCapturedNote와 hasHarmony는 거의
                 // 항상 같은 순간에 함께 true가 되므로(applyQuickRecordResult가 한 번에 둘 다
@@ -81,7 +80,6 @@ extension PracticeView {
                 }
             }
             .background(Color(uiColor: .systemGroupedBackground))
-//            .navigationTitle("연습")
             .toolbar {
                 if hasCapturedNote {
                     ToolbarItem(placement: .topBarLeading) {

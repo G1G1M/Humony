@@ -55,7 +55,6 @@ struct HistoryView: View {
                 .frame(maxWidth: .infinity)
             }
             .background(Color(uiColor: .systemGroupedBackground))
-            .navigationTitle("기록")
         }
     }
 
