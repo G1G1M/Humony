@@ -89,9 +89,10 @@ extension PracticeView {
         let startIndex = startStepIndex ?? 0
         guard melodySteps.indices.contains(startIndex) else { return [] }
 
-        // 세그먼트 경계에서 나는 클릭음을 없애는 짧은 페이드 — 트랙 전체에 거는 fade보다
-        // 훨씬 짧게(1/3 정도)만 줘서, 음이 여러 개 짧게 이어질 때 소리가 너무 죽지 않게 한다.
-        let segmentFadeCount = max(1, Int(rate * voiceClipFadeDuration / 3))
+        // 세그먼트 경계에서 나는 클릭음을 없애는 짧은 페이드 — 클릭 방지에 필요한 최소한만
+        // 쓴다(harmonySegmentFadeDuration 선언부 참고 — 너무 길면 매 음의 공격이 부드러워져
+        // "화음이 박자보다 밀려 들린다"는 인상을 만든다).
+        let segmentFadeCount = max(1, Int(rate * harmonySegmentFadeDuration))
         let bufferEnd = recentVoiceBuffer.count
         var output: [Float] = []
         var cursor = max(0, min(bufferEnd, Int(startTime * rate)))

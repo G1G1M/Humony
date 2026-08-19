@@ -147,6 +147,14 @@ struct PracticeView: View {
     // 목소리 화음 재생 시작/끝에 적용할 페이드 길이 — 녹음 구간은 원본 파형의 임의 지점에서
     // 시작/끝나서, 그대로 재생하면 클릭음이 날 수 있다(AudioGain 참고).
     let voiceClipFadeDuration: Double = 0.015
+    // harmonizedTrack이 음(세그먼트)마다 거는 페이드 — 예전엔 위 voiceClipFadeDuration의
+    // 1/3(~5ms)을 그대로 썼는데, 실기기 청취 피드백("멜로디음보다 박자가 늦게 들린다")의
+    // 원인이 이거였다: 멜로디(recorded)는 녹음 전체 시작/끝에만 한 번 페이드가 걸리는데,
+    // 화음 성부는 음 하나하나마다 매번 이 페이드를 다시 타서 모든 공격(attack)이 매번
+    // 살짝 부드럽게 시작한다 — 그 미세한 지연이 음마다 누적돼 "화음이 박자보다 밀려서
+    // 들린다"는 인상을 만들었다. 클릭음 방지에 필요한 최소한(2ms)까지만 줄였다 — 이보다
+    // 짧으면 세그먼트 경계의 진폭 불연속이 다시 들릴 위험이 있다.
+    let harmonySegmentFadeDuration: Double = 0.002
 
     let audioCapture = AudioCapture()
     let melodySession = MelodySession()

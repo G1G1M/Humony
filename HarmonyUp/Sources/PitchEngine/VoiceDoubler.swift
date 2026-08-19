@@ -59,20 +59,45 @@ enum VoiceDoubler {
     /// 재생 속도를 바꾸듯 원본을 `ratio`배 빠르게(피치는 올라가고 길이는 짧아짐) 또는 느리게
     /// (피치는 내려가고 길이는 길어짐) 읽어서 리샘플한다 — 옛날 테이프 ADT가 속도를 살짝
     /// 흔들던 것과 같은 원리를 그대로 구현한 것.
+    ///
+    /// 선형 보간(직선으로 두 점을 잇는 것) 대신 Catmull-Rom 3차 보간(앞뒤 네 점을 지나는
+    /// 부드러운 곡선)을 쓴다 — "성부가 기계음처럼 들린다"는 실기기 피드백 조사 중 발견:
+    /// 선형 보간은 고주파수 성분에 계단 모양 잡음(그레인/앨리어싱 느낌)을 섞는데, 이미
+    /// WORLD 포먼트 워핑을 거쳐 한 번 가공된 신호에 또 한 번 이런 거친 보간을 더하면 그
+    /// 거칠기가 누적된다. Catmull-Rom은 4점을 보고 매끄러운 곡선을 그려서 이 계단 잡음을
+    /// 크게 줄인다 — 연산량은 늘지만(점마다 3차 다항식 하나) 성부당 한 번, 세그먼트 단위로만
+    /// 도는 정도라 실시간성에 영향은 없다.
     private static func resamplePitch(_ samples: [Float], ratio: Double) -> [Float] {
         guard ratio > 0, !samples.isEmpty else { return samples }
         let outputCount = max(1, Int(Double(samples.count) / ratio))
         var output = [Float](repeating: 0, count: outputCount)
+        let lastIndex = samples.count - 1
         for i in 0..<outputCount {
             let sourcePosition = Double(i) * ratio
-            let index0 = Int(sourcePosition)
-            guard index0 < samples.count - 1 else {
-                output[i] = index0 < samples.count ? samples[index0] : 0
+            let index1 = Int(sourcePosition)
+            guard index1 < lastIndex else {
+                output[i] = index1 <= lastIndex ? samples[index1] : 0
                 continue
             }
-            let fraction = Float(sourcePosition - Double(index0))
-            output[i] = samples[index0] * (1 - fraction) + samples[index0 + 1] * fraction
+            let fraction = Float(sourcePosition - Double(index1))
+            let index0 = max(0, index1 - 1)
+            let index2 = index1 + 1
+            let index3 = min(lastIndex, index1 + 2)
+            output[i] = catmullRom(samples[index0], samples[index1], samples[index2], samples[index3], fraction)
         }
         return output
+    }
+
+    /// Catmull-Rom 스플라인 — p1과 p2 사이를 t(0~1)로 보간하되, 앞뒤 이웃(p0, p3)의 기울기까지
+    /// 반영해서 두 점을 직선이 아니라 부드러운 곡선으로 잇는다. 표준 공식.
+    private static func catmullRom(_ p0: Float, _ p1: Float, _ p2: Float, _ p3: Float, _ t: Float) -> Float {
+        let t2 = t * t
+        let t3 = t2 * t
+        return 0.5 * (
+            (2 * p1)
+            + (-p0 + p2) * t
+            + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2
+            + (-p0 + 3 * p1 - 3 * p2 + p3) * t3
+        )
     }
 }

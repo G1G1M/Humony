@@ -315,16 +315,38 @@ enum MelodySegmenter {
 
     // MARK: - 6단계: 흡수 이후 붙어버린 동일 음높이 병합
 
+    /// 두 같은 음높이 사이의 시간 간격이 이보다 짧으면 "진짜로 붙어있던 한 음"(아래 참고)으로
+    /// 보고 병합하고, 이보다 길면 정말로 다시 부른 별개의 음으로 보고 병합하지 않는다.
+    /// `absorbShortRuns`가 짧은 과도구간(잡음)을 흡수하고 나면 그 과도구간을 사이에 두고
+    /// 있던 두 동일음은 간격이 정확히 0에 가깝게 붙는다(runLengthEncode가 윈도우 인덱스
+    /// 기준으로 빈틈없이 잘라내므로) — 반면 진짜 무음(숨쉬기/쉼)을 두고 같은 음을 두 번 부른
+    /// 경우엔 그 무음 구간의 실제 길이만큼 간격이 남는다. 0.05초는 디바운스 최소 단위
+    /// (streakRequired*hop/sampleRate, 기본 설정 기준 약 35ms)보다 여유 있게 위, 사람이
+    /// 두 번 다시 부른 것으로 지각하기 시작하는 길이보다는 한참 아래로 잡았다.
+    static let sameNoteMergeGapThreshold: Double = 0.05
+
     /// `absorbShortRuns`가 짧은 과도구간을 이웃으로 흡수하고 나면, 그 과도구간을 사이에 두고
     /// 있던 두 이웃이 서로 같은 음높이인 경우 바로 옆에 붙게 된다 — 예: "도(C3) - 순간 잡음(B2,
     /// 3윈도우) - 도(C3)"에서 잡음을 앞의 도로 흡수하면 "도, 도" 두 개가 나란히 남는데, 원래
     /// 하나로 이어 부른 같은 음이므로 이것도 하나로 합쳐야 한다(실기기 로그로 실제 확인한 패턴).
+    ///
+    /// **주의**: 예전엔 간격을 안 보고 같은 음높이면 무조건 합쳤다 — 그러면 사용자가 숨을
+    /// 쉬며 같은 음을 "도... (쉼)... 도"처럼 정말로 두 번 다시 불러도 그 사이 무음까지 통째로
+    /// 하나의 긴 음으로 뭉개져서, 악보에도 화음 재생에도 "사실은 두 번 불렀다"는 정보가
+    /// 사라졌다("화음이 밀려서/이상하게 들린다"는 계열 피드백과 별개로, 악보에서 같은 음이
+    /// 이어진 건지 다시 부른 건지 구별이 안 된다는 지적으로 발견). 이제 간격이
+    /// `sameNoteMergeGapThreshold`보다 클 때는 병합하지 않고 별개 음으로 남긴다.
     static func mergeAdjacentSamePitch(_ notes: [SegmentedNote]) -> [SegmentedNote] {
         guard notes.count > 1 else { return notes }
 
         var result: [SegmentedNote] = [notes[0]]
         for note in notes.dropFirst() {
             guard let last = result.last, last.midiNote == note.midiNote else {
+                result.append(note)
+                continue
+            }
+            let gap = note.onsetTime - (last.onsetTime + last.duration)
+            guard gap <= sameNoteMergeGapThreshold else {
                 result.append(note)
                 continue
             }
