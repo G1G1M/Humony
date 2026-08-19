@@ -52,6 +52,15 @@ struct VexFlowScoreView: UIViewRepresentable {
         webView.backgroundColor = .white
         webView.scrollView.backgroundColor = .white
         webView.scrollView.bounces = false
+        // 명세서(v1.0) "WKWebView 제스처 독립화" — 악보는 가로(음표 흐름)/세로(성부가 많아
+        // 카드 높이를 넘칠 때) 둘 다 스크롤 가능한데(score.html #scoreWrapper), 컴팩트
+        // 레이아웃에서는 이 웹뷰가 SwiftUI의 세로 ScrollView 안에 얹혀 있다. 방향 잠금을 켜서
+        // 손가락이 처음 움직인 방향(가로/세로)으로만 이 안쪽 스크롤이 반응하게 하면, 대각선
+        // 드래그 때 안쪽·바깥쪽 스크롤이 동시에 애매하게 반응하는 걸 줄일 수 있다.
+        webView.scrollView.isDirectionalLockEnabled = true
+        // 기본값(true)은 터치 시작 후 일정 시간 지나야 콘텐츠가 반응한다 — 음표 탭
+        // 히트 영역(addTapRegions)이 "딜레이 없이 즉시" 반응해야 하는 요구사항과 맞지 않아 끈다.
+        webView.scrollView.delaysContentTouches = false
         webView.navigationDelegate = context.coordinator
 
         if let url = Bundle.main.url(forResource: "score", withExtension: "html") {

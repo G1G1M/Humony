@@ -37,6 +37,38 @@ var noteState = {
   activeIndex: null
 };
 
+// 명세서(v1.0) "부드러운 연속 스크롤" — 애플 뮤직 가사 뷰처럼 재생 중인 음표가 화면 중앙에
+// 오도록 scoreWrapper를 자동으로 스크롤한다. 사용자가 손가락으로 직접 스와이프하는 동안은
+// (탐색하고 싶어서 만진 것이므로) 자동 스크롤이 끼어들면 안 되니, touchstart~touchend 구간
+// 동안은 건너뛴다 — 손을 떼면 다음 setActiveStep 호출(다음 음으로 넘어가는 시점) 때 자동으로
+// 다시 따라붙는다.
+var isUserTouching = false;
+
+function initAutoScrollTouchTracking() {
+  var wrapper = document.getElementById('scoreWrapper');
+  if (!wrapper) return;
+  wrapper.addEventListener('touchstart', function () { isUserTouching = true; }, { passive: true });
+  wrapper.addEventListener('touchend', function () { isUserTouching = false; }, { passive: true });
+  wrapper.addEventListener('touchcancel', function () { isUserTouching = false; }, { passive: true });
+}
+
+// 활성 스텝의 x좌표(원래 크기 단위)를 화면 중앙에 오도록 scoreWrapper를 스크롤한다.
+// stepX[index]는 그 음표의 왼쪽 경계 근처 좌표라 정확한 중심은 아니지만, 음표 폭 자체가
+// 작아서(악보 전체 폭 대비) 이 정도 근사로도 "중앙 근처"로 충분히 자연스럽게 보인다.
+function scrollActiveStepIntoView(index) {
+  if (isUserTouching) return;
+  var wrapper = document.getElementById('scoreWrapper');
+  if (!wrapper || index === null || index === undefined) return;
+  var x = noteState.stepX[index];
+  if (x === undefined) return;
+
+  var pixelX = x * noteState.scale;
+  var target = pixelX - wrapper.clientWidth / 2;
+  var maxScroll = Math.max(0, wrapper.scrollWidth - wrapper.clientWidth);
+  target = Math.max(0, Math.min(maxScroll, target));
+  wrapper.scrollTo({ left: target, behavior: 'smooth' });
+}
+
 // el 자신과 그 자손 중 fill/stroke 속성을 가진 노드를 전부 찾아 색을 바꾼다. VexFlow가 그릴 때
 // 색을 각 path에 직접 attribute로 굽기 때문에, 부모 그룹의 색만 바꿔서는 상속되지 않는다(DOM을
 // 직접 확인해서 이렇게 결정 — docs/CONCEPTS.md 74절).
@@ -58,6 +90,7 @@ function setActiveStep(index) {
   }
   noteState.activeIndex = (index === null || index === undefined) ? null : index;
   if (noteState.activeIndex === null) return;
+  scrollActiveStepIntoView(noteState.activeIndex);
   var elements = noteState.stepElements[noteState.activeIndex];
   if (!elements) return;
   elements.forEach(function (el) { recolor(el, ACTIVE_NOTE_COLOR); });
@@ -299,3 +332,7 @@ function renderScore(data) {
 
 window.renderScore = renderScore;
 window.setActiveStep = setActiveStep;
+
+// score.html이 body 끝에서 이 스크립트를 로드하므로 #scoreWrapper는 이미 DOM에 있다 —
+// scoreWrapper 자체는 renderScore가 다시 그려도 재생성되지 않는 고정 컨테이너라 한 번만 걸면 된다.
+initAutoScrollTouchTracking();

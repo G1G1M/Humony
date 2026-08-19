@@ -2277,3 +2277,27 @@ Swift의 `private`는 "같은 타입"이 아니라 "같은 파일"을 기준으�
 ### 검증
 
 `xcodegen generate`로 새 파일들을 프로젝트에 등록한 뒤 시뮬레이터 빌드+유닛테스트 120개 통과 확인. 중복 심볼(`VoiceToggleChip`이 두 곳에 선언되는 등)이 없는지 grep으로도 재확인. **실기기 확인은 아직 안 함.**
+
+## 90. 기능 명세서(v1.0) 2단계 반영 — 연속 스크롤(카라오케식) + WKWebView 제스처 독립화
+
+### 배경
+
+88절에 이어 명세서 "2단계: 악보 확인 및 오디오 재생" 중 "부드러운 연속 스크롤"과 "WKWebView 제스처 독립화" 두 항목을 반영했다(음표 탭 즉시 재생은 이미 구현돼 있었음 — `onSeekToStep`).
+
+### 연속 스크롤
+
+`render.js`의 `setActiveStep(index)`가 하이라이트를 칠하기 직전에 `scrollActiveStepIntoView(index)`를 호출한다. 이미 있던 `stepX[index]`(그 스텝 음표의 x좌표, scale 곱하기 전)를 재사용해서 `scoreWrapper.scrollTo({ left: ..., behavior: 'smooth' })`로 그 지점이 wrapper 중앙에 오도록 스크롤한다 — 새 좌표 계산이나 DOM 재조회 없이 기존 캐시를 그대로 쓴 것.
+
+**수동 스와이프 보장**: `touchstart`~`touchend`(또는 `touchcancel`) 구간 동안 `isUserTouching` 플래그를 켜서, 사용자가 직접 만지고 있는 동안은 `scrollActiveStepIntoView`가 아무것도 안 하고 조용히 리턴한다. 손을 떼면 다음 `setActiveStep` 호출(다음 스텝으로 재생이 넘어가는 시점)에 자동으로 다시 따라붙는다 — 별도의 "몇 초 뒤 자동 재개" 타이머 없이, 다음 자연스러운 이벤트가 곧 재개 시점이 되는 단순한 구조.
+
+### WKWebView 제스처 독립화(부분 대응)
+
+`VexFlowScoreView.makeUIView`에 두 가지 추가:
+- `scrollView.isDirectionalLockEnabled = true` — 손가락이 처음 움직인 방향(가로/세로)으로만 안쪽 스크롤이 반응하게 잠가서, 컴팩트 레이아웃(이 웹뷰가 SwiftUI 세로 `ScrollView` 안에 얹힘)에서 대각선 드래그 시 안쪽/바깥쪽 스크롤이 동시에 애매하게 반응하는 걸 줄인다.
+- `scrollView.delaysContentTouches = false` — 기본값(true)은 스크롤 판정을 위해 터치 반응을 살짝 지연시키는데, 음표 탭 히트 영역(`addTapRegions`)이 "딜레이 없이 즉시" 반응해야 하는 명세서 요구와 맞지 않아 껐다.
+
+**한계**: 안쪽 웹뷰 스크롤 제스처 인식기(`UIScrollView.panGestureRecognizer`)와 바깥 SwiftUI `ScrollView`의 제스처 인식기를 명시적으로 `require(toFail:)` 관계로 묶는 완전한 해결은, SwiftUI `ScrollView`가 내부 제스처 인식기를 직접 노출하지 않아서 이번 범위에서는 하지 않았다. 위 두 설정은 iOS가 표준으로 제공하는 선에서의 개선이고, 실사용 중 여전히 충돌이 체감되면 더 깊은 커스텀 제스처 델리게이트가 필요할 수 있다.
+
+### 검증
+
+유닛테스트 120개 유지(JS/제스처 설정 변경이라 새 유닛테스트 대상 로직 없음), 시뮬레이터 빌드+테스트 통과. **실기기에서 스크롤 체감(부드러움, 수동 스와이프 후 재개 타이밍, 카드 내 세로 스크롤과의 충돌 여부) 확인 필요.**
