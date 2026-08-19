@@ -114,12 +114,13 @@ final class ChordGeneratorTests: XCTestCase {
         }
     }
 
-    // 성부별 상대 음량 배율(믹스 밸런스) — 바버샵 보이싱 관행대로 3도만 배경으로 살짝
-    // 낮아야 하고, 베이스/5도는 원래 음량(1.0)을 유지해야 한다.
-    func testGainKeepsThirdSlightlyRecessed() {
+    // 성부별 상대 음량 배율(믹스 밸런스) — 사용자가 "4개 성부가 다 같은 크기로 나오게 해달라,
+    // 직접 들으며 조정하겠다"고 요청해 전부 균등(1.0)으로 되돌렸다(바버샵풍으로 3도만 살짝
+    // 낮추던 이전 값 폐기).
+    func testGainIsEqualAcrossAllVoices() {
         XCTAssertEqual(ChordGenerator.Interval.bass.gain, 1.0)
+        XCTAssertEqual(ChordGenerator.Interval.third.gain, 1.0)
         XCTAssertEqual(ChordGenerator.Interval.fifth.gain, 1.0)
-        XCTAssertLessThan(ChordGenerator.Interval.third.gain, 1.0)
     }
 
 }
