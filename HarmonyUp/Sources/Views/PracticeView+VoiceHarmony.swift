@@ -111,7 +111,18 @@ extension PracticeView {
             if let target = step.harmony?.first(where: { $0.interval == interval }) {
                 let ratio = target.frequency / NoteNameConverter.frequency(forMIDINote: step.midiNote)
                 let shifted = PitchShifter.shift(samples: segment, pitchRatio: ratio, formantRatio: interval.formantRatio, sampleRate: rate)
-                output.append(contentsOf: AudioGain.applyFadeInOut(shifted, fadeSampleCount: min(segmentFadeCount, shifted.count / 2)))
+                // 더블링은 반드시 이 음 하나의 구간 안에서만 적용한다 — 예전엔 스텝별로 피치시프트한
+                // 조각들을 전부 이어붙인 "성부 전체 트랙"에 한 번에 더블링을 걸었는데, 그러면
+                // 각 음의 시작 지점(더블링 지연 15~35ms 구간)에 "직전 음의 피치로 지연·디튠된
+                // 복사본"이 새어 들어와서 음이 바뀔 때마다 화음이 어긋나 들렸다("화음이 안 맞는
+                // 느낌이 너무 강하다" 실사용 피드백으로 발견, 근거: VoiceDoubler.double이 델레이
+                // 오프셋만큼 과거 샘플을 그대로 참조하는데, 그 "과거"가 이 음이 아니라 이전
+                // 음이었던 것). 세그먼트 단위로만 더블링하면 지연 참조가 항상 같은 음 안에서만
+                // 일어나서 이 누출이 원천적으로 없어진다 — 대신 음 길이가 지연시간보다 짧으면
+                // (아주 빠른 음) 그 음에는 더블링 효과가 거의/전혀 안 들어가는데, 옆 음의 피치가
+                // 새어 들어오는 것보다는 이쪽이 훨씬 자연스럽다.
+                let doubled = VoiceDoubler.apply(to: shifted, sampleRate: rate, interval: interval)
+                output.append(contentsOf: AudioGain.applyFadeInOut(doubled, fadeSampleCount: min(segmentFadeCount, doubled.count / 2)))
             } else {
                 output.append(contentsOf: [Float](repeating: 0, count: segment.count))
             }
@@ -236,17 +247,19 @@ extension PracticeView {
             for (voice, interval) in [(PlaybackVoice.bass, ChordGenerator.Interval.bass),
                                        (.third, .third),
                                        (.fifth, .fifth)] where !muted.contains(voice) {
-                let shifted: [Float]
-                if let full = precomputed[interval] {
-                    shifted = Array(full[min(startSampleIndex, full.count)...])
-                } else {
-                    shifted = harmonizedTrack(interval: interval, startStepIndex: startStepIndex, startTime: startTime, rate: rate)
-                }
-                guard !shifted.isEmpty else { continue }
-                // 성부마다 다른 지연/디튠으로 더블링해서 두께를 준다 — 멜로디(원음)는 그대로 둔다.
+                // 더블링(성부마다 다른 지연/디튠으로 두께를 주는 것)은 이제 harmonizedTrack
+                // 안에서 음(세그먼트) 단위로 이미 적용돼 있다 — 여기서 트랙 전체에 한 번 더
+                // 걸면 음이 바뀔 때마다 "직전 음의 지연된 피치"가 새어 들어와 화음이 어긋나
+                // 들리던 문제(93절)가 재발한다. 멜로디(원음)는 애초에 더블링 대상이 아니다 —
                 // 이미 사용자 자신이 직접 부른 진짜 목소리라 "다른 사람이 한 번 더 부른" 효과가
                 // 필요 없고, 오히려 원음이 흔들리면 리드로서의 기준점이 흐려진다.
-                let doubled = VoiceDoubler.apply(to: shifted, sampleRate: rate, interval: interval)
+                let doubled: [Float]
+                if let full = precomputed[interval] {
+                    doubled = Array(full[min(startSampleIndex, full.count)...])
+                } else {
+                    doubled = harmonizedTrack(interval: interval, startStepIndex: startStepIndex, startTime: startTime, rate: rate)
+                }
+                guard !doubled.isEmpty else { continue }
                 // interval.gain(바버샵풍 믹스 밸런스, docs/CONCEPTS.md 리서치 섹션 B)은
                 // prepare()로 라우드니스를 이미 맞춘 뒤 상대적인 크고 작음만 마지막에 조정한다.
                 tracks.append((AudioGain.applyGain(prepare(doubled), factor: interval.gain), interval.pan))

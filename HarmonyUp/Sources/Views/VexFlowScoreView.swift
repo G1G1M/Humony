@@ -152,6 +152,13 @@ struct VexFlowScoreView: UIViewRepresentable {
         func renderIfReady() {
             guard isPageLoaded, let webView, let payload = pendingPayload else { return }
             if payload != lastRenderedPayload {
+                #if DEBUG
+                // "이미 렌더링된 악보인데 재생 중 로딩 표시가 계속 뜬다"는 실기기 제보 진단용 —
+                // 정상이라면 이 로그가 재생 중(스텝이 바뀔 때마다)엔 찍히지 않아야 한다. 만약
+                // 재생 중에도 반복해서 찍힌다면 payload(voices/mutedVoices 등)가 실제로 매번
+                // 달라지고 있다는 뜻이라 원인을 좁힐 수 있다.
+                print("[VexFlowScoreView] payload 변경 감지 — 악보 다시 그림 (이전 길이: \(lastRenderedPayload?.count ?? -1), 새 길이: \(payload.count))")
+                #endif
                 renderGeneration += 1
                 let generation = renderGeneration
                 setRendering(true)

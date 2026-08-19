@@ -43,6 +43,17 @@ var noteState = {
 // 동안은 건너뛴다 — 손을 떼면 다음 setActiveStep 호출(다음 음으로 넘어가는 시점) 때 자동으로
 // 다시 따라붙는다.
 var isUserTouching = false;
+// 실기기 재생 테스트에서 "악보 넘어가면서 소리가 날 때 렉이 걸린다"는 제보 — 원인은 음표가
+// 바뀔 때마다(빠른 8분음표면 초당 여러 번) `scrollTo({behavior:'smooth'})`를 매번 새로
+// 걸어서, 브라우저 내장 스무스 스크롤 애니메이션이 끝나기도 전에 계속 새 애니메이션으로
+// 갈아치워지는 것(애니메이션 재시작 자체가 비용이고, 재생 중 오디오 처리와 CPU를 다툰다 —
+// 84절에서 겪은 "IPC/연산이 재생 중 CPU를 다툰다" 패턴과 같은 계열). 목표 스크롤 위치가
+// 마지막으로 실제로 스크롤을 건 지점과 충분히(SCROLL_RETRIGGER_THRESHOLD픽셀 이상) 멀어졌을
+// 때만 새로 스크롤을 걸어서, 화면에 이미 보이는 근처 음표로 넘어갈 땐 애니메이션을 다시
+// 걸지 않는다 — 몇 음마다 한 번씩만 "훌쩍" 이동하지만, 그 편이 매 음마다 애니메이션을
+// 재시작하는 것보다 훨씬 부드럽게 느껴진다.
+var lastScrollTargetX = null;
+var SCROLL_RETRIGGER_THRESHOLD = 40;
 
 function initAutoScrollTouchTracking() {
   var wrapper = document.getElementById('scoreWrapper');
@@ -63,6 +74,9 @@ function scrollActiveStepIntoView(index) {
   if (x === undefined) return;
 
   var pixelX = x * noteState.scale;
+  if (lastScrollTargetX !== null && Math.abs(pixelX - lastScrollTargetX) < SCROLL_RETRIGGER_THRESHOLD) return;
+  lastScrollTargetX = pixelX;
+
   var target = pixelX - wrapper.clientWidth / 2;
   var maxScroll = Math.max(0, wrapper.scrollWidth - wrapper.clientWidth);
   target = Math.max(0, Math.min(maxScroll, target));
@@ -155,6 +169,7 @@ function renderScore(data) {
   var container = document.getElementById('score');
   container.innerHTML = '';
   noteState = { svg: null, scale: 1, topY: 0, bottomY: 0, stepX: [], stepElements: [], activeIndex: null };
+  lastScrollTargetX = null;
 
   var VF = Vex.Flow;
   var voices = (data.voices || []).filter(function (v) { return v.notes.length > 0; });
