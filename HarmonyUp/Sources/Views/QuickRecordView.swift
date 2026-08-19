@@ -203,7 +203,8 @@ struct QuickRecordView: View {
                 .font(Theme.Typography.subheadline)
             // 정적인 ProgressView 대신 채워진 부분 위로 빛이 스윽 지나가는 shimmer — "지금
             // 진행되고 있다"는 느낌을 강조해달라는 피드백 반영(LoadingIndicators.swift 참고).
-            ShimmerProgressBar(progress: stage.progress)
+            // 진행률 자체는 AnalysisProgressBar가 단계 안에서도 계속 차오르게 담당한다(바로 아래).
+            AnalysisProgressBar(stage: stage)
         }
         .frame(maxWidth: .infinity)
         .padding(Theme.Spacing.lg)
@@ -244,5 +245,38 @@ struct QuickRecordView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(Theme.Spacing.md)
         .harmonyGlassCard()
+    }
+}
+
+/// "완벽하게 로딩이 되다가 진짜 다 되면 딱 끝나는" 진행률 바를 만들기 위한 래퍼 — 실제
+/// 진행률을 모르는 `.voiceAnalysis` 단계 동안 `ShimmerProgressBar`가 그 단계의 상한(50%)에
+/// 딱 멈춰 서 있지 않고, 그 상한 바로 아래까지 스스로 천천히 계속 차오르게 한다. 예전엔
+/// 단계가 바뀔 때만 값이 점프해서, 실제 분석이 오래 걸리는 녹음일수록 "50%에서 멈춰있는
+/// 것처럼" 보였다("완벽하게 로딩이 되다가"라는 재현 피드백의 원인) — 실제 분석이 더 빨리
+/// 끝나면 이 채워가는 애니메이션은 그냥 중간에 잘리고 다음 단계로 넘어갈 뿐이라 안전하다.
+private struct AnalysisProgressBar: View {
+    let stage: QuickRecordView.AnalysisStage
+    @State private var displayedProgress: Double = 0.05
+
+    var body: some View {
+        ShimmerProgressBar(progress: displayedProgress)
+            .onAppear { animate(to: stage) }
+            .onChange(of: stage) { _, newStage in animate(to: newStage) }
+    }
+
+    private func animate(to stage: QuickRecordView.AnalysisStage) {
+        switch stage {
+        case .voiceAnalysis:
+            // 상한(0.5)에 딱 닿지 않게(0.48까지만) 남겨둔다 — 진짜 그 단계가 끝나는
+            // 순간(harmonyGeneration으로 전환)에만 상한을 딱 채우는 확실한 완료감을 주기 위해서다.
+            displayedProgress = 0.05
+            withAnimation(.easeOut(duration: 4.0)) {
+                displayedProgress = 0.48
+            }
+        case .harmonyGeneration:
+            withAnimation(.easeInOut(duration: 0.3)) {
+                displayedProgress = 1.0
+            }
+        }
     }
 }

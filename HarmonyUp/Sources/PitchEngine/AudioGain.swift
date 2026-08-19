@@ -39,16 +39,31 @@ enum AudioGain {
     /// 그 경계에서 값이 0이 아닌 채로 갑자기 시작되거나 끊기면 스피커에서 그 불연속 자체가
     /// 짧은 클릭음으로 들린다.
     static func applyFadeInOut(_ samples: [Float], fadeSampleCount: Int) -> [Float] {
-        guard !samples.isEmpty, fadeSampleCount > 0 else { return samples }
-        // 버퍼가 페이드 구간보다 짧으면(양 끝이 겹치면) 절반씩만 적용해서 전체가 무음이 되는 걸 막는다.
-        let fadeCount = min(fadeSampleCount, samples.count / 2)
-        guard fadeCount > 0 else { return samples }
+        applyFadeInOut(samples, fadeInCount: fadeSampleCount, fadeOutCount: fadeSampleCount)
+    }
 
+    /// 위 `applyFadeInOut(_:fadeSampleCount:)`의 비대칭 버전 — 앞/뒤 페이드 길이를 따로
+    /// 지정한다(0이면 그쪽은 아예 페이드 없음). `harmonizedTrack`이 "이어 부른 여러 음을 하나로
+    /// 이어 붙인 구간"(런) 전체를 한 번에 피치시프트할 때, 그 런의 맨 처음에만 페이드 인,
+    /// 맨 끝에만 페이드 아웃을 걸고 싶어서 추가했다 — 런 안쪽(원래 음 경계였던 자리)에는
+    /// 페이드를 안 걸어야 진짜로 끊김 없이 이어 들린다(안쪽에도 짧게라도 페이드를 걸면
+    /// 그 자리마다 미세한 "훅" 하는 골이 남는다).
+    static func applyFadeInOut(_ samples: [Float], fadeInCount: Int, fadeOutCount: Int) -> [Float] {
+        guard !samples.isEmpty else { return samples }
+        let maxHalf = samples.count / 2
         var result = samples
-        for i in 0..<fadeCount {
-            let gain = Float(i) / Float(fadeCount)
-            result[i] *= gain
-            result[result.count - 1 - i] *= gain
+
+        let inCount = min(fadeInCount, maxHalf)
+        if inCount > 0 {
+            for i in 0..<inCount {
+                result[i] *= Float(i) / Float(inCount)
+            }
+        }
+        let outCount = min(fadeOutCount, maxHalf)
+        if outCount > 0 {
+            for i in 0..<outCount {
+                result[result.count - 1 - i] *= Float(i) / Float(outCount)
+            }
         }
         return result
     }

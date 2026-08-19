@@ -102,15 +102,18 @@ extension PracticeView {
         // "화음이 박자보다 밀려 들린다"는 인상을 만든다).
         let segmentFadeCount = max(1, Int(rate * harmonySegmentFadeDuration))
         let bufferEnd = recentVoiceBuffer.count
+        let maxBridgeableGapSamples = Int(rate * maxHarmonyGapBridgeDuration)
         var output: [Float] = []
         var cursor = max(0, min(bufferEnd, Int(startTime * rate)))
-        // 직전에 실제로 화음을 재생한 스텝의 멜로디 원음(MIDI) — 간격 브리징 판단에 쓴다.
-        var lastPlayedMIDINote: Int?
 
-        // 원본 구간(raw)을 targetFrequency로 피치시프트 + (필요시)더블링 + 페이드까지 마친 청크로
-        // 만든다. 실제 스텝 구간과, 아래에서 "이어 부른 같은 음"으로 판단해 무음 대신 메우는
-        // 간격(gap) 구간 둘 다 이 헬퍼 하나를 공유한다.
-        func pitchShiftedChunk(raw: [Float], sourceMIDINote: Int, targetFrequency: Double) -> [Float] {
+        // raw 구간을 targetFrequency로 피치시프트 + (필요시)더블링 + 페이드까지 마친 청크로
+        // 만든다. fadeIn/fadeOut을 따로 받는 이유는 아래에서 "이어 부른 여러 음을 하나로
+        // 묶은 런(run)"을 통째로 한 번만 시프트하기 때문 — 런의 맨 처음에만 페이드 인,
+        // 맨 끝에만 페이드 아웃을 걸어야 안쪽(원래 음 경계였던 자리)에 미세한 골이 안 남고
+        // 진짜로 끊김 없이 이어 들린다("이음표처럼 이어져야 할 음이 화음에서 여전히 살짝
+        // 끊겨 들린다"는 재확인 피드백 — 예전엔 브리지 구간도 별도 청크로 취급해 그 경계마다
+        // 짧게라도 페이드가 걸렸었다).
+        func pitchShiftedChunk(raw: [Float], sourceMIDINote: Int, targetFrequency: Double, fadeIn: Bool, fadeOut: Bool) -> [Float] {
             let ratio = targetFrequency / NoteNameConverter.frequency(forMIDINote: sourceMIDINote)
             let shifted = PitchShifter.shift(samples: raw, pitchRatio: ratio, formantRatio: interval.formantRatio, sampleRate: rate)
             // 더블링은 반드시 이 청크 하나의 구간 안에서만 적용한다 — 예전엔 스텝별로 피치시프트한
@@ -119,50 +122,67 @@ extension PracticeView {
             // 복사본"이 새어 들어와서 음이 바뀔 때마다 화음이 어긋나 들렸다("화음이 안 맞는
             // 느낌이 너무 강하다" 실사용 피드백으로 발견, 근거: VoiceDoubler.double이 델레이
             // 오프셋만큼 과거 샘플을 그대로 참조하는데, 그 "과거"가 이 음이 아니라 이전
-            // 음이었던 것). 세그먼트 단위로만 더블링하면 지연 참조가 항상 같은 음 안에서만
+            // 음이었던 것). 청크(런) 단위로만 더블링하면 지연 참조가 항상 같은 런 안에서만
             // 일어나서 이 누출이 원천적으로 없어진다.
             let doubled = isVoiceDoublingEnabled ? VoiceDoubler.apply(to: shifted, sampleRate: rate, interval: interval) : shifted
-            return AudioGain.applyFadeInOut(doubled, fadeSampleCount: min(segmentFadeCount, doubled.count / 2))
+            return AudioGain.applyFadeInOut(
+                doubled,
+                fadeInCount: fadeIn ? segmentFadeCount : 0,
+                fadeOutCount: fadeOut ? segmentFadeCount : 0
+            )
         }
 
-        for i in startIndex..<melodySteps.count {
+        var i = startIndex
+        while i < melodySteps.count {
             let step = melodySteps[i]
-            guard let onset = step.onsetTime, let duration = step.duration, duration > 0 else { continue }
+            guard let onset = step.onsetTime, let duration = step.duration, duration > 0 else {
+                i += 1
+                continue
+            }
             let segStart = max(0, Int(onset * rate))
             let segEnd = min(bufferEnd, Int((onset + duration) * rate))
-            guard segStart < segEnd else { continue }
+            guard segStart < segEnd else {
+                i += 1
+                continue
+            }
 
-            let target = step.harmony?.first(where: { $0.interval == interval })
+            guard let target = step.harmony?.first(where: { $0.interval == interval }) else {
+                // 이 성부의 화음이 없는 스텝(쉼표) — 무음.
+                if segStart > cursor {
+                    output.append(contentsOf: [Float](repeating: 0, count: segStart - cursor))
+                }
+                output.append(contentsOf: [Float](repeating: 0, count: segEnd - segStart))
+                cursor = segEnd
+                i += 1
+                continue
+            }
 
             if segStart > cursor {
-                let gapSampleCount = segStart - cursor
-                // 실기기 피드백("한 음을 길게 끌면 멜로디는 이어 들리는데 화음은 끊겨 들림 —
-                // '미미'가 아니라 '미~'로 들려야 함") — `MelodySegmenter`가 발성 흔들림 때문에
-                // 진짜 하나로 이어 부른 음을 별개 스텝 2개로 갈랐을 때(95·98절에서 병합 임계값을
-                // 올렸지만 그래도 여전히 남는 경우), 이 간격 앞뒤가 정확히 같은 멜로디 음이면
-                // "정말 이어 부른 한 음일" 가능성이 높다 — 무음으로 메우는 대신 그 구간도
-                // 똑같이 피치시프트해서 이어 붙인다. 다른 음이거나(진짜 다음 음/쉼표) 간격이
-                // `maxHarmonyGapBridgeDuration`보다 길면(진짜 쉼표) 기존처럼 무음으로 둔다 —
-                // 진짜 쉼표까지 이어 붙이면 안 쉬어야 할 자리에서 화음이 계속 나서 더 이상하게 들린다.
-                let maxBridgeableGapSamples = Int(rate * maxHarmonyGapBridgeDuration)
-                if let target, let lastPlayedMIDINote, lastPlayedMIDINote == step.midiNote,
-                   gapSampleCount <= maxBridgeableGapSamples {
-                    let gapRaw = Array(recentVoiceBuffer[cursor..<segStart])
-                    output.append(contentsOf: pitchShiftedChunk(raw: gapRaw, sourceMIDINote: step.midiNote, targetFrequency: target.frequency))
-                } else {
-                    output.append(contentsOf: [Float](repeating: 0, count: gapSampleCount))
-                }
+                output.append(contentsOf: [Float](repeating: 0, count: segStart - cursor))
             }
 
-            let segment = Array(recentVoiceBuffer[segStart..<segEnd])
-            if let target {
-                output.append(contentsOf: pitchShiftedChunk(raw: segment, sourceMIDINote: step.midiNote, targetFrequency: target.frequency))
-                lastPlayedMIDINote = step.midiNote
-            } else {
-                output.append(contentsOf: [Float](repeating: 0, count: segment.count))
-                lastPlayedMIDINote = nil
+            // 이 스텝부터 시작해서, "같은 멜로디 음 + 브리징 가능한 간격"으로 이어지는 다음
+            // 스텝들을 계속 흡수한다 — 원래 여러 스텝으로 갈라져 있던 하나의 held 음을 런
+            // (run) 하나로 묶어서, 이 런 전체를 한 번의 피치시프트 호출로 처리한다(런 안쪽엔
+            // 페이드가 전혀 없다). v1 화성 모델(102절)에서는 같은 멜로디 음이면 화음 목표도
+            // 항상 같으므로, 멜로디 음이 같은지만 확인하면 충분하다.
+            var runEnd = segEnd
+            var j = i + 1
+            while j < melodySteps.count {
+                let nextStep = melodySteps[j]
+                guard let nextOnset = nextStep.onsetTime, let nextDuration = nextStep.duration, nextDuration > 0,
+                      nextStep.midiNote == step.midiNote else { break }
+                let nextSegStart = max(0, Int(nextOnset * rate))
+                let nextSegEnd = min(bufferEnd, Int((nextOnset + nextDuration) * rate))
+                guard nextSegStart < nextSegEnd, nextSegStart - runEnd <= maxBridgeableGapSamples else { break }
+                runEnd = nextSegEnd
+                j += 1
             }
-            cursor = segEnd
+
+            let runRaw = Array(recentVoiceBuffer[segStart..<runEnd])
+            output.append(contentsOf: pitchShiftedChunk(raw: runRaw, sourceMIDINote: step.midiNote, targetFrequency: target.frequency, fadeIn: true, fadeOut: true))
+            cursor = runEnd
+            i = j
         }
 
         if cursor < bufferEnd {
