@@ -93,4 +93,43 @@ final class AudioGainTests: XCTestCase {
     func testApplyGainOnEmptyBufferReturnsEmpty() {
         XCTAssertTrue(AudioGain.applyGain([], factor: 0.85).isEmpty)
     }
+
+    func testMixToStereoCenterPanSplitsEquallyWithEqualPowerGain() {
+        let mixed = AudioGain.mixToStereo(tracks: [(samples: [1.0, 1.0], pan: 0.0)])
+        // 등에너지 팬 법칙에서 pan=0(가운데)일 때 좌우 게인은 각각 1/√2 ≈ 0.707.
+        XCTAssertEqual(mixed.left, mixed.right)
+        XCTAssertEqual(mixed.left[0], Float(1.0 / 2.0.squareRoot()), accuracy: 0.001)
+    }
+
+    func testMixToStereoFullLeftPanSilencesRightChannel() {
+        let mixed = AudioGain.mixToStereo(tracks: [(samples: [1.0, 0.5], pan: -1.0)])
+        XCTAssertEqual(mixed.left, [1.0, 0.5])
+        XCTAssertEqual(mixed.right[0], 0, accuracy: 0.0001)
+    }
+
+    func testMixToStereoSumsMultipleTracksSampleAligned() {
+        // 두 트랙이 같은 인덱스에서 정확히 더해져야 한다(밀림 없이 재생되는 이유의 핵심).
+        let mixed = AudioGain.mixToStereo(tracks: [
+            (samples: [1.0, 0.0], pan: 0.0),
+            (samples: [0.0, 1.0], pan: 0.0)
+        ])
+        let unit = Float(1.0 / 2.0.squareRoot())
+        XCTAssertEqual(mixed.left[0], unit, accuracy: 0.001)
+        XCTAssertEqual(mixed.left[1], unit, accuracy: 0.001)
+    }
+
+    func testMixToStereoPadsShorterTrackWithZeroInsteadOfShrinkingOutput() {
+        let mixed = AudioGain.mixToStereo(tracks: [
+            (samples: [1.0, 1.0, 1.0], pan: 0.0),
+            (samples: [1.0], pan: 0.0)
+        ])
+        XCTAssertEqual(mixed.left.count, 3)
+        XCTAssertEqual(mixed.right.count, 3)
+    }
+
+    func testMixToStereoEmptyTracksReturnsEmpty() {
+        let mixed = AudioGain.mixToStereo(tracks: [])
+        XCTAssertTrue(mixed.left.isEmpty)
+        XCTAssertTrue(mixed.right.isEmpty)
+    }
 }

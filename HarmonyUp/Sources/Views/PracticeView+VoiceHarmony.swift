@@ -276,7 +276,13 @@ extension PracticeView {
                 // 재생해도 원본 녹음 타임라인 기준 경과 시간이 계속 정확하게 나온다(한 줄도
                 // 안 고치고 재사용 가능).
                 voiceClipPlaybackStartedAt = Date().addingTimeInterval(-startTime)
-                try voiceClipPlayer.playTracks(tracks, sampleRate: rate) {
+                // 성부마다 별도 AVAudioPlayerNode에 태워 동시에 play()를 부르던 이전 방식은,
+                // 노드가 여러 개라 각자 실제로 소리가 나가기 시작하는 시점이 미세하게 어긋날 수
+                // 있었다("화음이 밀린다"는 반복된 실기기 제보의 실제 원인). 재생 직전에 모든
+                // 트랙을 pan까지 반영해 하나의 스테레오 버퍼로 미리 합친 뒤(AudioGain.mixToStereo)
+                // 단일 노드로 재생하면, 같은 버퍼의 같은 샘플이라 밀릴 여지 자체가 없다.
+                let mixed = AudioGain.mixToStereo(tracks: tracks)
+                try voiceClipPlayer.playMixed(left: mixed.left, right: mixed.right, sampleRate: rate) {
                     guard generation == playbackGeneration else { return }
                     isPlayingVoiceClip = false
                     voiceClipPlaybackStartedAt = nil

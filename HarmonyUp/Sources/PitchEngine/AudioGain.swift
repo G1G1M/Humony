@@ -74,4 +74,41 @@ enum AudioGain {
     static func applyGain(_ samples: [Float], factor: Float) -> [Float] {
         samples.map { $0 * factor }
     }
+
+    /// 성부별 트랙(멜로디+베이스+3도+5도)을 각자의 pan(-1~1) 위치를 반영해 좌/우 두 채널로
+    /// 미리 더해 하나의 스테레오 버퍼로 만든다.
+    ///
+    /// 예전엔 이 합치는 작업을 안 하고 트랙마다 별도의 `AVAudioPlayerNode`에 태워 "동시에
+    /// play() 호출"로 재생했는데, 노드가 여러 개면 각 노드가 실제로 스피커에 소리를 내보내기
+    /// 시작하는 시점이 iOS 오디오 엔진의 내부 스케줄링/버퍼링 지연에 따라 서로 미세하게 어긋날
+    /// 수 있다 — "화음이 뒤로 밀린다"는 반복된 실기기 제보의 원인이 바로 이 "여러 노드 동시
+    /// 시작"이 실기기 하드웨어 조건에 따라 완벽히 보장되지 않는다는 것이었다(트랙 데이터
+    /// 자체는 `HarmonyTrackBuilder`가 이미 멜로디와 샘플 단위로 정확히 정렬해 만들어 둔다 —
+    /// 문제는 데이터가 아니라 "서로 다른 노드에서 따로 재생을 시작한다"는 구조였다). 여기서
+    /// 미리 하나의 배열로 합쳐서 단 하나의 노드로 재생하면, "언제 각자 시작하는가"라는 질문
+    /// 자체가 사라진다 — 같은 버퍼의 같은 샘플이라 밀릴 수가 없다.
+    ///
+    /// pan을 살리기 위해 등에너지(equal-power) 팬 법칙을 쓴다: 단순히 pan에 따라 왼쪽/오른쪽
+    /// 게인을 선형으로 나누면(예: pan=0일 때 좌우 각 0.5) 가운데에서 소리가 살짝 작게 들리는
+    /// "가운데 함몰"이 생긴다 — 등에너지 법칙은 pan=0일 때 좌우 게인을 각각 0.707(=1/√2)로 둬서
+    /// 좌우 게인의 "에너지"(제곱합)가 pan 전체 구간에서 항상 1로 일정하게 유지되게 한다.
+    static func mixToStereo(tracks: [(samples: [Float], pan: Float)]) -> (left: [Float], right: [Float]) {
+        guard !tracks.isEmpty else { return ([], []) }
+        let length = tracks.map { $0.samples.count }.max() ?? 0
+        var left = [Float](repeating: 0, count: length)
+        var right = [Float](repeating: 0, count: length)
+
+        for track in tracks {
+            let clampedPan = max(-1, min(1, track.pan))
+            // pan(-1~1) → 0~π/2 각도로 매핑, cos/sin으로 좌/우 게인을 구한다(등에너지 팬 법칙).
+            let angle = (Double(clampedPan) + 1) * .pi / 4
+            let leftGain = Float(cos(angle))
+            let rightGain = Float(sin(angle))
+            for i in 0..<track.samples.count {
+                left[i] += track.samples[i] * leftGain
+                right[i] += track.samples[i] * rightGain
+            }
+        }
+        return (left, right)
+    }
 }

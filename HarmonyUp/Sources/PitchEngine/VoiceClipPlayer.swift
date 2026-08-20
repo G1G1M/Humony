@@ -129,6 +129,70 @@ final class VoiceClipPlayer {
         }
     }
 
+    /// 이미 좌/우로 합쳐진(pan까지 반영된) 스테레오 버퍼 하나를 단일 노드로 재생한다
+    /// (`AudioGain.mixToStereo` 참고). `playTracks`처럼 성부마다 노드를 나누지 않으므로,
+    /// "여러 노드가 서로 다른 시점에 시작할 수 있다"는 밀림의 원인 자체가 없다 — 이 앱에서
+    /// 여러 성부(멜로디+화음)를 동시에 재생하는 경로는 이제 이 메서드로 통일했다.
+    /// - Parameter onFinished: 재생이 실제로 스피커까지 다 끝난 뒤 메인 스레드에서 한 번 호출된다.
+    func playMixed(left: [Float], right: [Float], sampleRate: Double, onFinished: (() -> Void)? = nil) throws {
+        guard !left.isEmpty, left.count == right.count else { return }
+        guard let stereoFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2) else { return }
+
+        if !isAttached {
+            for player in players {
+                engine.attach(player)
+            }
+            engine.attach(voiceMixer)
+            engine.attach(reverb)
+            reverb.loadFactoryPreset(.mediumRoom)
+            reverb.wetDryMix = 18
+            isAttached = true
+        }
+
+        if configuredSampleRate != sampleRate {
+            if engine.isRunning {
+                engine.stop()
+            }
+            for player in players {
+                engine.connect(player, to: voiceMixer, format: stereoFormat)
+            }
+            engine.connect(voiceMixer, to: reverb, format: stereoFormat)
+            engine.connect(reverb, to: engine.mainMixerNode, format: stereoFormat)
+            configuredSampleRate = sampleRate
+        }
+
+        // 이미 하나의 버퍼로 합쳐 재생하므로(등에너지 팬 법칙으로 좌우 게인을 미리 나눠 담음)
+        // playTracks의 1/√N 헤드룸 보정은 필요 없다 — 클리핑 방지는 AudioGain.normalizeLoudness의
+        // peakCeiling이 이미 각 성부 단계에서 맡고 있다.
+        engine.mainMixerNode.outputVolume = 1.0
+
+        if !engine.isRunning {
+            engine.prepare()
+            try engine.start()
+        }
+
+        let player = players[0]
+        player.pan = 0.0 // pan은 이미 좌/우 채널 값 자체에 반영돼 있다
+
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: stereoFormat, frameCapacity: AVAudioFrameCount(left.count)) else { return }
+        buffer.frameLength = AVAudioFrameCount(left.count)
+        left.withUnsafeBufferPointer { source in
+            guard let baseAddress = source.baseAddress else { return }
+            buffer.floatChannelData?[0].update(from: baseAddress, count: left.count)
+        }
+        right.withUnsafeBufferPointer { source in
+            guard let baseAddress = source.baseAddress else { return }
+            buffer.floatChannelData?[1].update(from: baseAddress, count: right.count)
+        }
+
+        player.scheduleBuffer(buffer, at: nil, options: [], completionCallbackType: .dataPlayedBack) { _ in
+            DispatchQueue.main.async {
+                onFinished?()
+            }
+        }
+        player.play()
+    }
+
     func stop() {
         for player in players {
             player.stop()
