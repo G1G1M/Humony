@@ -2745,3 +2745,28 @@ v2 전용 동작(경과음 구간 코드 유지, 근음 진행 선호)을 검증
 ### 검증
 
 아이패드 시뮬레이터 빌드 + 유닛테스트 129개 통과. **실기기에서 "충분히 길게 채점한 뒤 중지"가 여전히 저장 안 되는 경우가 남아있다면, 이번에 고친 것과는 다른 원인(예: `beginCapturingIfNeeded()`가 실제로 마이크를 못 켜는 경우 등)이라 별도로 봐야 한다.**
+
+## 112. 화음을 "처음 넣었을 때"(TonePlayer 합성음)로 되돌림 — WORLD 목소리 피치시프트 폐기
+
+### 배경
+
+109~111절로 재생 타이밍(단일 노드 믹스, 재생헤드 리셋)과 채점 저장 버그까지 고쳤는데도, 실기기에서 "화음이 멜로디랑 따로 들린다"는 제보가 계속됐다(`/btw` 포크로 재확인 — 코드는 이미 멜로디 스텝과 1:1로 정확히 맞물려 있음을 재차 확인했지만 체감은 그대로였음). 사용자가 "화음을 처음 넣었을 때(`TonePlayer`로 합성 톤을 재생하던 시절, 커밋 `c757f3a`)가 제일 정확하게 들렸다"며 그때로 되돌려달라고 요청했다.
+
+### 왜 파일 단위 git revert가 아니라 재구현인가
+
+`c757f3a` 시점의 코드 구조(단음 캡처 모드, `ContentView` 단일 파일, `MelodySession` 실시간 누적)는 지금(빠른 녹음 플로우, `PracticeView`+extension 분리, `HarmonyTrackBuilder`/`precomputeHarmonyTracks`/`playMixed` 등)과 완전히 달라 파일을 그 시점으로 되돌리는 게 불가능하다. 대신 **지금 구조는 그대로 두고, 화음(베이스/3도/5도)의 소리를 만드는 방식만** 그때의 파형으로 바꿨다 — 멜로디(원음)는 영향 없음.
+
+### 원인 정리 — 왜 목소리 피치시프트는 계속 "따로" 들렸나
+
+92절(WSOLA)부터 69절(PSOLA, 포먼트 보존)·70절(WORLD 보코더)까지, 그리고 93~111절의 수많은 타이밍/믹싱 수정까지 전부 "목소리를 피치시프트해서 화음을 만든다"는 전제 위에서 음질과 타이밍을 각각 따로 개선해왔다. 그런데 WORLD 같은 분석-재합성 기반 보코더는 트랜지언트(어택 순간)를 미세하게 뭉갤 수 있다는 게 이미 알려진 한계였고(79절 이후 문서에 명시), 이게 "타이밍은 정확히 맞는데도 청감상 살짝 어긋나 보이는" 체감으로 계속 남았을 가능성이 높다. 반면 `TonePlayer` 합성음은 애초에 어택이 순수 사인파+배음 조합이라 뭉개질 여지가 없다 — "정확하게 들린다"는 사용자 기억은 이 차이일 가능성이 크다.
+
+### 구현
+
+- `ToneSynthesizer.swift`(신규, PitchEngine) — `TonePlayer`(`AVAudioSourceNode` 콜백 안에서 실시간으로 매 샘플 계산하던 것)와 **정확히 같은 파형**(기본음 + 2배음×0.3 + 3배음×0.15, /1.45 정규화)을 오프라인 배열로 합성하는 순수 함수 `synthesize(frequency:sampleCount:sampleRate:)`.
+- `SynthesizedHarmonyTrackBuilder.swift`(신규, PitchEngine) — `HarmonyTrackBuilder.build`와 같은 스텝 순회+길이 보존 계약(스텝마다 `onsetTime`~`onsetTime+duration` 구간을 잘라 그 구간만큼 합성, 화음 없는 스텝/시작 이전 구간은 무음, 결과 길이는 항상 `bufferLength`와 동일)을 그대로 따르되, 목소리 샘플을 피치시프트하는 대신 `ToneSynthesizer`로 그 구간 길이만큼 톤을 새로 합성한다. 목소리가 아니라 합성음이라 `PitchShifter`(WORLD)도 `VoiceDoubler`(더블링)도 필요 없어 파라미터가 더 단순하다.
+- `PracticeView+VoiceHarmony.swift`의 호출부 두 곳(`harmonizedTrack`, `precomputeHarmonyTracks`)만 `HarmonyTrackBuilder.build` → `SynthesizedHarmonyTrackBuilder.build`로 교체. `HarmonyTrackBuilder`/`PitchShifter`/`VoiceDoubler` 자체는 지우지 않고 그대로 뒀다 — 나중에 다시 필요하면 이 두 호출부만 되돌리면 된다. 멜로디 트랙(`recorded`, 원본 녹음 그대로)과 재생 믹싱(단일 노드 `playMixed`, gain/pan)은 전혀 손대지 않았다.
+- "내 목소리로 화음" 카드의 설명 문구도 "베이스/3도/5도로 옮겨서"(목소리를 옮긴다는 뜻)에서 "베이스/3도/5도 화음을 맞춰"로 수정 — 더 이상 목소리를 옮기는 게 아니므로.
+
+### 검증
+
+`ToneSynthesizerTests`(신규 5개: 샘플 개수, 0/음수 처리, 주파수 0 이하 무음, 진폭이 -1~1 범위 안에 있는지, 주파수가 다르면 파형도 다른지) + `SynthesizedHarmonyTrackBuilderTests`(신규 5개: `HarmonyTrackBuilderTests`와 동일한 길이 보존/경계 케이스 + 화음 있는 구간엔 실제로 소리가 나는지). 유닛테스트 139개(129+10) 통과, 아이패드 시뮬레이터 빌드 통과. **실기기 재확인 필요 — 이번에도 "따로 들린다"는 인상이 남으면, 원인이 보코더 트랜지언트가 아니라 다른 데(예: 리버브의 잔향 꼬리, 성부 간 gain 밸런스) 있다는 뜻이므로 다음 조사 방향을 다시 잡아야 한다.**

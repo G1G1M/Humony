@@ -15,7 +15,7 @@
 
 ## 진행 상황
 
-전체 체크리스트는 [`docs/PROGRESS.md`](docs/PROGRESS.md) 참고. 최근 작업: 악보 탭 시크 시 이전 음표가 눌리던 버그(재생헤드 상태 리셋 누락)와 채점 후 기록 탭 저장 안 되던 버그(실패해도 성공 메시지가 뜨던 문제) 수정(110·111절).
+전체 체크리스트는 [`docs/PROGRESS.md`](docs/PROGRESS.md) 참고. 최근 작업: 화음(베이스/3도/5도)을 WORLD 목소리 피치시프트에서 화음을 처음 넣었을 때(TonePlayer 합성음)의 소리로 되돌림(112절).
 
 ## 구성 요소 (`HarmonyUp/Sources/PitchEngine/`)
 
