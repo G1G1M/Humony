@@ -1,25 +1,18 @@
 import Foundation
 
-/// `SynthesizedHarmonyTrackBuilder`(120~122절, 합성음)와 같은 세그먼트+크로스페이드 구조를
-/// 그대로 쓰되, 소리 자체는 `ToneSynthesizer`가 아니라 **사용자가 실제로 부른 목소리를
-/// 피치시프트로 옮긴 것**으로 채운다(123절, 화음 재설계 2단계).
+/// 129절, "전체 한 번 분석 + F0곡선 재합성" 구조 개선의 2단계 — 화음 성부(베이스/3도/5도)를
+/// 만들 때 더 이상 멜로디 스텝(음)마다 원본을 잘라 WORLD를 독립적으로 다시 돌리지 않는다.
+/// 대신 원본 녹음 전체로 `PitchShifterWorldAnalysis`를 **한 번만** 만들고, 그 F0 곡선의
+/// 스텝에 해당하는 구간만 목표 화음 비율로 바꿔치기한 뒤 **한 번만** 재합성한다 — 목소리
+/// 전체가 하나로 이어진 채 처리되므로, 세그먼트를 잘라 각각 분석-재합성하고 크로스페이드로
+/// 이어붙이던 예전 방식(123~128절)에서 남던 "이어붙인 티"가 원리적으로 사라진다.
 ///
-/// **125절, WSOLA → WORLD로 교체**: 123절엔 `PitchShifter`(WSOLA)를 썼는데 실기기 청취에서
-/// "어색하다"는 평가를 받았다 — WSOLA 계열은 피치를 올리면 포먼트도 같이 따라 올라가서
-/// (성도 모양이 만드는 음색이 원래 음높이에 묶여 있음) 특히 3도/5도처럼 크게 옮길 때
-/// "다람쥐 소리"에 가까워지는 원리적 한계가 있다. `PitchShifterWorld`(WORLD 보코더, 124~125절
-/// 복원)는 F0(피치)와 스펙트럼 포락선(포먼트)을 애초에 분리해서 분석하므로, 포먼트를 원본
-/// 그대로 유지한 채 피치만 옮길 수 있다 — 그 한계를 원리적으로 피해간다.
-///
-/// **소스 오디오를 구하는 방법**: 각 멜로디 스텝은 이미 `MelodySegmenter`가 정확한
-/// onset/duration을 매겨뒀으므로, 그 구간을 원본 녹음(`sourceBuffer`)에서 그대로 잘라 쓰면
-/// "이 음을 부를 때의 목소리"를 바로 얻는다 — 예전(85절)엔 실시간 롤링 버퍼에서 음 경계를
-/// 거꾸로 추적해야 했던 문제가, 배치 분석 구조에서는 애초에 없다.
-///
-/// **길이 정확도**: `PitchShifterWorld.shift`는 항상 입력과 정확히 같은 길이를 돌려주지만
-/// (브릿지 계약, `PitchShifterWorldTests.testOutputLengthMatchesInput` 참고), overlap-add가
-/// 요구하는 목표 길이(크로스페이드 확장분 포함)와는 여전히 다를 수 있어 `fitLength`로
-/// 안전하게 맞춘다(WSOLA 시절의 근사 길이 문제와는 다른 이유로 계속 필요).
+/// **이전 세대(128절)와의 차이**: 예전엔 스텝마다 원본 오디오 조각을 잘라 각각 WORLD로
+/// 재합성한 뒤, 그 결과물끼리 진폭 크로스페이드로 이어붙였다(다른 음높이 신호 두 개를
+/// 섞는 방식). 지금은 처음부터 끝까지 **하나의 연속된 오디오**만 있고, 그 안의 F0 값이
+/// 스텝 경계에서 부드럽게(글리산도) 바뀔 뿐이다 — 그래서 "크로스페이드"의 의미도 바뀌었다:
+/// 진폭을 섞는 게 아니라 **F0 곡선 자체를 선형보간**해서 피치 전환을 매끄럽게 만든다.
+/// 스텝 사이가 무음/숨쉬는 구간(진짜 쉼표)일 때만 진폭 마스킹(페이드)으로 소리를 낮춘다.
 enum VoiceHarmonyTrackBuilder {
 
     enum Voice: Hashable {
@@ -30,12 +23,13 @@ enum VoiceHarmonyTrackBuilder {
     /// - Parameters:
     ///   - melodySteps: `RecordingAnalyzer.melodySteps`가 만든, harmony/onsetTime/duration이
     ///     채워진 배열.
-    ///   - sourceBuffer: 원본 녹음(모노) — 각 스텝의 onset/duration으로 이 배열에서 직접 슬라이싱한다.
+    ///   - sourceBuffer: 원본 녹음(모노) — 화음 성부는 이 배열 전체를 한 번만 분석한다.
     ///   - bufferLength: 결과 트랙 길이(보통 `sourceBuffer.count`와 같음).
     ///   - voice: 만들 성부. `.melody`는 피치 시프트 없이(비율 1) 원본 그대로 쓴다.
     ///   - rate: 샘플레이트.
-    ///   - fadeDuration / crossfadeDuration: `SynthesizedHarmonyTrackBuilder`와 동일한 의미
-    ///     (무음 경계 fade vs 무음 없는 전환의 크로스페이드).
+    ///   - fadeDuration: 진짜 무음/숨쉬는 구간 경계에서 클릭음을 막는 짧은 페이드.
+    ///   - crossfadeDuration: 인접한(무음 없이 이어지는) 두 화음 스텝 사이에서 F0를
+    ///     선형보간할 전환 폭.
     /// - Returns: `bufferLength`와 정확히 같은 길이의 배열.
     static func build(
         melodySteps: [MelodyStep],
@@ -44,10 +38,6 @@ enum VoiceHarmonyTrackBuilder {
         voice: Voice,
         rate: Double,
         fadeDuration: Double = 0.01,
-        // 128절 — 화음(WORLD로 각각 독립 재합성된 음)끼리 더 자연스럽게 이어달라는 요청으로
-        // 0.02(20ms)에서 0.04(40ms)로 늘림. 멜로디는 더 이상 이 경로를 안 타므로(위 조기 반환)
-        // 화음 성부에만 영향— 합성음 신호와 달리 실제 목소리는 스펙트럼 내용 자체가 음마다
-        // 다시 분석되므로, 진폭 크로스페이드 구간을 넓히면 그 전환이 덜 갑작스럽게 들린다.
         crossfadeDuration: Double = 0.04
     ) -> [Float] {
         guard bufferLength > 0, rate > 0 else { return [] }
@@ -62,69 +52,27 @@ enum VoiceHarmonyTrackBuilder {
         }
 
         guard case .harmony(let interval) = voice else { return [] }
-        // 128절 — 성부마다 다른 포먼트(음색)를 줘서 "한 사람이 여러 번 겹쳐 부른" 느낌을
-        // 줄인다. 세그먼트마다 안 바뀌고 이 성부 전체에 고정이므로 루프 밖에서 한 번만 읽는다.
         let formantRatio = interval.formantRatio
         let segments = voicedSegments(melodySteps: melodySteps, bufferLength: bufferLength, interval: interval, rate: rate)
-        var output = [Float](repeating: 0, count: bufferLength)
-        guard !segments.isEmpty else { return output }
+        var silence: [Float] { [Float](repeating: 0, count: bufferLength) }
+        guard !segments.isEmpty else { return silence }
+
+        guard let analysis = PitchShifterWorldAnalysis(samples: sourceBuffer, sampleRate: rate) else { return silence }
 
         let fadeCount = max(0, Int(rate * fadeDuration))
         let crossfadeCount = max(2, Int(rate * crossfadeDuration) / 2 * 2)
         let crossfadeHalf = crossfadeCount / 2
 
-        for (index, segment) in segments.enumerated() {
-            let previous = index > 0 ? segments[index - 1] : nil
-            let next = index < segments.count - 1 ? segments[index + 1] : nil
-            let leadsFromPrevious = previous.map { segment.start - $0.end <= crossfadeHalf } ?? false
-            let leadsToNext = next.map { $0.start - segment.end <= crossfadeHalf } ?? false
+        let modifiedF0 = harmonyF0Curve(analysis: analysis, segments: segments, crossfadeHalf: crossfadeHalf, rate: rate)
+        let synthesized = analysis.synthesize(f0: modifiedF0, formantRatio: formantRatio)
+        let fitted = fitLength(synthesized, to: bufferLength)
 
-            let extStart = max(0, segment.start - (leadsFromPrevious ? crossfadeHalf : 0))
-            let extEnd = min(bufferLength, segment.end + (leadsToNext ? crossfadeHalf : 0))
-            guard extStart < extEnd else { continue }
-            let targetLength = extEnd - extStart
+        let envelope = amplitudeEnvelope(segments: segments, bufferLength: bufferLength, fadeCount: fadeCount, crossfadeHalf: crossfadeHalf)
 
-            // 128절: 크로스페이드 확장분을 이웃 세그먼트(다른 음높이)의 실제 목소리에서
-            // 빌리지 않는다 — 그러면 "다음 음의 목소리"가 "현재 화음 음정"으로 잘못 옮겨진
-            // 소리가 크로스페이드 안쪽(가중치가 큰 구간)에 섞인다. 대신 이 세그먼트 자신의
-            // 오디오를 경계에서 거울반사해서 확장분을 채운다 — 이웃 침범 없이, 무음도 아닌
-            // "같은 음의 실제 신호"로 크로스페이드 목적을 유지한다.
-            let sourceSlice = mirrorExtendedSlice(
-                sourceBuffer: sourceBuffer,
-                segmentStart: segment.start,
-                segmentEnd: segment.end,
-                extStart: extStart,
-                extEnd: extEnd
-            )
-
-            var tone: [Float]
-            if segment.pitchRatio == 1.0 && formantRatio == 1.0 {
-                tone = sourceSlice
-            } else {
-                tone = PitchShifterWorld.shift(
-                    samples: sourceSlice,
-                    pitchRatio: segment.pitchRatio,
-                    formantRatio: formantRatio,
-                    sampleRate: rate
-                )
-            }
-            tone = fitLength(tone, to: targetLength)
-
-            let leadingRampCount = leadsFromPrevious ? min(crossfadeCount, tone.count / 2) : min(fadeCount, tone.count / 2)
-            if leadingRampCount > 0 {
-                for i in 0..<leadingRampCount { tone[i] *= Float(i) / Float(leadingRampCount) }
-            }
-            let trailingBudget = tone.count - leadingRampCount
-            let trailingRampCount = leadsToNext ? min(crossfadeCount, trailingBudget) : min(fadeCount, trailingBudget)
-            if trailingRampCount > 0 {
-                for i in 0..<trailingRampCount { tone[tone.count - 1 - i] *= Float(i) / Float(trailingRampCount) }
-            }
-
-            for i in 0..<tone.count {
-                output[extStart + i] += tone[i]
-            }
+        var output = [Float](repeating: 0, count: bufferLength)
+        for i in 0..<bufferLength {
+            output[i] = fitted[i] * envelope[i]
         }
-
         return output
     }
 
@@ -132,9 +80,6 @@ enum VoiceHarmonyTrackBuilder {
         let start: Int
         let end: Int
         let pitchRatio: Double
-        /// 원본(사용자가 실제로 부른) 음의 주파수 — `PitchShifter`의 그레인 탐색 반경을
-        /// 좁히는 데 쓰인다(`expectedFrequency`).
-        let sourceFrequency: Double
     }
 
     private static func voicedSegments(melodySteps: [MelodyStep], bufferLength: Int, interval: ChordGenerator.Interval, rate: Double) -> [Segment] {
@@ -148,56 +93,105 @@ enum VoiceHarmonyTrackBuilder {
             let start = max(0, min(bufferLength, Int(onset * rate)))
             let end = max(0, min(bufferLength, Int((onset + duration) * rate)))
             guard start < end else { return nil }
-            return Segment(start: start, end: end, pitchRatio: pitchRatio, sourceFrequency: sourceFrequency)
+            return Segment(start: start, end: end, pitchRatio: pitchRatio)
         }
     }
 
-    /// `PitchShifter.shift` 결과는 길이가 "거의" 목표와 같을 뿐이라(WSOLA 특성), overlap-add가
-    /// 요구하는 정확한 길이로 맞춘다 — 짧으면 무음으로 채우고, 길면 잘라낸다.
+    /// `analysis.f0`(원본 곡선)를 바탕으로, 각 세그먼트 구간의 프레임은 그 세그먼트의
+    /// `pitchRatio`만큼 스케일하고, 인접한(무음 없이 이어지는) 두 세그먼트 사이는 두 비율을
+    /// 선형보간해 F0가 계단 없이 매끄럽게 전환되도록 만든다. 세그먼트에 속하지 않는 프레임은
+    /// 원본 F0를 그대로 둔다 — 그 구간은 어차피 `amplitudeEnvelope`가 무음으로 마스킹하므로
+    /// 값 자체는 들리지 않지만, 임의로 0을 넣지 않는 편이 이후 디버깅(로그로 F0 곡선을 볼 때)에
+    /// 더 정직하다.
+    private static func harmonyF0Curve(analysis: PitchShifterWorldAnalysis, segments: [Segment], crossfadeHalf: Int, rate: Double) -> [Double] {
+        var curve = analysis.f0
+        let frameRate = 1000.0 / analysis.framePeriodMs
+        func frame(forSample sample: Int) -> Int {
+            max(0, min(analysis.f0Length - 1, Int((Double(sample) / rate) * frameRate)))
+        }
+
+        for segment in segments {
+            let startFrame = frame(forSample: segment.start)
+            let endFrame = frame(forSample: segment.end)
+            guard startFrame < endFrame else { continue }
+            for f in startFrame..<endFrame {
+                let original = analysis.f0[f]
+                curve[f] = original > 0 ? original * segment.pitchRatio : 0
+            }
+        }
+
+        for i in 0..<(segments.count - 1) {
+            let current = segments[i]
+            let next = segments[i + 1]
+            let gap = next.start - current.end
+            guard gap >= 0, gap <= crossfadeHalf * 2 else { continue }
+
+            let blendStartFrame = frame(forSample: max(current.start, current.end - crossfadeHalf))
+            let blendEndFrame = frame(forSample: min(next.start + crossfadeHalf, next.end))
+            guard blendStartFrame < blendEndFrame else { continue }
+
+            let span = Double(blendEndFrame - blendStartFrame)
+            for f in blendStartFrame..<blendEndFrame {
+                let t = Double(f - blendStartFrame) / span
+                let ratio = current.pitchRatio * (1 - t) + next.pitchRatio * t
+                let original = analysis.f0[f]
+                curve[f] = original > 0 ? original * ratio : 0
+            }
+        }
+
+        return curve
+    }
+
+    /// 세그먼트 core는 항상 1.0(들림). 인접 세그먼트끼리는(위 F0 보간 구간과 같은 판정 기준)
+    /// 오디오가 이미 연속이라 그 사이 gap도 1.0으로 유지 — 진짜 무음/숨쉬는 구간에서 시작/
+    /// 끝나는 경계에서만 짧게 0으로 페이드해 클릭음을 막는다.
+    private static func amplitudeEnvelope(segments: [Segment], bufferLength: Int, fadeCount: Int, crossfadeHalf: Int) -> [Float] {
+        var envelope = [Float](repeating: 0, count: bufferLength)
+
+        for (index, segment) in segments.enumerated() {
+            let clampedStart = max(0, min(bufferLength, segment.start))
+            let clampedEnd = max(clampedStart, min(bufferLength, segment.end))
+            for s in clampedStart..<clampedEnd { envelope[s] = 1.0 }
+
+            let previous = index > 0 ? segments[index - 1] : nil
+            let next = index < segments.count - 1 ? segments[index + 1] : nil
+            let connectsToPrevious = previous.map { segment.start - $0.end <= crossfadeHalf * 2 } ?? false
+            let connectsToNext = next.map { $0.start - segment.end <= crossfadeHalf * 2 } ?? false
+
+            if connectsToPrevious, let previous {
+                let bridgeStart = max(0, min(bufferLength, previous.end))
+                let bridgeEnd = max(bridgeStart, min(bufferLength, segment.start))
+                for s in bridgeStart..<bridgeEnd { envelope[s] = 1.0 }
+            } else {
+                let fadeStart = max(0, segment.start - fadeCount)
+                let count = segment.start - fadeStart
+                for i in 0..<count {
+                    let s = fadeStart + i
+                    guard s >= 0, s < bufferLength else { continue }
+                    envelope[s] = max(envelope[s], Float(i) / Float(max(1, count)))
+                }
+            }
+
+            if !connectsToNext {
+                let fadeEnd = min(bufferLength, segment.end + fadeCount)
+                let count = fadeEnd - segment.end
+                for i in 0..<count {
+                    let s = segment.end + i
+                    guard s >= 0, s < bufferLength else { continue }
+                    envelope[s] = max(envelope[s], Float(count - i) / Float(max(1, count)))
+                }
+            }
+        }
+
+        return envelope
+    }
+
+    /// `PitchShifterWorldAnalysis.synthesize` 결과는 항상 원본(=`sourceBuffer`) 길이와 같지만
+    /// (브릿지 계약, `PitchShifterWorldAnalysisTests.testSynthesizeOutputLengthMatchesInputLength`
+    /// 참고), 호출자가 요청한 `bufferLength`와는 여전히 다를 수 있어 안전하게 맞춘다.
     private static func fitLength(_ samples: [Float], to length: Int) -> [Float] {
         if samples.count == length { return samples }
         if samples.count > length { return Array(samples.prefix(length)) }
         return samples + [Float](repeating: 0, count: length - samples.count)
-    }
-
-    /// 128절 — 크로스페이드 확장 구간(`extStart..<extEnd`)을 이 세그먼트 자신의 오디오
-    /// (`segmentStart..<segmentEnd`)만으로 채운다. 세그먼트 경계 바로 안쪽 샘플부터 거울처럼
-    /// 뒤집어서 바깥으로 이어 붙이는 방식(대칭 반사 패딩)이라, 이웃 세그먼트(다른 음높이)의
-    /// 오디오는 전혀 섞이지 않고 경계에서 값이 자연스럽게 이어진다(불연속 없음).
-    /// `internal`로 열어둔 이유: 유닛테스트에서 이웃 침범이 실제로 없는지 직접 검증하기 위함
-    /// (`MelodySegmenter.absorbShortRuns`와 같은 관례).
-    static func mirrorExtendedSlice(
-        sourceBuffer: [Float],
-        segmentStart: Int,
-        segmentEnd: Int,
-        extStart: Int,
-        extEnd: Int
-    ) -> [Float] {
-        let clampedStart = max(0, min(sourceBuffer.count, segmentStart))
-        let clampedEnd = max(clampedStart, min(sourceBuffer.count, segmentEnd))
-        let core = Array(sourceBuffer[clampedStart..<clampedEnd])
-        guard !core.isEmpty else { return [Float](repeating: 0, count: max(0, extEnd - extStart)) }
-
-        let leadingCount = max(0, clampedStart - extStart)
-        let trailingCount = max(0, extEnd - clampedEnd)
-        return mirror(core, count: leadingCount, fromStart: true) + core + mirror(core, count: trailingCount, fromStart: false)
-    }
-
-    /// `core`의 시작(또는 끝) 근처 `count`개를 뒤집어 만든 확장분. `count`가 `core.count`보다
-    /// 크면(세그먼트 자체가 크로스페이드 확장보다 짧은 극단적인 경우 — 최소 음 길이 0.18초
-    /// ≈ 7900샘플이 크로스페이드 확장 최대 10ms ≈ 441샘플보다 훨씬 길어 실전에선 거의 없다)
-    /// 남는 만큼은 가장자리 샘플을 반복해 방어적으로 채운다.
-    private static func mirror(_ core: [Float], count: Int, fromStart: Bool) -> [Float] {
-        guard count > 0, !core.isEmpty else { return [] }
-        let mirrorCount = min(count, core.count)
-        if fromStart {
-            var result = Array(core.prefix(mirrorCount).reversed())
-            if count > mirrorCount { result = [Float](repeating: core[0], count: count - mirrorCount) + result }
-            return result
-        } else {
-            var result = Array(core.suffix(mirrorCount).reversed())
-            if count > mirrorCount { result += [Float](repeating: core[core.count - 1], count: count - mirrorCount) }
-            return result
-        }
     }
 }
