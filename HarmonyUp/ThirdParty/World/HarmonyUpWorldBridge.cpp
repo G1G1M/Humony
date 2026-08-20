@@ -5,6 +5,7 @@
 #include "world/cheaptrick.h"
 #include "world/d4c.h"
 #include "world/synthesis.h"
+#include "world/constantnumbers.h"
 
 #include <vector>
 #include <cstring>
@@ -25,7 +26,8 @@ struct HarmonyUpWorldAnalysis {
   std::vector<std::vector<double>> aperiodicity;
 };
 
-HarmonyUpWorldAnalysis *HarmonyUpWorldAnalyze(const double *input, int length, int sampleRate) {
+HarmonyUpWorldAnalysis *HarmonyUpWorldAnalyze(const double *input, int length, int sampleRate,
+                                               double d4cThreshold) {
   if (length <= 0) {
     return nullptr;
   }
@@ -77,8 +79,13 @@ HarmonyUpWorldAnalysis *HarmonyUpWorldAnalyze(const double *input, int length, i
              &cheapTrickOption, spectrogram.data());
 
   // 3단계: 비주기성(숨소리/잡음 성분 비율) 추정 — 이것도 원본 그대로 재합성에 쓴다.
+  // threshold를 호출자가 넘긴 값으로 덮어써서 "D4C Love Train" 지름길(132절 헤더 주석 참고)
+  // 발동 빈도를 조절할 수 있게 한다 — InitializeD4COption의 기본값(world::kThreshold)에서
+  // 시작해 덮어쓰는 구조라, 기존 호출부처럼 기본값을 그대로 쓰고 싶으면 d4cThreshold에
+  // world::kThreshold를 넘기면 된다.
   D4COption d4cOption;
   InitializeD4COption(&d4cOption);
+  d4cOption.threshold = d4cThreshold;
   analysis->aperiodicity.assign(static_cast<size_t>(f0Length),
                                  std::vector<double>(static_cast<size_t>(spectralSize)));
   std::vector<double *> aperiodicity(static_cast<size_t>(f0Length));
@@ -184,7 +191,9 @@ void HarmonyUpWorldPitchShift(const double *input, int length, int sampleRate,
   // 129절 — 이 함수는 이제 handle 기반 API의 얇은 래퍼다: 한 번 분석하고, F0 전체를
   // pitchRatio배로 스케일한 곡선으로 한 번 재합성한다. 기존 호출부(단일 세그먼트를 한 번에
   // 옮기는 경우)와 동작이 정확히 같아야 하므로 별도 로직 없이 아래 두 함수만 그대로 호출한다.
-  HarmonyUpWorldAnalysis *analysis = HarmonyUpWorldAnalyze(input, length, sampleRate);
+  // world::kThreshold(0.85)는 InitializeD4COption의 기본값과 정확히 같은 값이라, 이 호출은
+  // 132절 이전(d4cThreshold 파라미터가 없던 시절)과 바이트 단위로 동일한 동작을 낸다.
+  HarmonyUpWorldAnalysis *analysis = HarmonyUpWorldAnalyze(input, length, sampleRate, world::kThreshold);
   if (!analysis) {
     std::memcpy(output, input, sizeof(double) * static_cast<size_t>(length));
     return;

@@ -33,7 +33,17 @@ typedef struct HarmonyUpWorldAnalysis HarmonyUpWorldAnalysis;
 
 // input을 한 번 분석해서 핸들을 만든다. 실패(길이가 분석 최소 길이보다 짧음 등)하면 NULL.
 // 반환된 핸들은 반드시 HarmonyUpWorldFreeAnalysis로 해제해야 한다.
-HarmonyUpWorldAnalysis *HarmonyUpWorldAnalyze(const double *input, int length, int sampleRate);
+//
+// - d4cThreshold: WORLD의 D4C(비주기성=숨소리/노이즈 성분 추정) 단계가 쓰는 임계값
+//   (WORLD 기본값은 0.85, world::kThreshold). D4C는 프레임이 "충분히 깨끗한 음"으로
+//   판단되면(추정된 대략적 비주기성이 이 값 이하) 그 프레임을 정교하게 계산하지 않고
+//   완전히 순수한 톤(비주기성 0 = 잡음 없음)으로 지름길 처리한다("D4C Love Train"). 이
+//   지름길이 자주 발동하면 실제 목소리엔 항상 있는 미세한 숨결/노이즈 질감이 사라져
+//   "너무 깨끗해서 기계음처럼" 들릴 수 있다 — 값을 낮출수록(0.0 = 지름길 완전히 끔)
+//   더 많은 프레임에서 실제 비주기성을 정교하게 계산해 자연스러운 질감이 살아날 가능성이
+//   있다(130~131절 "기계음" 피드백에 대한 실험, docs/CONCEPTS.md 132절).
+HarmonyUpWorldAnalysis *HarmonyUpWorldAnalyze(const double *input, int length, int sampleRate,
+                                               double d4cThreshold);
 
 // 분석된 F0 프레임 개수 — HarmonyUpWorldGetF0로 꺼내거나 HarmonyUpWorldSynthesizeWithF0에
 // 넘길 modifiedF0 배열의 길이와 정확히 같다.

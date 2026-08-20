@@ -27,13 +27,18 @@ final class PitchShifterWorldAnalysis {
     /// 원본(수정 전) F0 곡선 — 화음 곡선을 만들 때 "이 프레임의 원래 주파수"가 필요할 때 쓴다.
     let f0: [Double]
 
+    /// - Parameter d4cThreshold: WORLD의 D4C 비주기성(숨소리/노이즈) 추정 임계값 — 기본값
+    ///   0.85는 WORLD 자체 기본값(`world::kThreshold`)과 같다. 값을 낮추면 "충분히 깨끗하다"고
+    ///   판단해 지름길로 순수 톤 처리하는 프레임이 줄어들어(D4C Love Train), 더 많은 프레임에서
+    ///   실제 비주기성을 정교하게 계산한다 — 132절, "기계음처럼 들린다" 피드백에 대한 실험용
+    ///   손잡이(`HarmonyUpWorldBridge.h` 참고).
     /// - Returns: 분석에 실패하면(빈 입력, WORLD 최소 분석 길이보다 짧은 입력 등) nil.
-    init?(samples: [Float], sampleRate: Double) {
+    init?(samples: [Float], sampleRate: Double, d4cThreshold: Double = 0.85) {
         guard !samples.isEmpty else { return nil }
         let input = samples.map(Double.init)
 
         guard let handle = input.withUnsafeBufferPointer({ buffer in
-            HarmonyUpWorldAnalyze(buffer.baseAddress, Int32(input.count), Int32(sampleRate))
+            HarmonyUpWorldAnalyze(buffer.baseAddress, Int32(input.count), Int32(sampleRate), d4cThreshold)
         }) else { return nil }
 
         self.handle = handle

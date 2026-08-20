@@ -20,6 +20,14 @@ enum VoiceHarmonyTrackBuilder {
         case harmony(ChordGenerator.Interval)
     }
 
+    /// 132절 — WORLD 기본값(0.85, `world::kThreshold`)보다 낮춘 실험값. 화음 성부가
+    /// "기계음처럼 들린다"는 피드백(131절)에 대한 첫 시도 — 값을 0으로 낮춰 D4C Love Train
+    /// 지름길(프레임을 순수 톤으로 단순화)을 아예 끄고, 모든 유성음 프레임에서 실제 비주기성
+    /// (숨소리/노이즈 질감)을 정교하게 계산하도록 한다. 극단값으로 먼저 시험해 방향성 자체를
+    /// 확인하고, 너무 거칠거나 노이즈가 심하면 값을 올려 되돌아올 계획(`PitchShifterWorldAnalysis`
+    /// 헤더 주석 참고).
+    private static let harmonyD4CThreshold: Double = 0.0
+
     /// - Parameters:
     ///   - melodySteps: `RecordingAnalyzer.melodySteps`가 만든, harmony/onsetTime/duration이
     ///     채워진 배열.
@@ -57,7 +65,7 @@ enum VoiceHarmonyTrackBuilder {
         var silence: [Float] { [Float](repeating: 0, count: bufferLength) }
         guard !segments.isEmpty else { return silence }
 
-        guard let analysis = PitchShifterWorldAnalysis(samples: sourceBuffer, sampleRate: rate) else { return silence }
+        guard let analysis = PitchShifterWorldAnalysis(samples: sourceBuffer, sampleRate: rate, d4cThreshold: harmonyD4CThreshold) else { return silence }
 
         let fadeCount = max(0, Int(rate * fadeDuration))
         let crossfadeCount = max(2, Int(rate * crossfadeDuration) / 2 * 2)
