@@ -1,29 +1,32 @@
 import SwiftUI
 
-/// `PracticeView`의 "화음" 재생 책임 — 성부별 화음 트랙 계산, 재생, 카라오케 재생헤드
-/// 동기화/햅틱까지. 나머지 책임은 `PracticeView.swift`(상태/body),
+/// 화음이 멜로디와 싱크가 안 맞는다는 실기기 피드백(95·96절 이후에도 남음)에 대한 다음 실험 —
+/// `VoiceDoubler`(성부 두께감을 위한 지연+디튠 복사본 믹싱) 자체가 원본 위에 15~35ms 지연된
+/// 겹침을 한 겹 더 얹는 구조라, 그 겹침이 여전히 어택을 미세하게 부드럽게 만드는 요인일 수
+/// 있다는 가설을 검증하기 위해 끈다. `false`로 끄면 "합창처럼 두꺼운" 느낌은 줄지만 가장
+/// 깨끗하고 즉각적인 어택을 들을 수 있다 — 청취 결과로 다음(재도입/약하게/PSOLA 회귀 검토)을
+/// 정한다(docs/CONCEPTS.md 참고).
+private let isVoiceDoublingEnabled = false
+
+/// `PracticeView`의 "내 목소리로 화음" 재생 책임 — 성부별 화음 트랙 계산(WORLD 피치시프트),
+/// 재생, 카라오케 재생헤드 동기화/햅틱까지. 나머지 책임은 `PracticeView.swift`(상태/body),
 /// `PracticeView+Layout.swift`(레이아웃), `PracticeView+Scoring.swift`(채점),
 /// `PracticeView+Capture.swift`(녹음/분석)에 있다.
 ///
-/// **화음 소리 생성 방식(2026-08-20 변경)**: 92절(WSOLA)부터 WORLD 보코더까지 목소리를
-/// 피치시프트해서 화음을 만드는 방식을 계속 다듬어왔지만, "화음이 멜로디랑 따로 들린다"는
-/// 실기기 제보가 사라지지 않았다. 사용자가 "화음을 처음 넣었을 때(TonePlayer 합성음,
-/// 커밋 `c757f3a`)가 제일 정확했다"며 그 시점의 소리로 되돌려달라고 요청 — 그 시점의 코드
-/// 구조 자체는 지금과 완전히 달라(단음 캡처 모드, `ContentView` 단일 파일) 파일 단위로
-/// 되돌릴 수 없으므로, 지금 구조 위에서 **화음(베이스/3도/5도)의 소리 생성만**
-/// `HarmonyTrackBuilder`(WORLD 피치시프트) 대신 `SynthesizedHarmonyTrackBuilder`
-/// (`ToneSynthesizer`로 그때와 같은 파형을 직접 합성)로 바꿨다. 멜로디(원음)는 그대로
-/// `recentVoiceBuffer`를 재생하므로 영향 없음. `HarmonyTrackBuilder`/`PitchShifter`/
-/// `VoiceDoubler` 자체는 지우지 않고 그대로 뒀다 — 나중에 다시 필요하면 이 파일의 호출부
-/// 두 곳(`harmonizedTrack`, `precomputeHarmonyTracks`)만 되돌리면 된다.
+/// **화음 소리 생성 방식(2026-08-20, 다시 목소리로)**: 112절에서 "화음 처음 넣었을 때"의
+/// `TonePlayer` 합성음(`SynthesizedHarmonyTrackBuilder`)으로 잠깐 바꿨었는데, 113절에서
+/// 배음을 빼 단순화해도 "그냥 단순 음만 들려서" — 사용자가 다시 "내 목소리로 그 음을 만들어서
+/// 들려주는 걸로" 되돌려달라고 요청했다. `HarmonyTrackBuilder`(WORLD 피치시프트)/
+/// `PitchShifter`/`VoiceDoubler`를 지우지 않고 그대로 뒀던 덕분에, 이 파일의 호출부 두 곳
+/// (`harmonizedTrack`, `precomputeHarmonyTracks`)만 다시 바꾸면 됐다.
+/// `SynthesizedHarmonyTrackBuilder`/`ToneSynthesizer`도 지우지 않고 남겨뒀다 — 다음에 또
+/// 필요하면 마찬가지로 호출부만 다시 바꾸면 된다.
 extension PracticeView {
     var voiceHarmonyPanel: some View {
         HarmonyCard("내 목소리로 화음", systemImage: "music.mic", iconColor: Theme.voiceAccent) {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                 // 버튼보다 먼저 설명을 둬서, 뭘 누르기 전에 "이게 뭘 하는 버튼인지"부터 읽히게 한다.
-                // 화음을 처음 넣었을 때(TonePlayer 합성음)로 되돌린 뒤로는 베이스/3도/5도가
-                // 더 이상 목소리를 옮긴 소리가 아니라 합성음이라 문구도 그에 맞게 수정.
-                Text(String(format: "방금 녹음한 노래에 베이스/3도/5도 화음을 맞춰 들려줘요 (확보된 목소리: %.1f초)",
+                Text(String(format: "방금 녹음한 노래를 그대로 베이스/3도/5도로 옮겨서 들려줘요 (확보된 목소리: %.1f초)",
                             Double(recentVoiceBuffer.count) / recentVoiceSampleRate))
                     .font(Theme.Typography.caption)
                     .foregroundStyle(.secondary)
@@ -99,30 +102,31 @@ extension PracticeView {
     /// 없으면(온음계 밖 음 등, 악보에도 쉼표로 표시되는 것과 같은 경우) 무음으로 채워서 재생
     /// 타이밍(재생헤드 매핑, 멜로디 트랙과의 동기)은 그대로 유지한다 — 스텝 사이의 빈틈도
     /// 무음으로 메워서, 결과 트랙 길이가 `recorded`(멜로디 트랙)와 정확히 같게 만든다.
-    /// 실제 조합 로직은 `SynthesizedHarmonyTrackBuilder`(PitchEngine, 순수 함수+유닛테스트)로
-    /// 옮겼다 — 이 메서드는 `@State`(melodySteps/recentVoiceBuffer 등)를 그 함수의 명시적
-    /// 파라미터로 풀어주는 얇은 래퍼일 뿐이다. 왜 목소리 피치시프트(`HarmonyTrackBuilder`)
-    /// 대신 합성음을 쓰는지는 이 파일 상단 문서 참고.
+    /// 실제 조합 로직은 `HarmonyTrackBuilder`(PitchEngine, 순수 함수+유닛테스트)로 옮겼다 —
+    /// 이 메서드는 `@State`(melodySteps/recentVoiceBuffer 등)를 그 함수의 명시적 파라미터로
+    /// 풀어주는 얇은 래퍼일 뿐이다. 왜 이렇게 뽑았는지는 `HarmonyTrackBuilder.swift` 문서 참고.
     func harmonizedTrack(interval: ChordGenerator.Interval, startStepIndex: Int?, startTime: Double, rate: Double) -> [Float] {
-        SynthesizedHarmonyTrackBuilder.build(
+        HarmonyTrackBuilder.build(
             melodySteps: melodySteps,
-            bufferLength: recentVoiceBuffer.count,
+            recentVoiceBuffer: recentVoiceBuffer,
             interval: interval,
             startStepIndex: startStepIndex,
             startTime: startTime,
             rate: rate,
-            segmentFadeDuration: harmonySegmentFadeDuration
+            segmentFadeDuration: harmonySegmentFadeDuration,
+            isVoiceDoublingEnabled: isVoiceDoublingEnabled
         )
     }
 
     /// 녹음 분석이 끝나자마자(재생 버튼을 누르기 전에) 성부별 화음 트랙을 미리 다 계산해서
-    /// `precomputedHarmonyTracks`에 담아둔다. 예전(WORLD 피치시프트 시절)엔 "재생" 버튼을
-    /// 누른 시점에야 이 무거운 연산을 시작해서, 그 계산이 악보 렌더링(WKWebView JS)과 동시에
-    /// CPU를 다퉈 재생 오디오가 끊기는 원인이 됐다 — "재생 버튼은 이미 계산돼있는 걸 들어보기
-    /// 위한 버튼이어야 하지, 누른 시점에 계산을 시작하는 버튼이면 안 된다"는 지적을 반영해
-    /// 계산 시점 자체를 녹음 직후로 앞당겼다. 지금은 `SynthesizedHarmonyTrackBuilder`로
-    /// 바뀌어서 연산 자체가 훨씬 가벼워졌지만(단순 사인파 합성), 사전 계산 패턴은 그대로
-    /// 유지한다 — 재생 버튼을 누르는 순간 아무 연산도 없이 바로 트는 게 더 단순하고 안전하다.
+    /// `precomputedHarmonyTracks`에 담아둔다. 예전엔 "재생" 버튼을 누른 시점에야 이 무거운
+    /// WORLD 연산을 시작해서, 그 계산이 악보 렌더링(WKWebView JS)과 동시에 CPU를 다퉈 재생
+    /// 오디오가 끊기는 원인이 됐다 — "재생 버튼은 이미 계산돼있는 걸 들어보기 위한 버튼이어야
+    /// 하지, 누른 시점에 계산을 시작하는 버튼이면 안 된다"는 지적을 반영해 계산 시점 자체를
+    /// 녹음 직후로 앞당겼다. 이러면 계산은 악보 렌더링과 겹쳐도 상관없다(둘 다 아직 스피커로
+    /// 아무 소리도 안 내는 준비 단계라 CPU를 나눠 써도 사용자 귀에는 안 들림) — 진짜 위험한
+    /// "실시간 오디오 출력 중 CPU 경쟁"은 재생이 실제로 시작되는 시점으로 옮겨가는데, 그때는
+    /// 이미 한참 전에 계산이 끝나 있을 가능성이 높다.
     func precomputeHarmonyTracks() {
         precomputedHarmonyTracks = [:]
         let rate = recentVoiceSampleRate
@@ -144,14 +148,15 @@ extension PracticeView {
         Task {
             var computed: [ChordGenerator.Interval: [Float]] = [:]
             for interval in ChordGenerator.Interval.allCases {
-                computed[interval] = SynthesizedHarmonyTrackBuilder.build(
+                computed[interval] = HarmonyTrackBuilder.build(
                     melodySteps: stepsSnapshot,
-                    bufferLength: bufferSnapshot.count,
+                    recentVoiceBuffer: bufferSnapshot,
                     interval: interval,
                     startStepIndex: nil,
                     startTime: 0,
                     rate: rate,
-                    segmentFadeDuration: harmonySegmentFadeDuration
+                    segmentFadeDuration: harmonySegmentFadeDuration,
+                    isVoiceDoublingEnabled: isVoiceDoublingEnabled
                 )
             }
             guard harmonyPrecomputeGeneration == generation else { return } // 그 사이 재녹음으로 더 최신 시도가 시작됐으면 이 결과는 버린다
@@ -167,7 +172,8 @@ extension PracticeView {
     ///
     /// `startStepIndex`가 있으면(악보 탭, 74절) 그 스텝의 onsetTime부터 재생한다 — 버튼(항상
     /// nil, 처음부터)과 탭(구체적 인덱스)이 같은 파이프라인을 공유한다. 재생 시작 지점만
-    /// `recentVoiceBuffer`를 그 지점부터 잘라서 넣는 걸로 바뀌고, 나머지(정규화/믹싱)는 그대로다.
+    /// `recentVoiceBuffer`를 그 지점부터 잘라서 넣는 걸로 바뀌고, 나머지(정규화/시프트/더블링)는
+    /// 그대로다.
     func playHarmonizedVoice(startStepIndex: Int?) {
         // 예전엔 여기서 isScoreRendering을 확인해 악보가 다 그려질 때까지 재생을 통째로 막았다 —
         // 화음 트랙 계산(WORLD, 무거움)이 이 함수 호출 시점에야 시작됐기 때문에, 그 계산이 악보
@@ -248,29 +254,32 @@ extension PracticeView {
             if !muted.contains(.melody) {
                 tracks.append((prepare(recorded), 0.0)) // 리드 멜로디는 중앙
             }
-            // 베이스(한 옥타브 아래) + 3도 + 5도 트랙을 만든다 — 스텝마다 자기 화음 목표
-            // 주파수로 따로 합성한다(harmonizedTrack → SynthesizedHarmonyTrackBuilder, 멜로디가
-            // 여러 음일 때 화음이 어긋나던 문제 수정, docs/CONCEPTS.md 81절 및 화음 소리 생성
-            // 방식 변경은 이 파일 상단 문서 참고). 꺼진 성부는 건너뛴다. 보통은
-            // precomputeHarmonyTracks가 이미 다 계산해둔 전체 트랙(startStepIndex: nil 기준,
-            // recentVoiceBuffer와 길이가 같음)에서 시작 지점부터 잘라 쓰기만 하면 되고, 다시
-            // 합성하지 않는다 — 아주 드물게(녹음 끝나자마자 몇백ms 안에 재생을 누른 경우 등)
-            // 사전 계산이 아직 안 끝났으면 그때만 예전처럼 그 자리에서 계산한다.
+            // 베이스(한 옥타브 아래) + 3도 + 5도 트랙을 만든다 — 스텝마다 자기 화음 목표로 따로
+            // 피치시프트한다(harmonizedTrack, 멜로디가 여러 음일 때 화음이 어긋나던 문제 수정,
+            // docs/CONCEPTS.md 81절). 꺼진 성부는 건너뛴다. 보통은 precomputeHarmonyTracks가
+            // 이미 다 계산해둔 전체 트랙(startStepIndex: nil 기준, recentVoiceBuffer와 길이가
+            // 같음)에서 시작 지점부터 잘라 쓰기만 하면 되고, WORLD 연산을 다시 돌리지 않는다 —
+            // 아주 드물게(녹음 끝나자마자 몇백ms 안에 재생을 누른 경우 등) 사전 계산이 아직 안
+            // 끝났으면 그때만 예전처럼 그 자리에서 계산한다.
             for (voice, interval) in [(PlaybackVoice.bass, ChordGenerator.Interval.bass),
                                        (.third, .third),
                                        (.fifth, .fifth)] where !muted.contains(voice) {
-                // 합성음이라 더블링(목소리 두께감용 지연+디튠 복사)은 필요 없다 — 톤 자체가
-                // 이미 배음이 섞인 파형(ToneSynthesizer)이라 목소리처럼 "얇게" 들리지 않는다.
-                let synthesized: [Float]
+                // 더블링(성부마다 다른 지연/디튠으로 두께를 주는 것)은 이제 harmonizedTrack
+                // 안에서 음(세그먼트) 단위로 이미 적용돼 있다 — 여기서 트랙 전체에 한 번 더
+                // 걸면 음이 바뀔 때마다 "직전 음의 지연된 피치"가 새어 들어와 화음이 어긋나
+                // 들리던 문제(93절)가 재발한다. 멜로디(원음)는 애초에 더블링 대상이 아니다 —
+                // 이미 사용자 자신이 직접 부른 진짜 목소리라 "다른 사람이 한 번 더 부른" 효과가
+                // 필요 없고, 오히려 원음이 흔들리면 리드로서의 기준점이 흐려진다.
+                let doubled: [Float]
                 if let full = precomputed[interval] {
-                    synthesized = Array(full[min(startSampleIndex, full.count)...])
+                    doubled = Array(full[min(startSampleIndex, full.count)...])
                 } else {
-                    synthesized = harmonizedTrack(interval: interval, startStepIndex: startStepIndex, startTime: startTime, rate: rate)
+                    doubled = harmonizedTrack(interval: interval, startStepIndex: startStepIndex, startTime: startTime, rate: rate)
                 }
-                guard !synthesized.isEmpty else { continue }
+                guard !doubled.isEmpty else { continue }
                 // interval.gain(바버샵풍 믹스 밸런스, docs/CONCEPTS.md 리서치 섹션 B)은
                 // prepare()로 라우드니스를 이미 맞춘 뒤 상대적인 크고 작음만 마지막에 조정한다.
-                tracks.append((AudioGain.applyGain(prepare(synthesized), factor: interval.gain), interval.pan))
+                tracks.append((AudioGain.applyGain(prepare(doubled), factor: interval.gain), interval.pan))
             }
 
             do {
