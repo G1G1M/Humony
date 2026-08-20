@@ -326,6 +326,11 @@ extension PracticeView {
                 // 화음 API 제거(116절) 이후 없어졌던 재생 버튼 — 방금 부른 걸 그대로 들어보며
                 // 위 "감지된 음" 텍스트와 귀로 대조할 수 있게 다시 추가(멜로디 인식 정확도 검증용).
                 if !recentVoiceBuffer.isEmpty {
+                    // 세 재생 버튼(원본/합성음 화음/목소리 화음)은 항상 하나만 켜지게 서로 막는다 —
+                    // 동시에 여러 개가 스피커로 나가면 마이크 피드백 가드(isPlayingRecording 등)
+                    // 판단이 꼬이기 쉽다.
+                    let anyPlaybackActive = isPlayingRecording || isPlayingHarmony || isPlayingVoiceHarmony
+
                     HStack(spacing: Theme.Spacing.sm) {
                         Button {
                             togglePlayback()
@@ -333,7 +338,7 @@ extension PracticeView {
                             Label(isPlayingRecording ? "정지" : "녹음 다시 듣기", systemImage: isPlayingRecording ? "stop.fill" : "play.fill")
                         }
                         .harmonyButtonStyle()
-                        .disabled(isPlayingHarmony)
+                        .disabled(anyPlaybackActive && !isPlayingRecording)
 
                         // 120절, 화음 재설계 1단계 — 멜로디+베이스+3도+5도를 합성음으로 들어본다.
                         Button {
@@ -342,7 +347,16 @@ extension PracticeView {
                             Label(isPlayingHarmony ? "정지" : "화음 듣기", systemImage: isPlayingHarmony ? "stop.fill" : "music.note.list")
                         }
                         .harmonyButtonStyle()
-                        .disabled(isPlayingRecording)
+                        .disabled(anyPlaybackActive && !isPlayingHarmony)
+
+                        // 123절, 화음 재설계 2단계 — 같은 화음을 사용자 자신의 목소리(WSOLA 피치시프트)로 들어본다.
+                        Button {
+                            toggleVoiceHarmonyPlayback()
+                        } label: {
+                            Label(isPlayingVoiceHarmony ? "정지" : "내 목소리로 화음", systemImage: isPlayingVoiceHarmony ? "stop.fill" : "person.wave.2")
+                        }
+                        .harmonyButtonStyle()
+                        .disabled(anyPlaybackActive && !isPlayingVoiceHarmony)
                     }
                 }
 

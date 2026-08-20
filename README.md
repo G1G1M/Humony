@@ -1,6 +1,6 @@
 # HarmonyUp (하모니업)
 
-멜로디를 녹음하면 음표별로 인식해서 악보로 보여주고, 그 위에 화음(베이스/3도/5도)을 얹어 들려주는 iOS 앱. 2026-08-20에 화음 생성/재생 기능을 한 번 전부 제거하고 멜로디 인식(녹음 → 음표 추출 → 악보 표시)부터 다시 다진 뒤(실기기 다회 재검증 완료), **화음을 처음부터 다시 쌓는 중이다** — 목소리 피치시프트가 여러 라운드를 거쳐도 "이상하게 들린다"는 문제를 못 풀었던 전례가 있어, 이번엔 합성음(순수 사인파)부터 시작해 "화음 선택/타이밍이 맞는지"를 변수 격리해서 검증하고 있다. 원래 구상(목소리 화음+따라 부르기 채점)은 [`docs/prd.md`](docs/prd.md) 참고 — 채점 관련 코드(`PitchScorer`, `PracticeAttempt` 등)는 여전히 UI에서 뺀 채 남겨뒀다(아래 "보관 중인 코드" 참고).
+멜로디를 녹음하면 음표별로 인식해서 악보로 보여주고, 그 위에 화음(베이스/3도/5도)을 얹어 들려주는 iOS 앱. 2026-08-20에 화음 생성/재생 기능을 한 번 전부 제거하고 멜로디 인식(녹음 → 음표 추출 → 악보 표시)부터 다시 다진 뒤(실기기 다회 재검증 완료), **화음을 처음부터 다시 쌓는 중이다** — 합성음(순수 사인파)으로 화음 선택/타이밍/재생 구조부터 변수 격리해 검증(120~122절)한 뒤, 지금은 그 위에서 목소리 피치시프트(WSOLA)를 다시 얹는 2단계(123절)를 진행 중이다. 원래 구상(목소리 화음+따라 부르기 채점)은 [`docs/prd.md`](docs/prd.md) 참고 — 채점 관련 코드(`PitchScorer`, `PracticeAttempt` 등)는 여전히 UI에서 뺀 채 남겨뒀다(아래 "보관 중인 코드" 참고).
 
 전체 배경(문제의식, 경쟁 분석, 페르소나 등)은 [`docs/prd.md`](docs/prd.md), 개발 지침은 [`CLAUDE.md`](CLAUDE.md) 참고. 신호처리 개념 학습 노트는 [`docs/CONCEPTS.md`](docs/CONCEPTS.md)에 계속 정리 중.
 
@@ -15,7 +15,7 @@
 
 ## 진행 상황
 
-전체 체크리스트는 [`docs/PROGRESS.md`](docs/PROGRESS.md) 참고. 최근 작업: 화음 재설계 1단계(120절, `ToneSynthesizer`+`SynthesizedHarmonyTrackBuilder`) → 실기기 검증 중 "따다다닥" 끊김 발견, 진짜 크로스페이드로 수정(121절) → 잔여 "지지직"을 짧은 음 램프 중첩 방지+화음 재생 음량 조정으로 개선(122절). 다음은 목소리 기반 화음("내 목소리로 화음 만들기") 단계로 넘어갈지 논의 중.
+전체 체크리스트는 [`docs/PROGRESS.md`](docs/PROGRESS.md) 참고. 최근 작업: 화음 재설계 1단계(120절, 합성음) → 크로스페이드/지지직 수정(121~122절) → 실제 노래로 "화음이 애매함" 재제보, 로그 분석으로 코드 버그가 아니라 화성 모델(v1)의 한계임을 확인 → **화음 재설계 2단계, 목소리 피치시프트(WSOLA) 복원 + `VoiceHarmonyTrackBuilder`**(123절, "내 목소리로 화음" 버튼 추가, 실기기 청취 테스트 진행 중).
 
 ## 구성 요소 (`HarmonyUp/Sources/PitchEngine/`)
 
@@ -29,9 +29,11 @@
 | `MelodySession` | 프레임별 감지 결과를 누적해 KeyDetector에 연결 |
 | `ChordGenerator` | 멜로디 음 하나하나마다 독립적으로 그 음 자신을 근음 삼아 다이어토닉 트라이어드(베이스/3도/5도)를 계산하는 화성 이론 로직(v1, 101절) |
 | `ToneSynthesizer` | 순수 사인파를 오프라인(배열)으로 합성 — 화음 재설계 1단계(120절), 목소리 피치시프트 배제 |
-| `SynthesizedHarmonyTrackBuilder` | 멜로디 스텝 시퀀스를 원본 녹음과 같은 길이의 트랙으로(멜로디/베이스/3도/5도 전부 `ToneSynthesizer`로 합성, 120절) |
+| `SynthesizedHarmonyTrackBuilder` | 멜로디 스텝 시퀀스를 원본 녹음과 같은 길이의 트랙으로(멜로디/베이스/3도/5도 전부 `ToneSynthesizer`로 합성, 120~122절) |
+| `PitchShifter` | 오디오 길이는 유지하며 피치만 바꾸는 WSOLA 구현(93~115절에서 만들었다 지운 걸 123절에서 git 히스토리로 복원) |
+| `VoiceHarmonyTrackBuilder` | `SynthesizedHarmonyTrackBuilder`와 같은 세그먼트+크로스페이드 구조로, 소스를 원본 녹음 슬라이스+`PitchShifter`로 채움(123절, "내 목소리로 화음") |
 | `TonePlayer` | 지정 주파수 톤을 실시간 재생(배음+envelope) — 녹음 전 "첫음 잡기" 참고음 전용(66절) |
-| `RecordingPlayer` | 모노 `[Float]` 버퍼 하나를 트는 범용 재생기 — "녹음 다시 듣기"(117절)와 "화음 듣기"(120절) 둘 다 이 타입의 별개 인스턴스를 쓴다 |
+| `RecordingPlayer` | 모노 `[Float]` 버퍼 하나를 트는 범용 재생기 — "녹음 다시 듣기"(117절)/"화음 듣기"(120절)/"내 목소리로 화음"(123절)이 각각 별개 인스턴스로 쓴다 |
 | `PitchSmoother` | MIDI 노트(로그 스케일) 기준 EMA로 비브라토·흔들림 완화 |
 | `AudioGain` | 러프니스 정규화(기기별 마이크 게인 차이 보정) + 화음 트랙용 페이드/합산(`applyFadeInOut`/`mix`, 120절) |
 | `MelodySegmenter` | 녹음 전체를 배치로 분석해 음표(음높이+시작시간+길이) 목록으로 잘라내기 |
@@ -44,8 +46,8 @@
 
 채점 관련 코드는 지우지 않고 남겨뒀다 — 화음 재생이 다시 자리잡은 뒤 순서를 다시 논의할 대상.
 
-- `PitchScorer`/`PracticeSummary`/`PracticeAttempt`(SwiftData)/`PracticeView+Scoring.swift`/`HistoryView` — "따라 부르기 채점"과 기록 탭. 화음이 아직 목소리 기반이 아니라 목표음으로 쓰기엔 이르다고 판단해 UI에서 뺐다(`PracticeView+Layout.swift`가 더 이상 `scoringCard`를 안 부름).
-- 목소리 피치시프트(WSOLA/PSOLA/WORLD 3종), 화음 트랙 조립(`HarmonyTrackBuilder`, 목소리 버전), 다중 트랙 재생(`VoiceClipPlayer`), 보컬 더블링(`VoiceDoubler`), WORLD 보코더(`HarmonyUp/ThirdParty/World/`)는 **git 히스토리에서 완전히 삭제**했다(116절 커밋 직전 참고) — 여러 번 되살렸다 지웠다 한 이력이 있어서(112~115절), 다시 필요하면 git log에서 찾아 복원하면 된다. `ToneSynthesizer`/`SynthesizedHarmonyTrackBuilder`는 120절에서 다시 살아나 위 표에 있다.
+- `PitchScorer`/`PracticeSummary`/`PracticeAttempt`(SwiftData)/`PracticeView+Scoring.swift`/`HistoryView` — "따라 부르기 채점"과 기록 탭. 화음 재생이 완전히 자리잡기 전이라 목표음으로 쓰기엔 이르다고 판단해 UI에서 뺐다(`PracticeView+Layout.swift`가 더 이상 `scoringCard`를 안 부름).
+- PSOLA/WORLD 피치시프트, 화음 트랙 조립(`HarmonyTrackBuilder`, 목소리 버전), 다중 트랙 재생(`VoiceClipPlayer`), 보컬 더블링(`VoiceDoubler`), WORLD 보코더(`HarmonyUp/ThirdParty/World/`)는 **git 히스토리에서 완전히 삭제**했다(116절 커밋 직전 참고) — 여러 번 되살렸다 지웠다 한 이력이 있어서(112~115절), 다시 필요하면 git log에서 찾아 복원하면 된다. `ToneSynthesizer`/`SynthesizedHarmonyTrackBuilder`(120절)와 `PitchShifter`(WSOLA)/`VoiceHarmonyTrackBuilder`(123절)는 다시 살아나 위 표에 있다.
 
 ## 개발
 

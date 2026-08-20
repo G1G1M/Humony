@@ -45,7 +45,7 @@ extension PracticeView {
             try audioCapture.start { result, rawSamples, rawSampleRate in
                 // 녹음/화음 재생 중엔 마이크를 무시한다 — 스피커로 낸 소리가 다시 마이크로
                 // 들어가는 피드백 루프를 막기 위한 기존 원칙(화음 재생 때부터 이어옴).
-                guard !isPlayingRecording, !isPlayingHarmony else { return }
+                guard !isPlayingRecording, !isPlayingHarmony, !isPlayingVoiceHarmony else { return }
 
                 // 녹음 중엔 이 프레임을 quickRecordBuffer에 쌓기만 한다. 녹음이 끝난 뒤 "따라 부르기
                 // 채점"으로 마이크가 다시 켜질 때는 quickRecordPhase가 더 이상 .recording이 아니므로
@@ -268,6 +268,20 @@ extension PracticeView {
         quickRecordPhase = .result(noteCount: analyzed.notes.count)
         #if DEBUG
         print("[PracticeView] applyQuickRecordResult 완료 — hasCapturedNote=\(hasCapturedNote), melodySteps=\(melodySteps.count)개, suggestedHarmony=\(melodySession.suggestedHarmony != nil ? "있음" : "nil")")
+        // 123절 — "일반 노래로 부르면 화음이 애매하게 들린다" 진단용. 조성+스텝별 화음을 실측
+        // 로그로 남겨서, 조성 판별이 틀렸는지/화음 계산 자체는 맞는데 다른 이유로 애매하게
+        // 들리는지 구분한다(117~119절과 같은 방식 — UI로 상태를 짐작하지 말고 로그로 확인).
+        if let key = melodySession.detectedKey {
+            print("[PracticeView] 감지된 조성: \(key.name)")
+        }
+        let stepLog = melodySteps.map { step -> String in
+            guard let voices = step.harmonyVoices else { return "\(step.noteName)(화음없음-온음계밖)" }
+            let bass = voices[.bass] ?? "?"
+            let third = voices[.third] ?? "?"
+            let fifth = voices[.fifth] ?? "?"
+            return "\(step.noteName)[베이스\(bass)/3도\(third)/5도\(fifth)]"
+        }.joined(separator: ", ")
+        print("[PracticeView] 스텝별 화음(\(melodySteps.count)개): \(stepLog)")
         #endif
     }
 
@@ -278,6 +292,8 @@ extension PracticeView {
 
         harmonyPlayer.stop()
         isPlayingHarmony = false
+        voiceHarmonyPlayer.stop()
+        isPlayingVoiceHarmony = false
         recentVoiceBuffer = []
         isScoringExpanded = false
         lastSavedInterval = nil
@@ -356,6 +372,42 @@ extension PracticeView {
         } catch {
             isPlayingHarmony = false
             statusText = "화음 재생 실패: \(error.localizedDescription)"
+        }
+    }
+
+    /// 123절, 화음 재설계 2단계 — 멜로디+베이스+3도+5도를 전부 **사용자 자신의 목소리**로
+    /// 만든다(`VoiceHarmonyTrackBuilder`, WSOLA 피치시프트). `toggleHarmonyPlayback`(합성음
+    /// 버전)과 구조는 동일하고 트랙 빌더와 플레이어만 다르다 — 두 버전을 나란히 남겨서
+    /// 언제든 비교해 들어볼 수 있게 한다(93~115절에서 목소리 vs 합성음을 여러 번 오갔던
+    /// 전례가 있어, 이번에도 확정 전까지는 둘 다 유지).
+    func toggleVoiceHarmonyPlayback() {
+        if isPlayingVoiceHarmony {
+            voiceHarmonyPlayer.stop()
+            isPlayingVoiceHarmony = false
+            return
+        }
+        guard !recentVoiceBuffer.isEmpty, !melodySteps.isEmpty else { return }
+
+        let bufferLength = recentVoiceBuffer.count
+        let rate = recentVoiceSampleRate
+        let voices: [VoiceHarmonyTrackBuilder.Voice] = [.melody, .harmony(.bass), .harmony(.third), .harmony(.fifth)]
+        let tracks = voices.map { voice in
+            VoiceHarmonyTrackBuilder.build(melodySteps: melodySteps, sourceBuffer: recentVoiceBuffer, bufferLength: bufferLength, voice: voice, rate: rate)
+        }
+        // 합성음(122절)과 같은 이유로 화음 재생 전용 낮춘 목표 음량을 그대로 적용.
+        let mixed = AudioGain.applyFadeInOut(
+            AudioGain.normalizeLoudness(AudioGain.mix(tracks: tracks), targetRMS: 0.15, peakCeiling: 0.7),
+            fadeSampleCount: Int(rate * 0.01)
+        )
+
+        do {
+            isPlayingVoiceHarmony = true
+            try voiceHarmonyPlayer.play(samples: mixed, sampleRate: rate) {
+                isPlayingVoiceHarmony = false
+            }
+        } catch {
+            isPlayingVoiceHarmony = false
+            statusText = "목소리 화음 재생 실패: \(error.localizedDescription)"
         }
     }
 }

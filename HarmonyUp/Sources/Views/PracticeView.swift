@@ -117,9 +117,9 @@ struct PracticeView: View {
     // 녹음하면 지운다.
     @State var lastSavedInterval: ChordGenerator.Interval?
     @State var melodySteps: [MelodyStep] = []
-    // 방금 녹음한 목소리 원본 — 예전엔 "내 목소리로 화음"(피치시프트) 입력으로 쓰였다.
-    // 지금은 RecordingPlayer로 원본 그대로 재생하는 용도로 쓴다(멜로디 인식 정확도를 귀로도
-    // 확인하기 위해, 2026-08-20).
+    // 방금 녹음한 목소리 원본 — "녹음 다시 듣기"(원본 그대로 재생, 117절)와
+    // "내 목소리로 화음 듣기"(123절, VoiceHarmonyTrackBuilder가 이 버퍼에서 음마다 슬라이싱해
+    // 피치시프트하는 소스)에 둘 다 쓰인다.
     @State var recentVoiceBuffer: [Float] = []
     @State var recentVoiceSampleRate: Double = 44100
     let recordingPlayer = RecordingPlayer()
@@ -129,6 +129,10 @@ struct PracticeView: View {
     // "녹음 다시 듣기"와 "화음 듣기"를 빠르게 번갈아 누를 때 서로의 재생을 끊어버릴 수 있다.
     let harmonyPlayer = RecordingPlayer()
     @State var isPlayingHarmony = false
+    // 123절, 화음 재설계 2단계 — 목소리 피치시프트(WSOLA) 버전 전용 플레이어. 합성음 버전
+    // (harmonyPlayer)과 별개 인스턴스로 둬서 둘을 번갈아 눌러도 서로 끊기지 않게 한다.
+    let voiceHarmonyPlayer = RecordingPlayer()
+    @State var isPlayingVoiceHarmony = false
     // 악보 카드가 뜬 시점엔 항상 true로 시작 — WKWebView 프로세스가 늦게 뜰 수 있어서(76절),
     // 첫 렌더가 끝날 때까지는 화면이 비어 보이는 대신 "만드는 중" 표시를 겹쳐 보여준다.
     // VexFlowScoreView.Coordinator가 renderScore 자바스크립트 호출이 끝나면 false로 되돌린다.
@@ -179,6 +183,8 @@ struct PracticeView: View {
             isPlayingRecording = false
             harmonyPlayer.stop()
             isPlayingHarmony = false
+            voiceHarmonyPlayer.stop()
+            isPlayingVoiceHarmony = false
             startingNotePlayer.stop()
             isPlayingStartingNote = false
         }
