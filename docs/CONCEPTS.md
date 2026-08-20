@@ -3096,3 +3096,32 @@ Explore+Plan 에이전트로 코드를 직접 대조해 두 가지를 확인했�
 ### 다음 세션 — 더 근본적인 개선 후보
 
 여러 웹 화음 서비스(Tembrica 등)를 조사했지만 코드/라이브러리를 직접 가져다 쓸 수 있는 곳은 없었다(API 없음/유료/신경망 기반이라 온디바이스 부적합). 대신 **WORLD를 지금과 다르게 쓰는 방법**이 다음 후보로 남았다 — 지금은 화음 음 하나하나를 독립적으로 WORLD에 넣고 다시 합성해서(세그먼트별 개별 분석-재합성) 크로스페이드로 이어붙여도 "이어붙인 티"가 남는다. WORLD의 원래 설계는 목소리 전체를 **한 번만** 분석해 F0(피치) 곡선을 얻은 뒤, 그 곡선을 구간별로 원하는 화음 음정으로 바꿔서 **한 번만** 재합성하는 방식이다 — 이러면 자연스러운 숨결/떨림이 곡 전체에 걸쳐 끊기지 않을 가능성이 높다. 이걸 하려면 `HarmonyUpWorldBridge.cpp`(지금은 고정 비율 하나만 받음)를 구간별로 바뀌는 피치 곡선을 받도록 C++ 레벨에서 확장해야 한다 — 오늘 한 파라미터 조정보다 훨씬 큰 작업이라 다음 세션에서 별도로 다루기로 함.
+
+## 129. "전체 한 번 분석 + F0곡선 재합성" 구조 개선 1단계 — C++ 브릿지를 analyze/synthesize로 분리
+
+### 배경
+
+128절 마지막에 남긴 다음 세션 과제 착수. 사용자와 접근 방식을 먼저 정리해 확인받았다: (1) C++ 브릿지 확장(analyze/synthesize 분리) + 유닛테스트, (2) `VoiceHarmonyTrackBuilder` 새 API로 재작성, (3) 실기기 청취 검증 — 3단계로 나눠 진행하기로 함(124~126절과 같은 패턴). 이번 절은 1단계만.
+
+### 구조
+
+`HarmonyUpWorldBridge.cpp`의 기존 `HarmonyUpWorldPitchShift`는 "F0 추정(Dio+StoneMask) → 스펙트럼 포락선 추정(CheapTrick) → 비주기성 추정(D4C) → F0를 pitchRatio배로 스케일 → 재합성(Synthesis)"을 한 함수 안에서 매번 처음부터 끝까지 돌렸다. 이걸 불투명 포인터(`HarmonyUpWorldAnalysis*`, CoreFoundation의 `CFTypeRef` 같은 패턴 — 헤더에는 전방선언만 있고 실제 struct 정의는 `.cpp` 파일 안에만 있어서 Swift/C 쪽에서는 완전히 불투명하게 다룸) 기반 API로 쪼갰다:
+
+- `HarmonyUpWorldAnalyze(input, length, sampleRate)` — 분석 3단계(F0/포락선/비주기성)를 한 번 돌려서 결과를 handle에 저장.
+- `HarmonyUpWorldF0Length` / `HarmonyUpWorldFramePeriodMs` / `HarmonyUpWorldInputLength` / `HarmonyUpWorldGetF0` — handle에서 프레임 개수, 프레임 간격(ms), 원본 오디오 길이, 원본 F0 곡선을 꺼내는 getter들. Swift가 프레임 인덱스 → 실제 시각(`i * framePeriodMs / 1000`)을 계산해서 어느 멜로디 스텝에 속하는지 판단하는 데 쓴다.
+- `HarmonyUpWorldSynthesizeWithF0(analysis, modifiedF0, formantRatio, output)` — 저장된 포락선/비주기성은 그대로 재사용하고 F0만 `modifiedF0`(길이 = f0Length)로 바꿔치기해서 재합성. **분석은 다시 하지 않는다** — 화음 성부(베이스/3도/5도)마다 이 함수만 반복 호출하면 됨.
+- `HarmonyUpWorldFreeAnalysis` — handle 해제.
+
+기존 `HarmonyUpWorldPitchShift`(고정 비율 하나)는 지우지 않고 이 새 API의 얇은 래퍼로 재구현했다 — 내부적으로 `Analyze` 한 번 + F0 전체를 pitchRatio배로 균일 스케일한 곡선으로 `SynthesizeWithF0` 한 번을 호출할 뿐이라, 동작이 바이트 단위로 완전히 똑같다(아래 검증 참고). 기존 호출부(`PitchShifterWorld.swift`, 지금은 아직 `VoiceHarmonyTrackBuilder`가 이걸 씀)는 코드 변경 없이 그대로 동작.
+
+Swift 쪽엔 `PitchShifterWorldAnalysis`(신규, PitchEngine) 클래스를 추가해 이 handle을 RAII로 감쌌다 — `init?(samples:sampleRate:)`로 분석하고 `deinit`에서 자동으로 `HarmonyUpWorldFreeAnalysis`를 부르므로, 호출부가 수동으로 메모리를 해제할 필요가 없다(Swift ARC가 C 리소스 수명까지 관리하는 흔한 패턴). `synthesize(f0:formantRatio:)`가 얇은 브릿지 호출.
+
+### 검증
+
+`PitchShifterWorldAnalysisTests.swift`(신규, 7개):
+- `testAnalyzeThenUniformSynthesizeMatchesOldShiftFunction`(2개, formantRatio 유무 각각) — 새 handle 경로로 균일 비율 F0 곡선을 만들어 재합성한 결과가 기존 `PitchShifterWorld.shift`(옛 단일 함수, 지금은 내부적으로 같은 새 API로 구현됨) 결과와 **완전히 같은 배열**인지(`XCTAssertEqual`) 확인 — 리팩터링이 동작을 하나도 안 바꿨다는 가장 강한 증거.
+- `testSameAnalysisReusedForTwoDifferentRatiosProducesIndependentPitches` — 분석 하나를 재사용해서 장3도/완전5도 두 F0 곡선으로 각각 재합성해도 YIN 재검출로 두 결과가 독립적으로 정확한지 확인 — 다음 단계(`VoiceHarmonyTrackBuilder`가 분석 하나로 3성부를 만드는 것)가 기댈 핵심 능력.
+- `testSynthesizeWithRegionVaryingF0AppliesRatioOnlyToThatRegion` — **이번 개선의 핵심 능력**: 한 F0 곡선 안에서 앞쪽 절반은 원본 그대로, 뒤쪽 절반만 장3도 위로 바꿔서 한 번에 재합성해도, 두 구간에서 각각 올바른 주파수가 검출되는지 확인(같은 목소리가 이어지다가 중간에 화음 음정으로 바뀌는 상황을 흉내냄) — 다음 단계에서 멜로디 스텝마다 F0 곡선의 해당 구간만 화음 비율로 바꿔치기하는 방식이 실제로 작동함을 미리 증명.
+- 나머지(메타데이터 일관성, 빈 입력 실패, 출력 길이)는 기본 계약 확인.
+
+유닛테스트 153개(146+7) 전체 통과(아이패드 시뮬레이터, iPad Pro 11-inch M5). **다음 단계(2단계)**: `VoiceHarmonyTrackBuilder`를 이 handle 기반 API 위에서 재작성 — 원본 녹음 전체로 `PitchShifterWorldAnalysis`를 한 번 만들고, 성부마다 F0 곡선을 조립(멜로디 스텝 구간은 해당 화음 비율로, 그 외 구간은 무음 마스킹 예정)해서 `synthesize`를 성부 수만큼만 호출 — 지금처럼 세그먼트를 잘라 각각 분석하고 크로스페이드로 이어붙이는 구조 자체가 없어진다.
