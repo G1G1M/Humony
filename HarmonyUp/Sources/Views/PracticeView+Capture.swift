@@ -348,10 +348,15 @@ extension PracticeView {
 
         let bufferLength = recentVoiceBuffer.count
         let rate = recentVoiceSampleRate
-        let voices: [SynthesizedHarmonyTrackBuilder.Voice] = [.melody, .harmony(.bass), .harmony(.third), .harmony(.fifth)]
-        let tracks = voices.map { voice in
-            SynthesizedHarmonyTrackBuilder.build(melodySteps: melodySteps, bufferLength: bufferLength, voice: voice, rate: rate)
+        let melodyTrack = SynthesizedHarmonyTrackBuilder.build(melodySteps: melodySteps, bufferLength: bufferLength, voice: .melody, rate: rate)
+        // 128절 — "아카펠라/화음에서는 멜로디가 더 잘 들려야 하지 않냐"는 피드백 — 화음 3성부는
+        // backingGain만큼 낮춰서 섞고, 리드 멜로디만 원래 크기(1.0)로 남겨 앞으로 나오게 한다.
+        let backingGain: Float = 0.65
+        let harmonyTracks: [[Float]] = [ChordGenerator.Interval.bass, .third, .fifth].map { interval in
+            SynthesizedHarmonyTrackBuilder.build(melodySteps: melodySteps, bufferLength: bufferLength, voice: .harmony(interval), rate: rate)
+                .map { $0 * backingGain }
         }
+        let tracks = [melodyTrack] + harmonyTracks
         // 122절 재검증 — 크로스페이드+램프 중첩 수정 이후에도 "살짝 지지직"이 남는다는 제보 —
         // normalizeLoudness 기본값(targetRMS 0.25, peakCeiling 0.98)은 원래 목소리 녹음(발성이라
         // 크레스트 팩터가 큼)을 키우려고 잡은 값인데, 순수 사인파 4개를 겹친 신호는 애초에
@@ -390,10 +395,15 @@ extension PracticeView {
 
         let bufferLength = recentVoiceBuffer.count
         let rate = recentVoiceSampleRate
-        let voices: [VoiceHarmonyTrackBuilder.Voice] = [.melody, .harmony(.bass), .harmony(.third), .harmony(.fifth)]
-        let tracks = voices.map { voice in
-            VoiceHarmonyTrackBuilder.build(melodySteps: melodySteps, sourceBuffer: recentVoiceBuffer, bufferLength: bufferLength, voice: voice, rate: rate)
+        let melodyTrack = VoiceHarmonyTrackBuilder.build(melodySteps: melodySteps, sourceBuffer: recentVoiceBuffer, bufferLength: bufferLength, voice: .melody, rate: rate)
+        // 128절 — 합성음 버전과 같은 이유로 화음 3성부를 backingGain만큼 낮춰 리드 멜로디가
+        // 앞으로 나오게 한다.
+        let backingGain: Float = 0.65
+        let harmonyTracks: [[Float]] = [ChordGenerator.Interval.bass, .third, .fifth].map { interval in
+            VoiceHarmonyTrackBuilder.build(melodySteps: melodySteps, sourceBuffer: recentVoiceBuffer, bufferLength: bufferLength, voice: .harmony(interval), rate: rate)
+                .map { $0 * backingGain }
         }
+        let tracks = [melodyTrack] + harmonyTracks
         // 합성음(122절)과 같은 이유로 화음 재생 전용 낮춘 목표 음량을 그대로 적용.
         let mixed = AudioGain.applyFadeInOut(
             AudioGain.normalizeLoudness(AudioGain.mix(tracks: tracks), targetRMS: 0.15, peakCeiling: 0.7),
