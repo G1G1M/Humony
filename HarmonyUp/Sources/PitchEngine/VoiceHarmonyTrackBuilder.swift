@@ -58,6 +58,9 @@ enum VoiceHarmonyTrackBuilder {
         }
 
         guard case .harmony(let interval) = voice else { return [] }
+        // 128절 — 성부마다 다른 포먼트(음색)를 줘서 "한 사람이 여러 번 겹쳐 부른" 느낌을
+        // 줄인다. 세그먼트마다 안 바뀌고 이 성부 전체에 고정이므로 루프 밖에서 한 번만 읽는다.
+        let formantRatio = interval.formantRatio
         let segments = voicedSegments(melodySteps: melodySteps, bufferLength: bufferLength, interval: interval, rate: rate)
         var output = [Float](repeating: 0, count: bufferLength)
         guard !segments.isEmpty else { return output }
@@ -91,12 +94,13 @@ enum VoiceHarmonyTrackBuilder {
             )
 
             var tone: [Float]
-            if segment.pitchRatio == 1.0 {
+            if segment.pitchRatio == 1.0 && formantRatio == 1.0 {
                 tone = sourceSlice
             } else {
                 tone = PitchShifterWorld.shift(
                     samples: sourceSlice,
                     pitchRatio: segment.pitchRatio,
+                    formantRatio: formantRatio,
                     sampleRate: rate
                 )
             }
