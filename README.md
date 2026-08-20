@@ -26,7 +26,8 @@
 | `VoiceActivityDetector` | 에너지 임계값 기반 무음 구간 필터링 |
 | `AudioCapture` | AVAudioEngine 마이크 캡처 + 파이프라인 연결 |
 | `KeyDetector` | pitch-class 히스토그램 기반 조성 판별 (Temperley 1999 key profile) |
-| `ChordGenerator` | 멜로디 노트 시퀀스 전체에 HMM+Viterbi로 다이어토닉 코드 진행을 붙여 베이스/3도/5도 생성 |
+| `ChordGenerator` | 멜로디 음 하나하나마다 독립적으로(문맥 없음) 그 음 자신을 근음 삼아 다이어토닉 트라이어드(베이스/3도/5도) 계산 |
+| `HarmonyTrackBuilder` | 멜로디 스텝 단위로 목소리를 성부별 화음 주파수로 피치시프트해 이어붙이는 순수 함수 |
 | `MelodySession` | 프레임별 감지 결과를 누적해 KeyDetector/ChordGenerator에 연결 |
 | `TonePlayer` | 지정 주파수 톤 재생(배음+envelope) — 녹음 전 "첫음 잡기" 참고음 재생에 사용(66절) |
 | `PitchScorer` | 목표 주파수 대비 사용자 음정의 cent 편차 채점 |
