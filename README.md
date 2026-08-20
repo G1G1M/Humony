@@ -15,7 +15,7 @@
 
 ## 진행 상황
 
-전체 체크리스트는 [`docs/PROGRESS.md`](docs/PROGRESS.md) 참고. 최근 작업: 화음 API 전체 제거(116절) → 첫 실기기 검증+재생 버튼 복구(117절) → 반복음/빠른 노래에서 음이 사라지던 버그를 `absorbShortRuns`에 무음 간격 인지 추가로 수정(118절).
+전체 체크리스트는 [`docs/PROGRESS.md`](docs/PROGRESS.md) 참고. 최근 작업: 화음 API 전체 제거(116절) → 첫 실기기 검증+재생 버튼 복구(117절) → 반복음/빠른 노래에서 음이 사라지던 버그를 `absorbShortRuns`에 무음 간격 인지 추가로 수정(118절) → 재검증 로그 분석으로 `mergeAdjacentSamePitch`의 느슨한 병합 임계값이 118절 수정을 무효화하던 걸 발견·수정(119절).
 
 ## 구성 요소 (`HarmonyUp/Sources/PitchEngine/`) — 지금 쓰이는 멜로디 인식 파이프라인
 

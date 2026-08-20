@@ -283,6 +283,26 @@ enum MelodySegmenter {
     /// 부른 음"을 구분 못 했던 것 — 무음 간격 유무가 그 구분 기준이 된다(포르타멘토는 정의상
     /// 무음 없이 미끄러지는 것이므로). 양쪽 이웃 다 무음으로 갈라져 있으면 짧아도 흡수하지 않고
     /// 독립된 음으로 남긴다.
+    ///
+    /// **119절: `isContiguous`만으론 부족했다 — 음높이 거리(`maxPortamentoSemitones`)도
+    /// 같이 봐야 한다.** 118절 수정 후 재검증하다가 새 실패 사례를 확인했다 — 빠르게 부른
+    /// "도레미"에서 "미"(E3, 0.09초)가 "레"(D3)와 무음 없이 바로 이어져서(디바운스 과정에서
+    /// 생긴 2윈도우짜리 미확정 구간이 재구성하면 음수 간격으로 나옴) `isContiguous`를
+    /// 통과했고, 결국 짧다는 이유로 레에 흡수돼 사라짐. 그런데 지금까지 "진짜 포르타멘토"로
+    /// 확인된 사례(레->레#->미, 솔->솔#, 도->시)는 전부 이웃과 반음(1semitone) 차이였다 —
+    /// 포르타멘토/떨림은 정의상 반음 경계를 살짝 넘나드는 현상이지, 온음(2semitone, 도->레
+    /// 같은 정상적인 스텝)을 건너뛰지 않는다. 그래서 무음 간격이 없어도(`isContiguous`가
+    /// true여도) 음높이 차이가 반음을 넘는 이웃은 흡수 대상에서 제외한다 — "레"와 "미"처럼
+    /// 온음 떨어진 짧은 음은 무음이 없어도 별개 음으로 남긴다. 다만 이 자체가 완전한 해법은
+    /// 아니다: 정말로 무음 없이 이어붙여 부른 빠른 스케일(완전 레가토)은 여전히 한계로 남는다
+    /// (118절 "한계" 참고) — 이건 그 한계와 별개로, "무음이 짧아서 우연히 contiguous로
+    /// 판정된" 케이스만 추가로 걸러내는 보강이다.
+    static let maxPortamentoSemitones = 1
+
+    private static func isPortamentoDistance(_ a: SegmentedNote, _ b: SegmentedNote) -> Bool {
+        abs(a.midiNote - b.midiNote) <= maxPortamentoSemitones
+    }
+
     static func absorbShortRuns(_ candidates: [SegmentedNote], minimumDuration: Double) -> [SegmentedNote] {
         var notes = candidates
         // 무음으로 갈라져 있어 "짧아도 진짜 음"으로 판단해 보존하기로 확정한 인덱스는 더 이상
@@ -300,8 +320,8 @@ enum MelodySegmenter {
             let previous = shortestIndex > 0 ? notes[shortestIndex - 1] : nil
             let next = shortestIndex < notes.count - 1 ? notes[shortestIndex + 1] : nil
 
-            let previousIsContiguous = previous.map { isContiguous($0, shortNote) } ?? false
-            let nextIsContiguous = next.map { isContiguous(shortNote, $0) } ?? false
+            let previousIsContiguous = previous.map { isContiguous($0, shortNote) && isPortamentoDistance($0, shortNote) } ?? false
+            let nextIsContiguous = next.map { isContiguous(shortNote, $0) && isPortamentoDistance(shortNote, $0) } ?? false
 
             guard previousIsContiguous || nextIsContiguous else {
                 // 양쪽 다(또는 이웃 자체가 없어) 무음으로 갈라져 있다 — 흡수하지 않고 그대로 둔다.
@@ -353,17 +373,19 @@ enum MelodySegmenter {
     /// 두 같은 음높이 사이의 시간 간격이 이보다 짧으면 "진짜로 붙어있던 한 음"(아래 참고)으로
     /// 보고 병합하고, 이보다 길면 정말로 다시 부른 별개의 음으로 보고 병합하지 않는다.
     ///
-    /// **0.05초 -> 0.18초로 상향(실기기 피드백)**: 처음엔 디바운스 최소 단위(약 35ms)보다
-    /// 여유 있게 위, 사람이 재창으로 지각하는 길이보다는 한참 아래로 0.05초를 잡았는데,
-    /// 실기기에서 "길게 끈 음이 화음에서만 끊겨 들린다"는 제보를 받았다 — 원인은 이 임계값이
-    /// 너무 작아서, 한 음을 길게 끄는 동안 자연스럽게 생기는 발성 흔들림(VAD/YIN 신뢰도가
-    /// 잠깐 떨어지는 구간)까지 "정말로 다시 부른 별개 음"으로 잘못 갈라놓고 있었던 것.
-    /// `Configuration.minimumNoteDuration`(0.18) 쪽에 이미 이 흔들림 구간을 실측한 근거가
-    /// 있다("포르타멘토/반음 경계 떨림 구간이 0.09~0.15초까지도 지속되는 걸 확인") — 그 값을
-    /// 그대로 재사용해서, 이 정도 길이의 간격까지는 여전히 "하나로 이어 부른 음"으로 취급한다.
-    /// 트레이드오프: 아주 빠르게 스타카토로 같은 음을 두 번 재창하면 그것도 병합될 수 있지만,
-    /// 지금 더 흔하고 눈에 띄는 문제(자연스럽게 끈 음이 화음에서 끊김)를 우선 해결한다.
-    static let sameNoteMergeGapThreshold: Double = 0.18
+    /// **119절: 0.18초 -> `contiguousGapTolerance`(0.02초)로 하향.** 원래 0.18초였던 이유는
+    /// "길게 끈 음이 화음 재생에서만 끊겨 들린다"는 실기기 제보 때문이었다(화음 목소리를
+    /// 이어 재생할 때, 흔들림으로 갈라진 같은 음 사이에 짧은 무음이 껴서 들렸던 문제) — 그런데
+    /// 116절에서 화음 생성/재생 기능 자체를 통째로 삭제했다. 그 문제의 원인이었던 소비자가
+    /// 이제 없으므로, 0.18초짜리 관대한 임계값을 유지할 이유도 같이 없어졌다. 반대로 118~119절
+    /// 실기기 재검증에서는 이 관대함이 새 문제를 만드는 걸 확인했다 — "도도솔솔라라솔"처럼
+    /// 진짜로 반복해 부른 음이 `absorbShortRuns`(118절)에서는 무음 간격 덕에 올바르게
+    /// 별개로 보존됐는데도, 그 간격(예: 127ms)이 여전히 0.18초보다는 짧아서 이 병합 단계가
+    /// 다시 하나로 뭉개버렸다. 이제 이 단계도 `absorbShortRuns`와 같은 기준
+    /// (`contiguousGapTolerance`, 무음이 사실상 없는 경우만 "이어 부른 한 음")을 그대로
+    /// 재사용한다 — 두 단계가 서로 다른 기준으로 병합/보존을 판단하면 한쪽에서 지킨 경계를
+    /// 다른 쪽이 다시 무너뜨리는 지금 같은 문제가 재발하기 쉽다.
+    static let sameNoteMergeGapThreshold: Double = contiguousGapTolerance
 
     /// `absorbShortRuns`가 짧은 과도구간을 이웃으로 흡수하고 나면, 그 과도구간을 사이에 두고
     /// 있던 두 이웃이 서로 같은 음높이인 경우 바로 옆에 붙게 된다 — 예: "도(C3) - 순간 잡음(B2,

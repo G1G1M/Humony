@@ -217,6 +217,25 @@ final class MelodySegmenterTests: XCTestCase {
         XCTAssertEqual(result.count, 3, "무음으로 뚜렷이 갈라진 반복음은 흡수되지 않고 각각 남아야 한다")
     }
 
+    func testAbsorbShortRunsKeepsShortNoteEvenWhenContiguousIfWholeToneAway() {
+        // 119절 실기기 로그 실측: 빠르게 부른 "도레미파"에서 "미"(E3, 0.09초)가 앞의 "레"(D3)와는
+        // 무음 없이 바로 이어지고(isContiguous 통과, 온음 차이라 포르타멘토 아님), 뒤의
+        // "파"(F3)와는 뚜렷한 무음 간격(80ms)으로 갈라져 있었다. 지금까지 확인된 진짜
+        // 포르타멘토(D3->D#3->E3, G3<->G#3, C3<->B2)는 전부 이웃과 반음 차이였다 — 온음(2
+        // semitone, 레->미) 떨어진 짧은 음은 무음이 없어도 포르타멘토가 아니라 빠르게 스쳐간
+        // 진짜 음일 가능성이 높으므로, 양쪽 다 흡수 조건(무음 없음 + 반음 이내)을 못 채우면
+        // 흡수하지 않고 그대로 남아야 한다.
+        let notes = [
+            MelodySegmenter.SegmentedNote(midiNote: 62, onsetTime: 0.0, duration: 0.30, averageConfidence: 0.9),  // D3
+            MelodySegmenter.SegmentedNote(midiNote: 64, onsetTime: 0.30, duration: 0.09, averageConfidence: 0.9), // E3, 앞과는 무음 없이 붙어있지만 온음 차이
+            MelodySegmenter.SegmentedNote(midiNote: 65, onsetTime: 0.47, duration: 0.30, averageConfidence: 0.9)  // F3, 80ms 무음 간격 뒤
+        ]
+
+        let result = MelodySegmenter.absorbShortRuns(notes, minimumDuration: 0.18)
+
+        XCTAssertEqual(result.map(\.midiNote), [62, 64, 65], "온음 떨어진 짧은 음은 무음이 없어도 흡수되면 안 된다")
+    }
+
     func testAbsorbShortRunsKeepsNotesAlreadyAboveThreshold() {
         let notes = [
             MelodySegmenter.SegmentedNote(midiNote: 60, onsetTime: 0.0, duration: 0.3, averageConfidence: 0.9),
@@ -249,6 +268,22 @@ final class MelodySegmenterTests: XCTestCase {
         ]
 
         XCTAssertEqual(MelodySegmenter.mergeAdjacentSamePitch(notes), notes)
+    }
+
+    func testMergeAdjacentSamePitchDoesNotMergeAcrossRealSilenceGapUnder180ms() {
+        // 119절 실기기 로그 실측: "도도솔솔라라솔"에서 absorbShortRuns(118절)는 반복된
+        // "솔"들을 무음 간격(127ms) 덕에 올바르게 별개로 남겼는데, 이 병합 단계가 예전 임계값
+        // (0.18초)으로는 127ms < 180ms라서 다시 하나로 합쳐버렸다. 이제 이 단계도
+        // contiguousGapTolerance(0.02초) 기준을 쓰므로, 20ms보다 뚜렷한 무음 간격이 있으면
+        // 같은 음높이라도 합치면 안 된다.
+        let notes = [
+            MelodySegmenter.SegmentedNote(midiNote: 56, onsetTime: 0.0, duration: 0.41, averageConfidence: 0.98), // G#3
+            MelodySegmenter.SegmentedNote(midiNote: 56, onsetTime: 0.537, duration: 0.58, averageConfidence: 0.98) // G#3, 127ms 간격
+        ]
+
+        let result = MelodySegmenter.mergeAdjacentSamePitch(notes)
+
+        XCTAssertEqual(result.count, 2, "180ms보다는 짧아도 실제 무음 간격이면 병합하면 안 된다")
     }
 
     func testAbsorbThenMergeReproducesRealWorldGlitchInsideSustainedNote() {
