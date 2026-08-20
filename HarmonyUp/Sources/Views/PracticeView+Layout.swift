@@ -2,9 +2,9 @@ import SwiftUI
 import UIKit
 
 /// `PracticeView`의 화면 레이아웃(컴팩트/레귤러 두 갈래)과, 두 레이아웃이 공유하는 캡처
-/// 영역·악보 카드 UI. 상태 선언과 `body`는 `PracticeView.swift`, 나머지 책임(내 목소리로
-/// 화음 재생/채점/녹음 캡처)은 각각 `PracticeView+VoiceHarmony.swift`/
-/// `PracticeView+Scoring.swift`/`PracticeView+Capture.swift`에 있다.
+/// 영역·악보 카드 UI. 상태 선언과 `body`는 `PracticeView.swift`, 녹음 캡처 책임은
+/// `PracticeView+Capture.swift`에 있다. 채점(`PracticeView+Scoring.swift`, `scoringCard`)은
+/// 2026-08-20 화음 API 제거와 함께 화면에서 뺐다 — 코드는 남아있지만 이 파일에서 안 부른다.
 extension PracticeView {
     var compactLayout: some View {
         NavigationStack {
@@ -14,28 +14,10 @@ extension PracticeView {
                         captureHero(prominent: false)
                             .id("captureCard")
 
-                        // 카드 순서: 캡처 다음 바로 "내 목소리로 화음"이 오도록 악보보다 앞에
-                        // 둔다 — PRODUCT.md 핵심 가치("내 목소리로 화음 듣기"가 채점보다도
-                        // 우선인 이 앱의 대표 경험)에 맞춰, 악보(이론/표기 중심이라 상대적으로
-                        // 보조적)를 지나치지 않고 바로 그 경험에 닿게 한다. 화음이 나오기 전엔
-                        // 안 보인다(할 게 없으므로) — hasCapturedNote가 참이어도 온음계 밖
-                        // 음뿐이면 harmony가 없을 수 있는데(드문 경우), 그때는 이 카드가 아예
-                        // 안 보이고 악보만 보인다.
-                        if melodySession.suggestedHarmony != nil {
-                            voiceHarmonyPanel
-                                .id("voiceHarmonyCard")
-                                .transition(cardAppearTransition)
-                        }
-
                         // 악보(VexFlow 오선보) — 첫 녹음 분석이 끝나기 전엔 보여줄 게 없다.
                         if hasCapturedNote {
                             sheetMusicPanel(fillAvailable: false)
                                 .id("sheetMusicCard")
-                                .transition(cardAppearTransition)
-                        }
-
-                        if melodySession.suggestedHarmony != nil {
-                            scoringCard
                                 .transition(cardAppearTransition)
                         }
                     }
@@ -43,20 +25,14 @@ extension PracticeView {
                     // 카드가 새로 생기거나 사라질 때 위 .transition이 실제로 애니메이션되게 한다 —
                     // 이 modifier가 없으면 SwiftUI가 즉시(애니메이션 없이) 나타나고 사라진다.
                     .animation(.easeOut(duration: 0.3), value: hasCapturedNote)
-                    .animation(.easeOut(duration: 0.3), value: hasHarmony)
                 }
                 .background(Color(uiColor: .systemGroupedBackground))
                 // 카드가 막 나타난 시점에 화면 아래로 스크롤해서, "방금 뭐가 생겼다"는 걸
-                // 사용자가 놓치지 않고 바로 보게 한다. hasCapturedNote와 hasHarmony는 거의
-                // 항상 같은 순간에 함께 true가 되므로(applyQuickRecordResult가 한 번에 둘 다
-                // 채움), 스크롤 목표는 hasHarmony 하나로 충분하다 — 예전엔 hasCapturedNote용
-                // 스크롤도 따로 있었는데 "조성과 화음" 카드 제거(54절) 이후 존재하지 않는
-                // id("keyHarmonyCard")를 가리키는 죽은 코드로 남아 있었다(조용히 아무 일도 안
-                // 하는 버그, 이번에 발견해서 정리함).
-                .onChange(of: hasHarmony) { _, appeared in
+                // 사용자가 놓치지 않고 바로 보게 한다.
+                .onChange(of: hasCapturedNote) { _, appeared in
                     guard appeared else { return }
                     withAnimation(.easeOut(duration: 0.3)) {
-                        proxy.scrollTo("voiceHarmonyCard", anchor: .top)
+                        proxy.scrollTo("sheetMusicCard", anchor: .top)
                     }
                 }
             }
@@ -166,7 +142,7 @@ extension PracticeView {
         }
     }
 
-    /// 조작부 — 캡처+내 목소리로 화음+채점. 스왑 시에도 내용은 그대로, 위치만 바뀐다.
+    /// 조작부 — 지금은 캡처만. 스왑 시에도 내용은 그대로, 위치만 바뀐다.
     private var controlColumn: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
@@ -174,14 +150,8 @@ extension PracticeView {
                 // 같은 이름의 버튼을 남겨두면 툴바 버전과 의미가 갈려서(하나는 컨텍스트 유지,
                 // 하나는 완전 리셋) 헷갈린다.
                 captureHero(prominent: false, showsInlineRetry: false)
-
-                if melodySession.suggestedHarmony != nil {
-                    voiceHarmonyPanel
-                    scoringCard
-                }
             }
             .padding()
-            .animation(.easeOut(duration: 0.3), value: hasHarmony)
         }
     }
 
@@ -380,9 +350,8 @@ extension PracticeView {
         ZStack {
             VexFlowScoreView(
                 steps: melodySteps,
-                mutedVoices: $mutedVoices,
-                activeStepIndex: activePlaybackStepIndex,
-                onSeekToStep: { seekPlayback(toStep: $0) },
+                activeStepIndex: nil,
+                onSeekToStep: { _ in },
                 isRendering: $isScoreRendering,
                 contentVersion: scoreContentVersion
             )

@@ -71,7 +71,11 @@ struct HistoryView: View {
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 80)
+        // 예전엔 .padding(.top, 80)으로 위에서 고정 거리만큼만 내려서, 화면이 클수록(특히
+        // 아이패드) 중앙보다 한참 위에 붙어 보였다 — containerRelativeFrame(.vertical)로
+        // 이 뷰의 높이를 스크롤뷰가 보이는 영역 높이와 같게 만들면, frame의 기본 정렬(.center)
+        // 덕분에 안의 VStack이 그 안에서 실제로 세로 중앙에 온다.
+        .containerRelativeFrame(.vertical)
     }
 
     private func attempts(for interval: ChordGenerator.Interval) -> [PracticeAttempt] {

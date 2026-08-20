@@ -4,8 +4,7 @@ import AVFAudio
 
 /// `PracticeView`의 마이크 캡처/녹음/분석 책임 — 권한 확인, 빠른 녹음 시작/중지, 배치 분석
 /// (타임아웃 안전망 포함), 분석 결과 반영, 세션 리셋까지. 나머지 책임은 `PracticeView.swift`
-/// (상태/body), `PracticeView+Layout.swift`(레이아웃), `PracticeView+VoiceHarmony.swift`
-/// (화음 재생), `PracticeView+Scoring.swift`(채점)에 있다.
+/// (상태/body), `PracticeView+Layout.swift`(레이아웃)에 있다.
 extension PracticeView {
     /// 측정(마이크 캡처)이 꺼져 있으면 켠다. 이미 켜져 있으면 아무 것도 하지 않는다(중복 start 방지).
     /// "녹음 시작"과 "채점하기" 둘 다 이걸 호출해서, 같은 audioCapture 하나를 상황에 맞게 공유한다 —
@@ -44,10 +43,6 @@ extension PracticeView {
     func startCaptureAfterPermissionGranted() {
         do {
             try audioCapture.start { result, rawSamples, rawSampleRate in
-                // 화음/시작음 재생 중엔 마이크 입력을 완전히 무시한다 — 안 그러면 스피커로 낸 소리가
-                // 다시 마이크로 들어가서 "새로 부른 음"으로 인식되고, 거기에 또 화음이 붙는 피드백 루프가 생긴다.
-                guard !isPlaybackBusy else { return }
-
                 // 녹음 중엔 이 프레임을 quickRecordBuffer에 쌓기만 한다. 녹음이 끝난 뒤 "따라 부르기
                 // 채점"으로 마이크가 다시 켜질 때는 quickRecordPhase가 더 이상 .recording이 아니므로
                 // 이 분기를 건너뛰고 곧장 아래 채점 로직으로 간다.
@@ -248,29 +243,20 @@ extension PracticeView {
             ))
         }
 
-        guard let key = melodySession.detectedKey else {
+        guard melodySession.detectedKey != nil else {
             quickRecordPhase = .error("조성을 판별하지 못했어요 — 조금 더 길게 불러서 다시 녹음해주세요")
             return
         }
-        // 2단계: 화면에 보여줄 스텝별 화음은, 녹음 전체를 다 보고 확정한 "최종" 조성 기준으로
-        // 한 번에 다시 계산한다 — 실시간 캡처처럼
-        // "그때까지 들은 것만으로 추측한 조성"을 스텝마다 다르게 쓰면, 이미 다 끝난 녹음을 배치로
-        // 분석하는 이 경로에서는 앞부분 스텝의 화음이 뒤늦게 밝혀진 진짜 조성과 어긋나 보일 수 있다.
-        // ChordGenerator.harmonizeSequence는 Viterbi로 노트 시퀀스 전체의 문맥을 보고 코드
-        // 진행을 고르므로, 노트별로 따로따로가 아니라 한 번에 통째로 넘긴다(docs/CONCEPTS.md 51절).
-        let harmonySequence = ChordGenerator.harmonizeSequence(
-            melodyNotes: analyzed.notes.map { ($0.midiNote, $0.duration) },
-            key: key
-        )
-        melodySteps = analyzed.notes.enumerated().map { index, note in
+        // 화음 API 제거(2026-08-20) 이후로는 스텝마다 화음을 계산하지 않는다 — 멜로디
+        // 음이름/시작시각/길이만 채운다(harmony/harmonyVoices는 nil로 남음). ChordGenerator
+        // 자체는 지우지 않았으니, 나중에 다시 필요하면 여기서 harmonizeSequence를 다시
+        // 호출하기만 하면 된다(docs/CONCEPTS.md 참고).
+        melodySteps = analyzed.notes.map { note in
             let frequency = NoteNameConverter.frequency(forMIDINote: note.midiNote)
             let noteName = NoteNameConverter.convert(frequency: frequency)?.noteName ?? "?"
-            let harmony = harmonySequence[index]
             return MelodyStep(
                 noteName: noteName,
                 midiNote: note.midiNote,
-                harmonyVoices: MelodyStep.harmonyVoices(from: harmony),
-                harmony: harmony,
                 onsetTime: note.onsetTime,
                 duration: note.duration
             )
@@ -279,15 +265,10 @@ extension PracticeView {
         // VexFlowScoreView.Coordinator가 새 페이로드의 renderScore 호출이 끝나면 false로 되돌림.
         isScoreRendering = true
         scoreContentVersion += 1
-        downbeatStepIndices = Self.downbeatStepIndices(from: melodySteps)
 
-        // "내 목소리로 화음"/채점 카드가 그대로 재사용하는 recentVoiceBuffer를 녹음 전체로 채운다 —
-        // 이후 3도/5도/전체 화음 버튼을 누르면 이 전체 녹음이 그대로 피치시프트된다.
+        // 녹음 원본은 재생/채점을 다시 붙일 때를 위해 계속 들고 있는다.
         recentVoiceBuffer = analyzed.voiceSamples
         recentVoiceSampleRate = analyzed.sampleRate
-        precomputeHarmonyTracks()
-        isScoringExpanded = false // 새 녹음마다 채점 카드는 다시 접힌 상태로
-        lastSavedInterval = nil
 
         hasCapturedNote = true
         quickRecordPhase = .result(noteCount: analyzed.notes.count)
@@ -301,13 +282,7 @@ extension PracticeView {
             finalizeCurrentAttempt(interval: active) // 리셋 직전까지의 채점 시도도 버리지 않고 기록으로 남긴다
         }
 
-        voiceClipPlayer.stop()
-        isPlayingVoiceClip = false
-        voiceClipPlaybackStartedAt = nil
-        activePlaybackStepIndex = nil
         recentVoiceBuffer = []
-        precomputedHarmonyTracks = [:]
-        mutedVoices = []
         isScoringExpanded = false
         lastSavedInterval = nil
         activeScoringInterval = nil

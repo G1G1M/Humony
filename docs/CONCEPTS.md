@@ -2837,3 +2837,44 @@ WSOLA/PSOLA는 지운 적이 없으니 복원이라기보다는 "다시 이름 �
 ### 검증
 
 유닛테스트 162개 통과, 세 알고리즘 전부 시뮬레이터+실기기 빌드 성공. `.wsola` 설정으로 실기기 설치 완료. **실기기 청취로 세 알고리즘 중 어느 게 이 화음 파이프라인(짧은 세그먼트 단위 피치시프트)에 제일 나은지 확인 필요 — 사용자가 직접 비교 후 최종 선택.**
+
+## 116. 화음 API 전체 제거 — 멜로디 인식부터 다시 다지기
+
+### 배경
+
+115절까지 목소리 피치시프트 알고리즘 3종(WSOLA/PSOLA/WORLD)을 A/B 비교할 수 있게 만들었지만, 사용자가 실기기로 다시 들어본 뒤 결론을 바꿨다: "그냥 지금 멜로디만 받아오는 걸로 다시 바꿔주라. 일단 멜로디 제대로 뽑아내는 거부터 하자. 화음 API 다 없애줘. 처음부터 다시할게. 그게 맞는 것 같다." 93절부터 115절까지(거의 20개 절) 화음 소리를 고치는 데 매달렸는데도 "이상하게 들린다"는 문제가 근본적으로 안 풀렸다는 판단 — 화음을 다시 설계하기 전에, 그 화음이 근거로 삼는 멜로디 인식 자체(음표 추출 정확도)부터 확실히 다지기로 했다.
+
+### 범위 확정
+
+"채점(따라 부르기)/기록 탭도 지울까요?"라고 확인한 결과: **채점 관련 소스는 지우지 말고 UI에서만 빼기**로 결정(코드는 나중에 재사용). 반면 **화음 소리를 만드는 API(피치시프트 3종, WORLD, 합성음, 다중 트랙 재생, 보컬 더블링)는 완전히 삭제**하기로 함 — 이 둘의 차이가 이번 작업의 핵심 기준이었다.
+
+### 삭제한 것 (git 히스토리에만 남음, 워킹트리에서 완전히 제거)
+
+- `PitchShifter.swift`(스위처)/`PitchShifterWSOLA.swift`/`PitchShifterPSOLA.swift`/`PitchShifterWorld.swift`(112·115절에서 만든 3-way 전환 구조 전체)
+- `HarmonyTrackBuilder.swift`/`SynthesizedHarmonyTrackBuilder.swift`/`ToneSynthesizer.swift`(화음 트랙 조립+합성음)
+- `VoiceDoubler.swift`(보컬 더블링), `VoiceClipPlayer.swift`(다중 트랙/단일 버퍼 재생 엔진)
+- `PracticeView+VoiceHarmony.swift`("내 목소리로 화음" 카드+재생 로직 전체)
+- `VoiceToggleChip.swift`(`PlaybackVoice` enum + 성부 뮤트 토글 UI)
+- `HarmonyUp/ThirdParty/World/`(WORLD 보코더 벤더링 소스 전체) + `HarmonyUpWorldBridge.h/.cpp` + `HarmonyUp-Bridging-Header.h`
+- 위 파일들의 테스트(`PitchShifterWSOLATests`/`PitchShifterPSOLATests`/`PitchShifterWorldTests`/`HarmonyTrackBuilderTests`/`SynthesizedHarmonyTrackBuilderTests`/`ToneSynthesizerTests`/`VoiceDoublerTests`)
+- `project.yml`에서 `ThirdParty/World` 소스 경로, `SWIFT_OBJC_BRIDGING_HEADER`, `HEADER_SEARCH_PATHS`, `CLANG_CXX_LANGUAGE_STANDARD`(C++ 빌드용) 제거
+
+이 파일들은 112절 이전까지는 계속 "지우지 않고 남겨두기" 패턴을 따랐지만, 이번엔 사용자가 명시적으로 "다 없애줘"라고 해서 실제로 삭제했다 — 필요하면 이 커밋(116절) 이전 git 히스토리에서 되살릴 수 있다.
+
+### 남긴 것 (코드는 그대로, UI에서만 뺌)
+
+- `ChordGenerator.swift` — `PracticeAttempt`/`Theme.intervalColor`/채점 로직이 `ChordGenerator.Interval` 타입에 의존하므로 삭제하면 그것들도 같이 깨짐. `harmonizeSequence`(실제 화음 계산)는 이제 아무 데서도 안 부르지만 타입 자체는 유지.
+- `PracticeView+Scoring.swift`/`PitchScorer.swift`/`PracticeSummary.swift`/`PracticeAttempt.swift`(SwiftData)/`HistoryView.swift` — 소스는 그대로, `PracticeView+Layout.swift`가 더 이상 `scoringCard`를 안 불러서 화면엔 안 뜬다.
+- `MelodyStep.harmony`/`harmonyVoices` 필드 — 구조체 자체는 안 건드림, 이제 항상 `nil`로만 채워짐(`PracticeView+Capture.swift`가 `ChordGenerator.harmonizeSequence` 호출을 멈췄으므로).
+- `recentVoiceBuffer`/`recentVoiceSampleRate`(`PracticeView.swift`) — 녹음 원본은 계속 들고 있는다. 재생/채점을 나중에 다시 붙일 때 그대로 쓸 수 있게.
+
+### 고친 것
+
+- `AudioGain.swift` — `normalizeLoudness`(녹음 분석 직전 정규화, 화음과 무관)만 남기고 `normalize`/`applyFadeInOut`/`applyGain`/`mixToStereo`(전부 화음 재생 전용) 삭제.
+- `VexFlowScoreView.swift` — 성부별 오선(멜로디/베이스/3도/5도)+뮤트 토글 구조를 **멜로디 단일 오선**으로 단순화. `mutedVoices`/`ChordGenerator` 의존 제거. `activeStepIndex`/`onSeekToStep` 파라미터는 남겨뒀지만(재생 자체가 없어서) 호출부가 항상 `nil`/no-op을 넘긴다.
+- `SheetMusicFullScreenView.swift` — 성부 토글 행 제거, 멜로디만 표시.
+- `PracticeView.swift`/`PracticeView+Layout.swift`/`PracticeView+Capture.swift` — 화음 재생 관련 `@State`(뮤트 상태, 사전계산 캐시, 재생헤드, 세대 토큰, 햅틱 등) 전부 제거. 마이크 콜백의 `isPlaybackBusy` 가드(화음 재생 중 마이크 무시)도 재생 자체가 없어져서 제거.
+
+### 검증
+
+빌드 성공(시뮬레이터), 유닛테스트 93개(162개에서 화음 관련 69개 제거) 전부 통과, 시뮬레이터 설치+실행에서 크래시 없이 기존과 동일한 대기 화면 확인. **다음 단계는 사용자와 함께 멜로디 인식 정확도부터 처음부터 다시 검토하는 것 — 아직 착수 전.**

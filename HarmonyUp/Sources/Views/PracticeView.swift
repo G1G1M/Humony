@@ -4,17 +4,19 @@ import AVFAudio
 import UIKit
 import Combine
 
-/// "연습" 탭 — 빠른 녹음으로 노래 한 소절을 받아 조성/화음 판별 -> 화음 청취(합성음/내 목소리) ->
-/// 채점까지 한 세션의 흐름을 담당한다. 예전엔 이 화면 자체가 앱의 유일한 화면(`ContentView`)이었는데,
-/// 세션 기록(`HistoryView`)을 별도 탭으로 분리하면서 이름도 역할에 맞게 바꿨다. 예전엔 "단음"/"멜로디"
-/// 실시간 캡처 모드도 별도로 있었지만, 빠른 녹음이 그 기능(여러 음을 이어 부른 멜로디)을 그대로
-/// 포함하면서 데이터 흐름이 더 명확해져서(녹음 완료 -> 분석 -> 결과, 프레임 단위로 상태가 섞이지
-/// 않음) 하나로 통합했다.
+/// "연습" 탭 — 빠른 녹음으로 노래 한 소절을 받아 멜로디를 인식하고 악보로 보여준다.
+///
+/// **2026-08-20, 화음 API 전체 제거**: 화음 생성/재생(피치시프트, 합성음, WORLD 등)이
+/// "화음이 이상하게 들린다"는 문제를 여러 라운드(93~115절) 반복해도 못 풀어서, 사용자
+/// 요청으로 걷어내고 "멜로디를 제대로 뽑아내는 것"부터 다시 다지기로 했다. `ChordGenerator`
+/// (화성 이론 계산)와 채점 관련 파일(`PracticeView+Scoring.swift`, `PitchScorer`,
+/// `PracticeSummary`, `PracticeAttempt`, `HistoryView`)은 코드 자체는 지우지 않고 남겨뒀다
+/// (나중에 다시 쓸 수 있게) — 다만 화음이 없으면 채점할 목표음 자체가 없으므로, 채점 카드
+/// 호출부(`PracticeView+Layout.swift`)에서 화면에는 안 뜨게만 빼뒀다.
 ///
 /// **파일 구성**: 상태 선언과 `body`는 여기, 나머지 책임은 각각 `PracticeView+Layout.swift`
-/// (화면 레이아웃+캡처/악보 UI), `PracticeView+VoiceHarmony.swift`(내 목소리로 화음 재생),
-/// `PracticeView+Scoring.swift`(따라 부르기 채점), `PracticeView+Capture.swift`(녹음/분석)로
-/// 나눠져 있다 — 파일 하나가 1400줄 넘게 불어나 있던 걸 책임별로 쪼갰다. Swift의 `private`는
+/// (화면 레이아웃+캡처/악보 UI), `PracticeView+Scoring.swift`(따라 부르기 채점, 지금은
+/// UI에서 숨김), `PracticeView+Capture.swift`(녹음/분석)로 나눠져 있다. Swift의 `private`는
 /// 선언된 파일 밖(다른 파일의 extension 포함)에서는 안 보이므로, 다른 파일에서 참조하는 상태/
 /// 메서드는 대부분 `private` 없이(모듈 내부 전용인 internal로) 선언한다 — 앱 타깃 밖으로는
 /// 여전히 노출되지 않는다.
@@ -112,6 +114,11 @@ struct PracticeView: View {
     // 녹음하면 지운다.
     @State var lastSavedInterval: ChordGenerator.Interval?
     @State var melodySteps: [MelodyStep] = []
+    // 방금 녹음한 목소리 원본 — 예전엔 "내 목소리로 화음"(피치시프트) 입력으로 쓰였다.
+    // 화음 재생 자체가 없어진 지금은 안 쓰이지만, 나중에 재생/채점을 다시 붙일 때 그대로
+    // 재사용할 수 있어 남겨둔다.
+    @State var recentVoiceBuffer: [Float] = []
+    @State var recentVoiceSampleRate: Double = 44100
     // 악보 카드가 뜬 시점엔 항상 true로 시작 — WKWebView 프로세스가 늦게 뜰 수 있어서(76절),
     // 첫 렌더가 끝날 때까지는 화면이 비어 보이는 대신 "만드는 중" 표시를 겹쳐 보여준다.
     // VexFlowScoreView.Coordinator가 renderScore 자바스크립트 호출이 끝나면 false로 되돌린다.
@@ -129,77 +136,9 @@ struct PracticeView: View {
     // true면 조작부가 왼쪽(기존 기본 배치), false면 오른쪽.
     @State var isControlPanelLeading = true
 
-    // "내 목소리로 화음 만들기" — 합성음(TonePlayer) 대신 사용자 목소리를 그대로 베이스/3도/5도로
-    // 옮겨서 재생한다. 빠른 녹음이 끝나면 녹음 전체가 그대로 여기 채워진다(applyQuickRecordResult).
-    @State var recentVoiceBuffer: [Float] = []
-    @State var recentVoiceSampleRate: Double = 44100
-    // 성부별(베이스/3도/5도) 화음 트랙(WORLD 피치시프트 결과) 사전 계산 캐시 — 녹음 전체
-    // (startStepIndex: nil, startTime: 0 기준)를 키로 한 번만 담아두고, 재생/탭-탐색은 여기서
-    // 필요한 구간만 잘라 쓴다. `harmonizedTrack`이 만드는 배열은 항상 recentVoiceBuffer와
-    // 길이가 같아서(공백은 무음으로 채움), 시작 샘플 인덱스로 자르기만 해도 그 지점부터
-    // recomputing한 것과 동일한 결과가 나온다.
-    @State var precomputedHarmonyTracks: [ChordGenerator.Interval: [Float]] = [:]
-    // 재녹음이 이전 사전계산 Task보다 먼저 끝나버려서 그 낡은 결과가 새 캐시를 덮어쓰는 걸
-    // 막는 세대 토큰 — `activeAnalysisToken`(녹음 분석)과 같은 패턴을 화음 사전계산에도 적용.
-    // "재녹음 이후부터 화음이 밀려 들린다" 실기기 재현으로 발견(`precomputeHarmonyTracks` 참고).
-    @State var harmonyPrecomputeGeneration = 0
-    // "전체 화음"/"화음만 듣기"로 나뉘어 있던 두 버튼을, 성부별로 켜고 끌 수 있는 토글 하나로
-    // 일반화했다(로드맵 Phase 4, docs/CONCEPTS.md 53절) — 리드 멜로디도 다른 성부와 동등하게
-    // 뮤트 대상이 된다. 기본값은 전부 켜짐(예전 "전체 화음" 버튼과 동일한 동작).
-    @State var mutedVoices: Set<PlaybackVoice> = []
-    let voiceClipPlayer = VoiceClipPlayer()
-    // 목소리 화음 재생 시작/끝에 적용할 페이드 길이 — 녹음 구간은 원본 파형의 임의 지점에서
-    // 시작/끝나서, 그대로 재생하면 클릭음이 날 수 있다(AudioGain 참고).
-    let voiceClipFadeDuration: Double = 0.015
-    // harmonizedTrack이 음(세그먼트)마다 거는 페이드 — 예전엔 위 voiceClipFadeDuration의
-    // 1/3(~5ms)을 그대로 썼는데, 실기기 청취 피드백("멜로디음보다 박자가 늦게 들린다")의
-    // 원인이 이거였다: 멜로디(recorded)는 녹음 전체 시작/끝에만 한 번 페이드가 걸리는데,
-    // 화음 성부는 음 하나하나마다 매번 이 페이드를 다시 타서 모든 공격(attack)이 매번
-    // 살짝 부드럽게 시작한다 — 그 미세한 지연이 음마다 누적돼 "화음이 박자보다 밀려서
-    // 들린다"는 인상을 만들었다. 클릭음 방지에 필요한 최소한(2ms)까지만 줄였다 — 이보다
-    // 짧으면 세그먼트 경계의 진폭 불연속이 다시 들릴 위험이 있다.
-    let harmonySegmentFadeDuration: Double = 0.002
-
     let audioCapture = AudioCapture()
     let melodySession = MelodySession()
     let pitchSmoother = PitchSmoother()
-
-    // 재생 중(내 목소리 화음)엔 마이크를 완전히 무시한다 — 스피커 소리가 되먹임되는 피드백
-    // 루프 방지. isPlayingVoiceClip이 빠져 있던 게 26절 버그의 원인이었다.
-    var isPlaybackBusy: Bool {
-        isPlayingVoiceClip
-    }
-    @State var isPlayingVoiceClip = false
-
-    // 카라오케 재생헤드(Phase 7) — "내 목소리로 화음" 재생이 시작된 실제 시각을 기록해두고,
-    // 50ms마다 경과 시간을 melodySteps의 onsetTime/duration(원본 녹음 기준 초)과 비교해서
-    // 지금 재생 중인 스텝의 인덱스를 찾는다. 새 타이밍 계산이 필요 없는 이유: PitchShifter.shift는
-    // 피치만 바꾸고 길이는 그대로라, 재생 경과 시간과 원본 녹음 타임라인이 그대로 일치한다.
-    @State var voiceClipPlaybackStartedAt: Date?
-    @State var activePlaybackStepIndex: Int?
-    // 탭으로 다른 지점을 다시 눌렀을 때(seekPlayback), 이전 재생의 onFinished 콜백이
-    // voiceClipPlayer.stop() 이후에도 뒤늦게 도착해 방금 시작한 새 재생 상태를 지워버리는 걸
-    // 막는 세대 토큰 — 재생을 새로 시작할 때마다 증가시키고, 콜백에서 세대가 다르면 무시한다.
-    @State var playbackGeneration = 0
-    // .autoconnect()로 뷰가 살아있는 동안 항상 흐르지만, updatePlaybackStepIndex()가
-    // voiceClipPlaybackStartedAt이 nil이면 즉시 return하므로 재생 중이 아닐 땐 사실상 아무 일도
-    // 안 한다 — 재생 시작/종료마다 타이머를 새로 만들고 해제하는 생명주기 관리보다 단순하다.
-    let playheadTimer = Timer.publish(every: 0.05, on: .main, in: .common).autoconnect()
-
-    // 재생헤드가 다음 스텝으로 넘어갈 때마다 미세한 진동을 줘서(Phase 8 Task 5), 화면을 안
-    // 보고 듣기만 해도 박자를 손끝으로 느낄 수 있게 한다. 마디의 첫 박(다운비트)은 더 강하게,
-    // 나머지(업비트)는 약하게 — RhythmQuantizer.measureBreaks가 이미 "마디마다 음이 몇 개인지"
-    // 계산해주므로, 그 구간의 시작 인덱스만 모아두면 다운비트 판정이 된다. VexFlowScoreView가
-    // 악보를 그릴 때 쓰는 것과 똑같은 계산이지만, 여기선 소리(햅틱) 쪽에서만 필요해서 따로
-    // 가볍게 한 번 더 돌린다(melodySteps가 바뀔 때만, 재생 중 매 tick마다가 아님).
-    @State var downbeatStepIndices: Set<Int> = []
-    let downbeatHaptic = UIImpactFeedbackGenerator(style: .heavy)
-    let upbeatHaptic = UIImpactFeedbackGenerator(style: .light)
-
-    // 화음이 나오는 순간(카드 2개가 한꺼번에 등장) 새로 나타난 카드로 자동 스크롤하기 위한 판정.
-    // melodySession.suggestedHarmony(Optional 배열) 자체는 Equatable이 아니라서, onChange/애니메이션
-    // 트리거로 쓰기 쉬운 단순 Bool로 한 번 감싼다.
-    var hasHarmony: Bool { melodySession.suggestedHarmony != nil }
 
     var body: some View {
         Group {
@@ -210,15 +149,6 @@ struct PracticeView: View {
             }
         }
         .tint(Theme.tint)
-        .onReceive(playheadTimer) { _ in
-            updatePlaybackStepIndex()
-        }
-        .onChange(of: activePlaybackStepIndex) { _, newIndex in
-            triggerStepHaptic(for: newIndex)
-        }
-        .onChange(of: mutedVoices) { _, _ in
-            scoreContentVersion += 1
-        }
         .onAppear {
             #if DEBUG
             print("[PracticeView] onAppear — hasCapturedNote=\(hasCapturedNote), isCapturing=\(isCapturing), quickRecordPhase=\(quickRecordPhase)")
@@ -235,15 +165,11 @@ struct PracticeView: View {
             // 생길 수 있다 — 뷰를 벗어날 땐 항상 false로 확실히 되돌린다.
             audioCapture.stop()
             isCapturing = false
-            voiceClipPlayer.stop()
-            isPlayingVoiceClip = false
-            voiceClipPlaybackStartedAt = nil
-            activePlaybackStepIndex = nil
             startingNotePlayer.stop()
             isPlayingStartingNote = false
         }
         .fullScreenCover(isPresented: $showingFullScreenScore) {
-            SheetMusicFullScreenView(steps: melodySteps, mutedVoices: $mutedVoices, detectedKeyName: melodySession.detectedKey?.name)
+            SheetMusicFullScreenView(steps: melodySteps, detectedKeyName: melodySession.detectedKey?.name)
         }
     }
 }
