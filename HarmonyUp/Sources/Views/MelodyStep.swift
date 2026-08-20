@@ -12,9 +12,9 @@ struct MelodyStep: Identifiable {
     // 성부(Interval)별 음이름 — 온음계 밖 음이면 nil(화음을 정의할 수 없음). 화면 표시 전용.
     var harmonyVoices: [ChordGenerator.Interval: String]?
     // harmonyVoices의 원본 데이터(실제 주파수 포함) — 채점/화음 재생(SynthesizedHarmonyTrackBuilder)이
-    // 이 값을 그대로 읽어 쓴다. ChordGenerator는 v1(101절)부터 노트마다 독립적으로 화음을
-    // 계산하지만(문맥 의존 없음), RecordingAnalyzer가 시퀀스 전체를 한 번에 계산해 채워주므로
-    // 이 필드는 계속 배치 계산 결과를 그대로 들고 있는다.
+    // 이 값을 그대로 읽어 쓴다. ChordGenerator는 v2(133절)부터 Viterbi로 노트 시퀀스 전체의
+    // 문맥을 보고 코드를 고르므로, RecordingAnalyzer가 시퀀스 전체를 한 번에 계산해 채워주는
+    // 이 필드가 노트 하나만 떼서는 다시 만들 수 없는 유일한 소스다.
     var harmony: [ChordGenerator.HarmonyNote]? = nil
     // 빠른 녹음(RecordingAnalyzer) 경로에서만 채워진다 — 녹음 시작 기준 시작 시각/길이(초).
     var onsetTime: Double? = nil

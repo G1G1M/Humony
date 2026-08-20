@@ -59,17 +59,32 @@ final class ChordGeneratorTests: XCTestCase {
         XCTAssertNotNil(result[1])
     }
 
-    // 101절(v1로 회귀)의 핵심 계약: 화음이 멜로디 음 하나하나에 맞게, 매번 그 음 자신을
-    // 근음으로 삼아 새로 계산돼야 한다 — HMM/Viterbi가 문맥을 보고 코드를 몇 음에 걸쳐
-    // 붙잡고 있던 v2와 달리, 이제는 노트마다 독립적이라 "베이스의 음이름은 항상 그 멜로디
-    // 음 자신의 음이름과 같다"는 게 모든 온음계 안 음에서 성립해야 한다. 실기기 청취에서
-    // 반복된 "화음 박자가 안 맞는다"는 피드백에 대한 사용자의 명시적 요청으로 바뀐 동작.
-    func testEachNoteGetsItsOwnChordRootedOnItself() {
-        let notes = [(midiNote: 60, duration: 0.2), (midiNote: 62, duration: 0.2), (midiNote: 64, duration: 1.0)] // C4-D4-E4(길이도 섞어서 문맥 의존이 없음을 확인)
+    // 133절(v2 재도입)의 핵심 계약: 짧은 경과음은 코드 판단에 거의 영향을 주지 않아야
+    // 한다(방출 점수가 길이로 가중되므로) — 매우 짧은 도-레-미 시퀀스는 "같은 코드 유지"
+    // 전이 보너스(+3.0)가 미세한 방출 점수 차이를 압도해서 베이스가 3음 내내 그대로여야
+    // 한다. v1(101절)이었다면 매번 그 음 자신을 근음으로 새로 계산해 베이스가 [0,2,4]로
+    // 바뀌었을 자리다.
+    func testVeryShortPassingTonesHoldTheSameChord() {
+        let notes = [(midiNote: 60, duration: 0.02), (midiNote: 62, duration: 0.02), (midiNote: 64, duration: 0.02)] // C4-D4-E4, 아주 짧게
         let result = ChordGenerator.harmonizeSequence(melodyNotes: notes, key: key(tonic: 0, mode: .major))
         let basses = result.compactMap { $0 }.map { harmonyByInterval($0)[.bass]!.pitchClass }
 
-        XCTAssertEqual(basses, [0, 2, 4], "베이스 음이름이 각 멜로디 음(C,D,E) 자신과 매번 같아야 함 — 문맥/길이와 무관")
+        XCTAssertEqual(basses.count, 3)
+        XCTAssertEqual(Set(basses).count, 1, "아주 짧은 경과음 3개는 화음이 한 번도 안 바뀌고 그대로 유지돼야 함, 실제 \(basses)")
+    }
+
+    // 반대로 충분히 긴 음이 지금 코드에 안 맞는 음이면, "같은 코드 유지" 보너스를 방출
+    // 점수 차이가 압도해서 코드가 실제로 바뀌어야 한다 — 안 그러면 그냥 항상 첫 코드에
+    // 머무는 퇴화한 알고리즘이 된다. 도(C, pc0)와 시(B, pc11)는 공통으로 속하는 다이어토닉
+    // 코드가 하나도 없다(C는 I/IV/vi, B는 iii/V/vii°) — 그래서 두 음 다 충분히 길면 "같은
+    // 코드로 둘 다 설명하기"가 애초에 불가능해 코드가 반드시 바뀌어야 한다.
+    func testLongOffChordNoteChangesTheChord() throws {
+        let notes = [(midiNote: 60, duration: 3.0), (midiNote: 71, duration: 3.0)] // C4(3초) -> B4(3초)
+        let result = ChordGenerator.harmonizeSequence(melodyNotes: notes, key: key(tonic: 0, mode: .major))
+        let first = try XCTUnwrap(result[0])
+        let second = try XCTUnwrap(result[1])
+
+        XCTAssertNotEqual(harmonyByInterval(first)[.bass]!.pitchClass, harmonyByInterval(second)[.bass]!.pitchClass, "충분히 긴 음이 기존 코드에 안 맞으면 코드가 바뀌어야 함")
     }
 
     func testCMajorTriadFromRootMelodyNote() throws {

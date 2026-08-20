@@ -43,10 +43,10 @@ final class MelodySessionTests: XCTestCase {
         XCTAssertEqual(session.detectedKey?.mode, .major)
     }
 
-    // ChordGenerator.harmonizeSequence(v1, 101절)는 노트마다 독립적으로(그 음 자신을 근음
-    // 삼아) 화음을 계산하므로, suggestedHarmony는 항상 "마지막 노트 자신을 근음으로 한
-    // 다이어토닉 트라이어드"여야 한다 — 앞에 어떤 음이 왔든(C-E-G) 문맥과 무관하게 마지막
-    // 음(G4)만으로 정해진다. G는 C장조 스케일의 5번째 디그리라 V(G-B-D)가 나와야 한다.
+    // ChordGenerator.harmonizeSequence(v2, 133절)는 Viterbi로 문맥 전체를 보고 코드를
+    // 고른다 — C-E-G는 셋 다 C장조 I(도미솔) 코드의 구성음이라서, 마지막 음(G4)만 따로
+    // 떼어 새 코드(V)를 만드는 대신 처음부터 끝까지 "같은 코드(I) 유지" 보너스가 이겨
+    // I 화음이 그대로 이어진다. suggestedHarmony는 그 유지된 코드(I=도미솔) 기준이어야 한다.
     func testSuggestedHarmonyReflectsLastNoteInContext() throws {
         let session = MelodySession()
         session.record(result(midiNote: 60, duration: 0.3)) // C4
@@ -55,9 +55,9 @@ final class MelodySessionTests: XCTestCase {
 
         let harmony = try XCTUnwrap(session.suggestedHarmony)
         let byInterval = Dictionary(uniqueKeysWithValues: harmony.map { ($0.interval, $0) })
-        XCTAssertEqual(byInterval[.bass]?.pitchClass, 7)   // G — 마지막 음 자신이 근음
-        XCTAssertEqual(byInterval[.third]?.pitchClass, 11) // B
-        XCTAssertEqual(byInterval[.fifth]?.pitchClass, 2)  // D
+        XCTAssertEqual(byInterval[.bass]?.pitchClass, 0)  // C — 세 음이 모두 속하는 I 코드가 처음부터 끝까지 유지됨
+        XCTAssertEqual(byInterval[.third]?.pitchClass, 4) // E
+        XCTAssertEqual(byInterval[.fifth]?.pitchClass, 7) // G
         // 배치 위치는 항상 마지막 노트(G4=67) 기준이어야 한다.
         XCTAssertLessThan(byInterval[.fifth]!.midiNote, 67)
     }
