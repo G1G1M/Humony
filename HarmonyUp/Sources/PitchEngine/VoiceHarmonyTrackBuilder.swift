@@ -44,7 +44,11 @@ enum VoiceHarmonyTrackBuilder {
         voice: Voice,
         rate: Double,
         fadeDuration: Double = 0.01,
-        crossfadeDuration: Double = 0.02
+        // 128절 — 화음(WORLD로 각각 독립 재합성된 음)끼리 더 자연스럽게 이어달라는 요청으로
+        // 0.02(20ms)에서 0.04(40ms)로 늘림. 멜로디는 더 이상 이 경로를 안 타므로(위 조기 반환)
+        // 화음 성부에만 영향— 합성음 신호와 달리 실제 목소리는 스펙트럼 내용 자체가 음마다
+        // 다시 분석되므로, 진폭 크로스페이드 구간을 넓히면 그 전환이 덜 갑작스럽게 들린다.
+        crossfadeDuration: Double = 0.04
     ) -> [Float] {
         guard bufferLength > 0, rate > 0 else { return [] }
 
