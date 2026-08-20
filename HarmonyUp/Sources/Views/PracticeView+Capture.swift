@@ -43,9 +43,9 @@ extension PracticeView {
     func startCaptureAfterPermissionGranted() {
         do {
             try audioCapture.start { result, rawSamples, rawSampleRate in
-                // 녹음 재생 중엔 마이크를 무시한다 — 스피커로 낸 소리가 다시 마이크로
+                // 녹음/화음 재생 중엔 마이크를 무시한다 — 스피커로 낸 소리가 다시 마이크로
                 // 들어가는 피드백 루프를 막기 위한 기존 원칙(화음 재생 때부터 이어옴).
-                guard !isPlayingRecording else { return }
+                guard !isPlayingRecording, !isPlayingHarmony else { return }
 
                 // 녹음 중엔 이 프레임을 quickRecordBuffer에 쌓기만 한다. 녹음이 끝난 뒤 "따라 부르기
                 // 채점"으로 마이크가 다시 켜질 때는 quickRecordPhase가 더 이상 .recording이 아니므로
@@ -251,20 +251,10 @@ extension PracticeView {
             quickRecordPhase = .error("조성을 판별하지 못했어요 — 조금 더 길게 불러서 다시 녹음해주세요")
             return
         }
-        // 화음 API 제거(2026-08-20) 이후로는 스텝마다 화음을 계산하지 않는다 — 멜로디
-        // 음이름/시작시각/길이만 채운다(harmony/harmonyVoices는 nil로 남음). ChordGenerator
-        // 자체는 지우지 않았으니, 나중에 다시 필요하면 여기서 harmonizeSequence를 다시
-        // 호출하기만 하면 된다(docs/CONCEPTS.md 참고).
-        melodySteps = analyzed.notes.map { note in
-            let frequency = NoteNameConverter.frequency(forMIDINote: note.midiNote)
-            let noteName = NoteNameConverter.convert(frequency: frequency)?.noteName ?? "?"
-            return MelodyStep(
-                noteName: noteName,
-                midiNote: note.midiNote,
-                onsetTime: note.onsetTime,
-                duration: note.duration
-            )
-        }
+        // 120절, 화음 재설계: RecordingAnalyzer.analyze가 이미 ChordGenerator로 스텝별 화음을
+        // 계산해뒀다(analyzed.harmonies) — 그 결과를 그대로 melodySteps에 실어서
+        // SynthesizedHarmonyTrackBuilder가 재생 시 바로 쓸 수 있게 한다.
+        melodySteps = RecordingAnalyzer.melodySteps(from: analyzed)
         // "다시 녹음"으로 새 악보 내용이 들어올 때도 다시 "만드는 중" 표시부터 보여준다 —
         // VexFlowScoreView.Coordinator가 새 페이로드의 renderScore 호출이 끝나면 false로 되돌림.
         isScoreRendering = true
@@ -286,6 +276,8 @@ extension PracticeView {
             finalizeCurrentAttempt(interval: active) // 리셋 직전까지의 채점 시도도 버리지 않고 기록으로 남긴다
         }
 
+        harmonyPlayer.stop()
+        isPlayingHarmony = false
         recentVoiceBuffer = []
         isScoringExpanded = false
         lastSavedInterval = nil
@@ -322,6 +314,38 @@ extension PracticeView {
         } catch {
             isPlayingRecording = false
             statusText = "재생 실패: \(error.localizedDescription)"
+        }
+    }
+
+    /// 120절, 화음 재설계 1단계 — 멜로디+베이스+3도+5도를 전부 합성음으로 만들어 한 번에
+    /// 재생한다. 목소리 피치시프트는 전혀 쓰지 않는다(변수 격리) — "화음 자체가 맞게 들리는지"
+    /// 부터 깨끗하게 검증하는 게 이 단계의 목적이다. 매번 새로 만드는 이유: WSOLA 같은 무거운
+    /// 계산이 없는 순수 합성이라(vDSP 없이도) 버튼 누를 때 즉시 만들어도 체감 지연이 없다 —
+    /// 미리 계산해뒀다가 재녹음 시 갱신을 놓치는 캐시 무효화 버그(107절류)를 아예 만들지 않는다.
+    func toggleHarmonyPlayback() {
+        if isPlayingHarmony {
+            harmonyPlayer.stop()
+            isPlayingHarmony = false
+            return
+        }
+        guard !recentVoiceBuffer.isEmpty, !melodySteps.isEmpty else { return }
+
+        let bufferLength = recentVoiceBuffer.count
+        let rate = recentVoiceSampleRate
+        let voices: [SynthesizedHarmonyTrackBuilder.Voice] = [.melody, .harmony(.bass), .harmony(.third), .harmony(.fifth)]
+        let tracks = voices.map { voice in
+            SynthesizedHarmonyTrackBuilder.build(melodySteps: melodySteps, bufferLength: bufferLength, voice: voice, rate: rate)
+        }
+        let mixed = AudioGain.applyFadeInOut(AudioGain.normalizeLoudness(AudioGain.mix(tracks: tracks)), fadeSampleCount: Int(rate * 0.01))
+
+        do {
+            isPlayingHarmony = true
+            try harmonyPlayer.play(samples: mixed, sampleRate: rate) {
+                isPlayingHarmony = false
+            }
+        } catch {
+            isPlayingHarmony = false
+            statusText = "화음 재생 실패: \(error.localizedDescription)"
         }
     }
 }

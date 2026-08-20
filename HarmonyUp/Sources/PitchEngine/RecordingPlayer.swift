@@ -1,13 +1,14 @@
 import AVFoundation
 
-/// 방금 녹음한 멜로디 원본(`recentVoiceBuffer`)을 화음/피치시프트 없이 그대로 재생한다 —
-/// "내가 실제로 부른 소리"와 "감지된 음" 텍스트를 귀로도 대조해볼 수 있게.
+/// 모노 `[Float]` 버퍼 하나를 트는 최소 구성 재생기 — 어떤 샘플 배열이든 상관없이 재생만
+/// 한다(성부/팬/리버브 없음). `VoiceClipPlayer`가 쓰던 것과 같은 검증된 패턴(단일 노드,
+/// `completionCallbackType: .dataPlayedBack`)만 남겼다.
 ///
 /// 116절에서 화음 재생 인프라(`VoiceClipPlayer` — 다중 트랙/pan/리버브)를 통째로 지우면서
-/// 재생 버튼 자체가 같이 없어졌었다 — 멜로디 인식 정확도를 검증하려면 녹음을 다시 들어볼
-/// 수 있어야 해서 새로 만든다. 성부/팬/리버브가 전혀 필요 없으니 모노 버퍼 하나만 트는
-/// 최소 구성으로, `VoiceClipPlayer`가 쓰던 것과 같은 검증된 패턴(단일 노드,
-/// `completionCallbackType: .dataPlayedBack`)만 남겼다.
+/// 재생 버튼 자체가 없어졌던 걸, 녹음 원본을 다시 들어볼 수 있게 새로 만들었다(`PracticeView`의
+/// `recordingPlayer` 인스턴스). 120절부터는 같은 타입을 두 번째 인스턴스(`harmonyPlayer`)로
+/// 재사용해 `SynthesizedHarmonyTrackBuilder`가 만든 합성 화음 믹스도 재생한다 — 이 타입
+/// 자체엔 "녹음"이라는 특정 의미가 없어서(그냥 버퍼 재생기) 새 타입을 또 만들 필요가 없었다.
 final class RecordingPlayer {
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()

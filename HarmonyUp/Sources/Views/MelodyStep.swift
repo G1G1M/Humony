@@ -11,10 +11,10 @@ struct MelodyStep: Identifiable {
     var midiNote: Int      // 옥타브까지 포함한 실제 MIDI 노트 — 수정 시 같은 옥타브 안에서 pitch class만 바꾸는 데 쓴다.
     // 성부(Interval)별 음이름 — 온음계 밖 음이면 nil(화음을 정의할 수 없음). 화면 표시 전용.
     var harmonyVoices: [ChordGenerator.Interval: String]?
-    // harmonyVoices의 원본 데이터(실제 주파수 포함) — 채점/재생이 이 값을 그대로 읽어 쓴다.
-    // Viterbi 기반 화음(ChordGenerator.harmonizeSequence)은 문맥(앞뒤 노트)을 보고 코드를
-    // 고르므로, 스텝 하나만 떼어 다시 계산할 수 없다 — 배치로 한 번에 계산한 결과를 그대로
-    // 들고 있어야 한다(docs/CONCEPTS.md 51절).
+    // harmonyVoices의 원본 데이터(실제 주파수 포함) — 채점/화음 재생(SynthesizedHarmonyTrackBuilder)이
+    // 이 값을 그대로 읽어 쓴다. ChordGenerator는 v1(101절)부터 노트마다 독립적으로 화음을
+    // 계산하지만(문맥 의존 없음), RecordingAnalyzer가 시퀀스 전체를 한 번에 계산해 채워주므로
+    // 이 필드는 계속 배치 계산 결과를 그대로 들고 있는다.
     var harmony: [ChordGenerator.HarmonyNote]? = nil
     // 빠른 녹음(RecordingAnalyzer) 경로에서만 채워진다 — 녹음 시작 기준 시작 시각/길이(초).
     var onsetTime: Double? = nil

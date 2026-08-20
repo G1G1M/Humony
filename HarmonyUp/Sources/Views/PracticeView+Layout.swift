@@ -326,12 +326,24 @@ extension PracticeView {
                 // 화음 API 제거(116절) 이후 없어졌던 재생 버튼 — 방금 부른 걸 그대로 들어보며
                 // 위 "감지된 음" 텍스트와 귀로 대조할 수 있게 다시 추가(멜로디 인식 정확도 검증용).
                 if !recentVoiceBuffer.isEmpty {
-                    Button {
-                        togglePlayback()
-                    } label: {
-                        Label(isPlayingRecording ? "정지" : "녹음 다시 듣기", systemImage: isPlayingRecording ? "stop.fill" : "play.fill")
+                    HStack(spacing: Theme.Spacing.sm) {
+                        Button {
+                            togglePlayback()
+                        } label: {
+                            Label(isPlayingRecording ? "정지" : "녹음 다시 듣기", systemImage: isPlayingRecording ? "stop.fill" : "play.fill")
+                        }
+                        .harmonyButtonStyle()
+                        .disabled(isPlayingHarmony)
+
+                        // 120절, 화음 재설계 1단계 — 멜로디+베이스+3도+5도를 합성음으로 들어본다.
+                        Button {
+                            toggleHarmonyPlayback()
+                        } label: {
+                            Label(isPlayingHarmony ? "정지" : "화음 듣기", systemImage: isPlayingHarmony ? "stop.fill" : "music.note.list")
+                        }
+                        .harmonyButtonStyle()
+                        .disabled(isPlayingRecording)
                     }
-                    .harmonyButtonStyle()
                 }
 
                 if fillAvailable {

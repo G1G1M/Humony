@@ -6,13 +6,16 @@ import Combine
 
 /// "연습" 탭 — 빠른 녹음으로 노래 한 소절을 받아 멜로디를 인식하고 악보로 보여준다.
 ///
-/// **2026-08-20, 화음 API 전체 제거**: 화음 생성/재생(피치시프트, 합성음, WORLD 등)이
-/// "화음이 이상하게 들린다"는 문제를 여러 라운드(93~115절) 반복해도 못 풀어서, 사용자
-/// 요청으로 걷어내고 "멜로디를 제대로 뽑아내는 것"부터 다시 다지기로 했다. `ChordGenerator`
-/// (화성 이론 계산)와 채점 관련 파일(`PracticeView+Scoring.swift`, `PitchScorer`,
-/// `PracticeSummary`, `PracticeAttempt`, `HistoryView`)은 코드 자체는 지우지 않고 남겨뒀다
-/// (나중에 다시 쓸 수 있게) — 다만 화음이 없으면 채점할 목표음 자체가 없으므로, 채점 카드
-/// 호출부(`PracticeView+Layout.swift`)에서 화면에는 안 뜨게만 빼뒀다.
+/// **2026-08-20, 화음 재설계(120절)**: 화음 생성/재생(피치시프트, 합성음, WORLD 등)이
+/// "화음이 이상하게 들린다"는 문제를 여러 라운드(93~115절) 반복해도 못 풀어서, 116절에서
+/// 한 번 전부 걷어내고 "멜로디를 제대로 뽑아내는 것"부터 다시 다졌다(117~119절, 실기기
+/// 검증 완료). 120절부터 화음을 처음부터 다시 쌓는 중 — 목소리 피치시프트는 배제하고
+/// `ToneSynthesizer`(순수 사인파) + `SynthesizedHarmonyTrackBuilder`로 멜로디+베이스+3도+5도를
+/// 전부 합성음으로 만들어 "화음 듣기" 버튼 하나로 재생한다("화음 선택/타이밍이 맞는지"부터
+/// 변수를 격리해 검증하는 게 목적, 목소리 버전은 그 다음 단계). 채점 관련 파일
+/// (`PracticeView+Scoring.swift`, `PitchScorer`, `PracticeSummary`, `PracticeAttempt`,
+/// `HistoryView`)은 여전히 화면에는 안 뜨게 빼둔 채다 — 화음 재생이 다시 자리잡은 뒤 순서를
+/// 다시 논의할 대상.
 ///
 /// **파일 구성**: 상태 선언과 `body`는 여기, 나머지 책임은 각각 `PracticeView+Layout.swift`
 /// (화면 레이아웃+캡처/악보 UI), `PracticeView+Scoring.swift`(따라 부르기 채점, 지금은
@@ -121,6 +124,11 @@ struct PracticeView: View {
     @State var recentVoiceSampleRate: Double = 44100
     let recordingPlayer = RecordingPlayer()
     @State var isPlayingRecording = false
+    // 120절, 화음 재설계 — 멜로디+베이스+3도+5도를 합성음으로 섞어 재생하는 전용 플레이어.
+    // recordingPlayer(원본 재생)와 별개 인스턴스를 쓰는 이유: 둘을 같은 인스턴스로 공유하면
+    // "녹음 다시 듣기"와 "화음 듣기"를 빠르게 번갈아 누를 때 서로의 재생을 끊어버릴 수 있다.
+    let harmonyPlayer = RecordingPlayer()
+    @State var isPlayingHarmony = false
     // 악보 카드가 뜬 시점엔 항상 true로 시작 — WKWebView 프로세스가 늦게 뜰 수 있어서(76절),
     // 첫 렌더가 끝날 때까지는 화면이 비어 보이는 대신 "만드는 중" 표시를 겹쳐 보여준다.
     // VexFlowScoreView.Coordinator가 renderScore 자바스크립트 호출이 끝나면 false로 되돌린다.
@@ -169,6 +177,8 @@ struct PracticeView: View {
             isCapturing = false
             recordingPlayer.stop()
             isPlayingRecording = false
+            harmonyPlayer.stop()
+            isPlayingHarmony = false
             startingNotePlayer.stop()
             isPlayingStartingNote = false
         }

@@ -2961,3 +2961,26 @@ WSOLA/PSOLA는 지운 적이 없으니 복원이라기보다는 "다시 이름 �
 ### 검증
 
 두 실패 사례를 그대로 반영한 신규 테스트 2개 추가(`testAbsorbShortRunsKeepsShortNoteEvenWhenContiguousIfWholeToneAway`, `testMergeAdjacentSamePitchDoesNotMergeAcrossRealSilenceGapUnder180ms`). 유닛테스트 97개(95+2) 전부 통과, 기존 포르타멘토 흡수 테스트(반음 차이 사례)도 회귀 없이 통과. **다음: 사용자가 두 케이스를 다시 불러서 반복음 케이스가 실제로 개선됐는지 확인 — 빠른 스케일 케이스는 "완전 레가토" 한계가 남아있을 수 있어 추가 개선이 필요할 수 있음을 미리 안내.**
+
+## 120. 화음 재설계 1단계 — 합성음(순수 사인파)으로 멜로디+베이스+3도+5도 재생
+
+### 배경
+
+116절에서 화음 재생 기능을 통째로 삭제하고 멜로디 인식만 남긴 뒤, 117~119절에 걸쳐 실기기 다회 재검증까지 마쳤다(무음 간격이 있는 반복은 매번 정확히 갈림, 완전 레가토만 원리적 한계로 남김). 사용자가 "다음 단계로 넘어가자" -> "화음 처음부터 재설계"를 선택했고, 접근 방식으로 (1) `ChordGenerator`(다이어토닉 화성 계산)는 그대로 재사용, (2) 소리 생성은 93~115절 20라운드 시행착오의 진앙이었던 목소리 피치시프트(WSOLA/PSOLA/WORLD)로 바로 가지 않고 **합성음부터 다시 시작**해 변수를 격리하기로 확정했다.
+
+### 왜 순수 사인파부터인가
+
+112절(화음을 처음 넣었을 때)은 `TonePlayer`와 같은 파형(기본음+2배음×0.3+3배음×0.15)을 썼는데, 베이스/3도/5도 세 톤이 동시에 울리면 톤마다의 배음까지 서로 부딪혀 "불협화음처럼 들린다"는 문제가 있었다(113절에서 실제로 겪고 배음을 뺀 적이 있음). 지금 단계의 목표는 소리의 아름다움이 아니라 **"화음 선택과 타이밍이 맞는지"를 깨끗하게 검증하는 것**이라, 배음이라는 변수부터 없애고 가장 단순한 순수 사인파(`ToneSynthesizer`)로 시작한다 — 소리가 로봇처럼 들리는 건 이 단계에서 감수한다.
+
+### 구현
+
+- **`ToneSynthesizer`**(신규): 주파수/샘플개수/샘플레이트를 받아 순수 사인파를 오프라인(배열)으로 합성하는 순수 함수. 실시간 재생용 `TonePlayer`(AVAudioSourceNode 콜백)와 달리, 화음 전체를 미리 배열로 만들어 한 번에 재생하는 이번 설계엔 오프라인 합성이 필요하다.
+- **`SynthesizedHarmonyTrackBuilder`**(신규): 멜로디 스텝 시퀀스(`onsetTime`/`duration`/`harmony`)를 원본 녹음과 정확히 같은 길이의 트랙으로 바꾼다. `Voice` enum(`.melody` 또는 `.harmony(Interval)`)으로 멜로디 자신도, 베이스/3도/5도도 전부 같은 함수로 만든다 — 멜로디까지 합성음으로 통일해서 "목소리 녹음/피치시프트"라는 변수를 완전히 배제했다. **길이 보존 계약**(항상 `bufferLength`와 정확히 같은 길이, 빈 구간은 무음)을 처음부터 유닛테스트로 보장한다 — CLAUDE.md 코딩 컨벤션에 남긴 "노래가 빠를수록 화음이 밀리는" 버그(107절)의 교훈을 반영.
+- **`AudioGain`**: 화음 API 제거(116절) 때 지웠던 `applyFadeInOut`(스텝 경계 클릭 방지)과, 예전 `mixToStereo`(pan 포함) 대신 더 단순한 `mix`(여러 트랙 샘플 단위 합산, 모노만)를 새로 추가. pan/성부별 개별 게인은 지금 단계에서 필요 없다고 판단해 뺐다(복잡한 해법보다 단순한 해법 먼저 — CLAUDE.md 컨벤션).
+- **재생**: `PracticeView`에 `harmonyPlayer`(`RecordingPlayer` 두 번째 인스턴스 — 이 타입은 "녹음 재생"이라는 특정 의미가 없는 범용 모노 버퍼 재생기라 새 타입 없이 재사용) + `isPlayingHarmony` 상태 추가. "화음 듣기" 버튼을 누르면 멜로디+베이스+3도+5도 네 트랙을 매번 새로 합성해(WSOLA 같은 무거운 계산이 없어 즉시 끝남 — 캐시 무효화 버그를 아예 만들지 않는다) `AudioGain.mix` -> `normalizeLoudness` -> `applyFadeInOut` 순서로 하나의 모노 버퍼로 만들어 단일 노드로 재생(109절 "다중 노드 타이밍 어긋남" 교훈 유지).
+- **`RecordingAnalyzer.melodySteps(from:)` 재사용**: `PracticeView+Capture.swift`의 `applyQuickRecordResult`가 그동안 화음 계산을 건너뛰고 `melodySteps`를 수동으로 만들고 있었는데, `RecordingAnalyzer.analyze`는 애초에 `ChordGenerator.harmonizeSequence`로 스텝별 화음을 이미 계산해두고 있었다(변경 없이 그대로 살아있었음) — 그 결과를 실어주는 기존 헬퍼(`RecordingAnalyzer.melodySteps(from:)`)를 호출하도록 한 줄만 바꿔서, 새 코드 작성 없이 `MelodyStep.harmony`를 다시 채웠다.
+- 마이크 콜백의 재생 중 무시 가드(`isPlayingRecording`)에 `isPlayingHarmony`도 추가해 화음 재생 소리가 다시 마이크로 들어가 멜로디 인식을 오염시키는 걸 막았다(93~115절 내내 지켜온 원칙).
+
+### 검증
+
+`ToneSynthesizerTests`(5개: 샘플 개수, 영교차 기반 주파수 검증, 무음/빈 배열 예외, 진폭 범위) + `SynthesizedHarmonyTrackBuilderTests`(6개: 길이 보존 불변식, 스텝 사이 무음, 성부별 올바른 주파수, 화음 없는 스텝의 무음 처리, 빈 멜로디) + `AudioGainTests` 추가(5개: 페이드 인/아웃, 트랙 합산) 신규. 유닛테스트 112개(97+15) 통과, 아이패드 시뮬레이터(iPad Air 11-inch M3) 빌드+테스트 확인. **실기기(Ian's iPad) 미접속 상태로 이번 세션에선 실기기 검증 못 함 — 다음 세션에서 반드시 재확인.**

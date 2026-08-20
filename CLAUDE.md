@@ -2,7 +2,7 @@
 
 ## 개요
 
-**2026-08-20 기준 스코프**: 지금은 멜로디 인식(녹음 → 음표 추출 → 악보 표시)만 다룬다. 원래 구상(화음 자동 생성 + 따라 부르기 채점)은 화음 소리 품질이 여러 라운드(93~115절, docs/CONCEPTS.md)를 거쳐도 안 풀려서, 사용자 결정으로 화음 API 전체를 삭제하고(116절) 멜로디 인식 자체부터 다시 다지기로 했다. 채점 관련 소스(`ChordGenerator`, `PracticeView+Scoring.swift`, `PitchScorer`, `PracticeSummary`, `PracticeAttempt`, `HistoryView`)는 지우지 않고 남아있지만 UI에서는 안 보인다 — 나중에 화음을 다시 설계할 때 참고/재사용 대상.
+**2026-08-20 기준 스코프**: 원래 구상(화음 자동 생성 + 따라 부르기 채점)은 화음 소리 품질이 여러 라운드(93~115절, docs/CONCEPTS.md)를 거쳐도 안 풀려서, 사용자 결정으로 화음 API 전체를 삭제하고(116절) 멜로디 인식(녹음 → 음표 추출 → 악보 표시)부터 다시 다졌다(117~119절, 실기기 다회 재검증 완료). **120절부터 화음을 처음부터 재설계 중** — `ChordGenerator`(화성 이론)는 재사용하고, 소리는 목소리 피치시프트를 배제한 채 합성음(`ToneSynthesizer`, 순수 사인파)부터 시작해 "화음 선택/타이밍이 맞는지"를 변수 격리해서 검증한다(목소리 버전은 그 다음 단계). 채점 관련 소스(`PracticeView+Scoring.swift`, `PitchScorer`, `PracticeSummary`, `PracticeAttempt`, `HistoryView`)는 여전히 UI에서 안 보인다 — 화음 재생이 다시 자리잡은 뒤 순서를 다시 논의할 대상.
 
 - 전체 제품 배경(문제의식, 경쟁 분석, 페르소나, 성공지표 등, 화음 스코프 포함 원래 구상): `docs/prd.md`
 - 진행 상황 체크리스트: `docs/PROGRESS.md`, 신호처리/설계 결정 히스토리: `docs/CONCEPTS.md`(특히 116절이 화음 제거 결정 배경)
@@ -19,11 +19,11 @@
 - 서버/백엔드 없음 — 전 과정 온디바이스 처리가 기본 원칙
 - 외부 유료 API(Klangio 등)는 v1 범위에서 사용하지 않음
 
-## 현재 단계: 멜로디 인식만 남긴 상태 — 정확도부터 다시 검토 예정
+## 현재 단계: 화음 재설계 1단계 — 합성음으로 화음 선택/타이밍 검증 중
 
-지금 살아있는 파이프라인: `AudioCapture`(마이크) → `QuickRecordView`(최대 60초 녹음) → `MelodySegmenter`(배치 분석, 음표별 음높이/시작시각/길이 추출) → `RecordingAnalyzer`(`KeyDetector`로 조성 판별) → `MelodyStep` 배열 → `VexFlowScoreView`(멜로디 단일 오선보로 표시). `TonePlayer`는 녹음 전 "첫음 잡기" 참고음 재생에만 쓰인다.
+지금 살아있는 파이프라인: `AudioCapture`(마이크) → `QuickRecordView`(최대 60초 녹음) → `MelodySegmenter`(배치 분석, 음표별 음높이/시작시각/길이 추출) → `RecordingAnalyzer`(`KeyDetector`로 조성 판별 + `ChordGenerator`로 스텝별 화음 계산) → `MelodyStep` 배열(harmony 포함) → `VexFlowScoreView`(멜로디 단일 오선보로 표시) + "화음 듣기" 버튼(`SynthesizedHarmonyTrackBuilder`로 멜로디+베이스+3도+5도를 합성음으로 재생). `TonePlayer`는 녹음 전 "첫음 잡기" 참고음 재생에만 쓰인다.
 
-**다음 단계**: 사용자가 "멜로디 제대로 뽑아내는 것부터"라고 명시했으므로, `MelodySegmenter`/`YINPitchDetector`의 인식 정확도(음 개수/음높이/타이밍이 실제로 부른 것과 얼마나 맞는지)를 실기기로 재검증하는 게 다음 우선순위 — 아직 착수 전, 사용자와 논의 후 진행할 것. 화음(3도/5도/베이스 자동 생성 + 재생 + 채점)은 멜로디 인식이 확실해진 뒤 처음부터 다시 설계 대상 — `ChordGenerator`(화성 계산)와 채점 관련 파일은 남아있지만 지금은 UI에서 안 쓰인다.
+**다음 단계**: 실기기(Ian's iPad)로 "화음 듣기"를 직접 확인 — 화음 선택(다이어토닉 3도/5도가 실제로 맞게 들리는지)과 타이밍(멜로디와 같이 딱 맞아떨어지는지)부터 검증할 것. 순수 사인파라 음질 자체("삐" 소리 같음)에 대한 피드백은 이 단계에서 정상 — 화음/타이밍이 만족스러운 다음에야 소리를 다듬거나(배음 다시 넣기 등) 목소리 피치시프트 버전으로 넘어갈지 판단한다. 채점(3도/5도/베이스 목표음 따라 부르기)은 화음 재생이 자리잡은 뒤 다시 붙일 대상 — `PitchScorer`/`PracticeAttempt`/`HistoryView`는 남아있지만 지금은 UI에서 안 쓰인다.
 
 ## 코딩 컨벤션
 
