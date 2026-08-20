@@ -88,17 +88,46 @@ final class VoiceHarmonyTrackBuilderTests: XCTestCase {
     }
 
     // 무음 없이 이어지는 두 음도 크로스페이드 구간에서 무음까지 떨어지면 안 된다(121절과 같은 원칙).
+    // 128절: 멜로디는 더 이상 크로스페이드 경로를 안 타므로(패스스루), 화음 성부로 검증한다.
     func testContiguousTransitionCrossfadesWithoutDippingToSilence() {
         let steps = [
-            step(midiNote: 60, onset: 0.0, duration: 0.2, harmony: nil),
-            step(midiNote: 64, onset: 0.2, duration: 0.2, harmony: nil),
+            step(midiNote: 60, onset: 0.0, duration: 0.2, harmony: harmonyNotes(bass: 48, third: 64, fifth: 67)),
+            step(midiNote: 64, onset: 0.2, duration: 0.2, harmony: harmonyNotes(bass: 52, third: 68, fifth: 71)),
         ]
         let bufferLength = Int(0.4 * rate)
         let source = sineWave(frequency: 261.63, sampleCount: bufferLength)
-        let track = VoiceHarmonyTrackBuilder.build(melodySteps: steps, sourceBuffer: source, bufferLength: bufferLength, voice: .melody, rate: rate)
+        let track = VoiceHarmonyTrackBuilder.build(melodySteps: steps, sourceBuffer: source, bufferLength: bufferLength, voice: .harmony(.third), rate: rate)
 
         let boundary = Int(0.2 * rate)
         let window = track[max(0, boundary - 50)..<min(bufferLength, boundary + 50)]
         XCTAssertTrue(window.contains { abs($0) > 0.2 })
+    }
+
+    // 128절 회귀 테스트 — MelodySegmenter가 "음"으로 인식 못한 구간(숨소리/자음/저신뢰도 전환)이
+    // 예전엔 완전한 무음으로 재생됐다. 멜로디는 세그먼트 재구성을 안 거치므로, 스텝 사이 미커버
+    // 구간에도 원본 오디오가 그대로 남아있어야 한다.
+    func testMelodyVoicePreservesAudioInGapsBetweenRecognizedSteps() {
+        let steps = [
+            step(midiNote: 60, onset: 0.0, duration: 0.2, harmony: nil),
+            step(midiNote: 62, onset: 0.4, duration: 0.2, harmony: nil),
+        ]
+        let bufferLength = Int(0.6 * rate)
+        let source = sineWave(frequency: 261.63, sampleCount: bufferLength)
+        let track = VoiceHarmonyTrackBuilder.build(melodySteps: steps, sourceBuffer: source, bufferLength: bufferLength, voice: .melody, rate: rate)
+
+        // 0.2~0.4초는 두 스텝 어느 쪽에도 안 걸리는 "미인식 구간" — 원본엔 계속 소리가 있었다.
+        let gapStart = Int(0.25 * rate)
+        let gapEnd = Int(0.35 * rate)
+        XCTAssertTrue(track[gapStart..<gapEnd].contains { abs($0) > 0.2 })
+    }
+
+    // 128절 — 멜로디는 이제 세그먼트 재구성 없이 원본을 그대로 돌려주는 패스스루라는 계약을 명시.
+    func testMelodyVoiceIsIdenticalToSourceBufferWhenLengthsMatch() {
+        let steps = [step(midiNote: 60, onset: 0.0, duration: 0.2, harmony: nil)]
+        let bufferLength = Int(0.2 * rate)
+        let source = sineWave(frequency: 261.63, sampleCount: bufferLength)
+
+        let track = VoiceHarmonyTrackBuilder.build(melodySteps: steps, sourceBuffer: source, bufferLength: bufferLength, voice: .melody, rate: rate)
+        XCTAssertEqual(track, source)
     }
 }

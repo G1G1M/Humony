@@ -48,7 +48,17 @@ enum VoiceHarmonyTrackBuilder {
     ) -> [Float] {
         guard bufferLength > 0, rate > 0 else { return [] }
 
-        let segments = voicedSegments(melodySteps: melodySteps, bufferLength: bufferLength, voice: voice, rate: rate)
+        if case .melody = voice {
+            // 원본 녹음은 이미 연속된 오디오다 — MelodySegmenter가 "인식된 음"으로 확정 못한
+            // 짧은 구간(숨소리/자음/저신뢰도 전환)은 MelodyStep 목록에 아예 없어서, 세그먼트로
+            // 잘라 다시 이어붙이면 그 구간이 완전한 무음으로 재생돼 "딱딱 끊긴다"는 제보로
+            // 이어졌다(128절). 멜로디는 피치 시프트가 없으므로(비율 1) 세그먼트 재구성 자체가
+            // 불필요 — 길이만 맞춰 원본을 그대로 돌려준다.
+            return fitLength(sourceBuffer, to: bufferLength)
+        }
+
+        guard case .harmony(let interval) = voice else { return [] }
+        let segments = voicedSegments(melodySteps: melodySteps, bufferLength: bufferLength, interval: interval, rate: rate)
         var output = [Float](repeating: 0, count: bufferLength)
         guard !segments.isEmpty else { return output }
 
@@ -113,19 +123,13 @@ enum VoiceHarmonyTrackBuilder {
         let sourceFrequency: Double
     }
 
-    private static func voicedSegments(melodySteps: [MelodyStep], bufferLength: Int, voice: Voice, rate: Double) -> [Segment] {
+    private static func voicedSegments(melodySteps: [MelodyStep], bufferLength: Int, interval: ChordGenerator.Interval, rate: Double) -> [Segment] {
         melodySteps.compactMap { step -> Segment? in
             guard let onset = step.onsetTime, let duration = step.duration, duration > 0 else { return nil }
             let sourceFrequency = NoteNameConverter.frequency(forMIDINote: step.midiNote)
 
-            let pitchRatio: Double
-            switch voice {
-            case .melody:
-                pitchRatio = 1.0
-            case .harmony(let interval):
-                guard let targetFrequency = step.harmony?.first(where: { $0.interval == interval })?.frequency else { return nil }
-                pitchRatio = targetFrequency / sourceFrequency
-            }
+            guard let targetFrequency = step.harmony?.first(where: { $0.interval == interval })?.frequency else { return nil }
+            let pitchRatio = targetFrequency / sourceFrequency
 
             let start = max(0, min(bufferLength, Int(onset * rate)))
             let end = max(0, min(bufferLength, Int((onset + duration) * rate)))
