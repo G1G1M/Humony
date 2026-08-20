@@ -3050,3 +3050,7 @@ git 히스토리(`96987e2^`, 화음 API 제거 직전 최종 상태)에서 WORLD
 ### 검증
 
 `xcodebuild build`(아이패드 시뮬레이터)로 빌드만 확인 — 성공. 유닛테스트는 이 단계에서 변경 없음(아직 아무것도 안 씀). **다음 단계**: `HarmonyUpWorldPitchShift`를 부르는 최소 Swift 래퍼(가칭 `PitchShifterWorld`)를 추가해서, 합성 사인파로 피치가 실제로 원하는 만큼 옮겨지는지부터 유닛테스트로 검증(93~115절과 같은 "합성 신호로 먼저 확인" 방식) — `VoiceHarmonyTrackBuilder`에 연결하는 건 그다음.
+
+## 125. WORLD 복원 2단계 — Swift 래퍼 + 합성 신호로 피치 정확도 검증
+
+git 히스토리(`96987e2^`)에서 `PitchShifterWorld.swift`(브릿지 호출 래퍼)와 `PitchShifterWorldTests.swift`(10개)를 그대로 복원 — 아직 `VoiceHarmonyTrackBuilder`에는 연결하지 않았다. 유닛테스트로 장3도/완전5도/1옥타브 시프트 정확도(YIN 재검출, ±50cent 이내)와 포먼트/피치 독립성, 30초 클립 처리 성능(10초 이내)까지 전부 확인 — 10개 전부 통과, 전체 스위트 141개(131+10) 통과. **다음 단계**: `VoiceHarmonyTrackBuilder`가 `PitchShifter.shift`(WSOLA) 대신 `PitchShifterWorld.shift`를 쓰도록 연결하고 실기기로 청취 검증.
