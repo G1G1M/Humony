@@ -15,7 +15,7 @@
 
 ## 진행 상황
 
-전체 체크리스트는 [`docs/PROGRESS.md`](docs/PROGRESS.md) 참고. 최근 작업: 화음 API(피치시프트 3종+합성음+WORLD+VoiceDoubler+VoiceClipPlayer 등) 전체 제거, 멜로디 인식/악보 표시만 남김(116절).
+전체 체크리스트는 [`docs/PROGRESS.md`](docs/PROGRESS.md) 참고. 최근 작업: 화음 API 전체 제거, 멜로디 인식/악보 표시만 남김(116절) → 실기기 첫 검증에서 "도레미파솔라시도" 거의 완벽 인식 확인 + 없어졌던 녹음 재생 버튼 복구(117절).
 
 ## 구성 요소 (`HarmonyUp/Sources/PitchEngine/`) — 지금 쓰이는 멜로디 인식 파이프라인
 
@@ -28,6 +28,7 @@
 | `KeyDetector` | pitch-class 히스토그램 기반 조성 판별 (Temperley 1999 key profile) — 악보에 감지된 조성 표시용 |
 | `MelodySession` | 프레임별 감지 결과를 누적해 KeyDetector에 연결 |
 | `TonePlayer` | 지정 주파수 톤 재생(배음+envelope) — 녹음 전 "첫음 잡기" 참고음 재생에 사용(66절) |
+| `RecordingPlayer` | 녹음 원본을 화음 없이 그대로 재생(모노 버퍼 전용 최소 구성) — "녹음 다시 듣기" 버튼, 멜로디 인식 정확도를 귀로 대조하는 용도(117절) |
 | `PitchSmoother` | MIDI 노트(로그 스케일) 기준 EMA로 비브라토·흔들림 완화 |
 | `AudioGain` | 녹음 종료 직후 분석 전에 거는 러프니스 정규화(기기별 마이크 게인 차이 보정) |
 | `MelodySegmenter` | 녹음 전체를 배치로 분석해 음표(음높이+시작시간+길이) 목록으로 잘라내기 |

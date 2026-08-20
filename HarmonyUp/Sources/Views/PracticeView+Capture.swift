@@ -43,6 +43,10 @@ extension PracticeView {
     func startCaptureAfterPermissionGranted() {
         do {
             try audioCapture.start { result, rawSamples, rawSampleRate in
+                // 녹음 재생 중엔 마이크를 무시한다 — 스피커로 낸 소리가 다시 마이크로
+                // 들어가는 피드백 루프를 막기 위한 기존 원칙(화음 재생 때부터 이어옴).
+                guard !isPlayingRecording else { return }
+
                 // 녹음 중엔 이 프레임을 quickRecordBuffer에 쌓기만 한다. 녹음이 끝난 뒤 "따라 부르기
                 // 채점"으로 마이크가 다시 켜질 때는 quickRecordPhase가 더 이상 .recording이 아니므로
                 // 이 분기를 건너뛰고 곧장 아래 채점 로직으로 간다.
@@ -299,5 +303,25 @@ extension PracticeView {
         quickRecordPhase = .idle
         quickRecordBuffer = []
         recordingLevel = 0
+    }
+
+    /// 방금 녹음한 원본을 그대로 들어본다 — 화음 없이, 화음 API 제거(116절) 이후 멜로디
+    /// 인식 정확도를 귀로도 확인할 수 있게 다시 추가한 재생 버튼의 동작.
+    func togglePlayback() {
+        if isPlayingRecording {
+            recordingPlayer.stop()
+            isPlayingRecording = false
+            return
+        }
+        guard !recentVoiceBuffer.isEmpty else { return }
+        do {
+            isPlayingRecording = true
+            try recordingPlayer.play(samples: recentVoiceBuffer, sampleRate: recentVoiceSampleRate) {
+                isPlayingRecording = false
+            }
+        } catch {
+            isPlayingRecording = false
+            statusText = "재생 실패: \(error.localizedDescription)"
+        }
     }
 }

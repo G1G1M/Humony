@@ -115,10 +115,12 @@ struct PracticeView: View {
     @State var lastSavedInterval: ChordGenerator.Interval?
     @State var melodySteps: [MelodyStep] = []
     // 방금 녹음한 목소리 원본 — 예전엔 "내 목소리로 화음"(피치시프트) 입력으로 쓰였다.
-    // 화음 재생 자체가 없어진 지금은 안 쓰이지만, 나중에 재생/채점을 다시 붙일 때 그대로
-    // 재사용할 수 있어 남겨둔다.
+    // 지금은 RecordingPlayer로 원본 그대로 재생하는 용도로 쓴다(멜로디 인식 정확도를 귀로도
+    // 확인하기 위해, 2026-08-20).
     @State var recentVoiceBuffer: [Float] = []
     @State var recentVoiceSampleRate: Double = 44100
+    let recordingPlayer = RecordingPlayer()
+    @State var isPlayingRecording = false
     // 악보 카드가 뜬 시점엔 항상 true로 시작 — WKWebView 프로세스가 늦게 뜰 수 있어서(76절),
     // 첫 렌더가 끝날 때까지는 화면이 비어 보이는 대신 "만드는 중" 표시를 겹쳐 보여준다.
     // VexFlowScoreView.Coordinator가 renderScore 자바스크립트 호출이 끝나면 false로 되돌린다.
@@ -165,6 +167,8 @@ struct PracticeView: View {
             // 생길 수 있다 — 뷰를 벗어날 땐 항상 false로 확실히 되돌린다.
             audioCapture.stop()
             isCapturing = false
+            recordingPlayer.stop()
+            isPlayingRecording = false
             startingNotePlayer.stop()
             isPlayingStartingNote = false
         }
