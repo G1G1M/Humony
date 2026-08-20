@@ -2,17 +2,24 @@ import Foundation
 
 /// `SynthesizedHarmonyTrackBuilder`(120~122절, 합성음)와 같은 세그먼트+크로스페이드 구조를
 /// 그대로 쓰되, 소리 자체는 `ToneSynthesizer`가 아니라 **사용자가 실제로 부른 목소리를
-/// `PitchShifter`(WSOLA)로 옮긴 것**으로 채운다(123절, 화음 재설계 2단계).
+/// 피치시프트로 옮긴 것**으로 채운다(123절, 화음 재설계 2단계).
+///
+/// **125절, WSOLA → WORLD로 교체**: 123절엔 `PitchShifter`(WSOLA)를 썼는데 실기기 청취에서
+/// "어색하다"는 평가를 받았다 — WSOLA 계열은 피치를 올리면 포먼트도 같이 따라 올라가서
+/// (성도 모양이 만드는 음색이 원래 음높이에 묶여 있음) 특히 3도/5도처럼 크게 옮길 때
+/// "다람쥐 소리"에 가까워지는 원리적 한계가 있다. `PitchShifterWorld`(WORLD 보코더, 124~125절
+/// 복원)는 F0(피치)와 스펙트럼 포락선(포먼트)을 애초에 분리해서 분석하므로, 포먼트를 원본
+/// 그대로 유지한 채 피치만 옮길 수 있다 — 그 한계를 원리적으로 피해간다.
 ///
 /// **소스 오디오를 구하는 방법**: 각 멜로디 스텝은 이미 `MelodySegmenter`가 정확한
 /// onset/duration을 매겨뒀으므로, 그 구간을 원본 녹음(`sourceBuffer`)에서 그대로 잘라 쓰면
 /// "이 음을 부를 때의 목소리"를 바로 얻는다 — 예전(85절)엔 실시간 롤링 버퍼에서 음 경계를
 /// 거꾸로 추적해야 했던 문제가, 배치 분석 구조에서는 애초에 없다.
 ///
-/// **길이 정확도**: `PitchShifter.shift`는 길이를 "거의" 보존하지만(WSOLA 특성상 ±수백 샘플
-/// 오차 가능, `PitchShifterTests.testOutputLengthApproximatelyMatchesInput` 참고) 이
-/// 빌더는 overlap-add로 정확한 절대 위치에 써야 하므로, 시프트 결과를 목표 길이에 맞춰
-/// 잘라내거나 무음으로 채운다(`fitLength`).
+/// **길이 정확도**: `PitchShifterWorld.shift`는 항상 입력과 정확히 같은 길이를 돌려주지만
+/// (브릿지 계약, `PitchShifterWorldTests.testOutputLengthMatchesInput` 참고), overlap-add가
+/// 요구하는 목표 길이(크로스페이드 확장분 포함)와는 여전히 다를 수 있어 `fitLength`로
+/// 안전하게 맞춘다(WSOLA 시절의 근사 길이 문제와는 다른 이유로 계속 필요).
 enum VoiceHarmonyTrackBuilder {
 
     enum Voice: Hashable {
@@ -71,11 +78,10 @@ enum VoiceHarmonyTrackBuilder {
             if segment.pitchRatio == 1.0 {
                 tone = sourceSlice
             } else {
-                tone = PitchShifter.shift(
+                tone = PitchShifterWorld.shift(
                     samples: sourceSlice,
                     pitchRatio: segment.pitchRatio,
-                    sampleRate: rate,
-                    expectedFrequency: segment.sourceFrequency
+                    sampleRate: rate
                 )
             }
             tone = fitLength(tone, to: targetLength)

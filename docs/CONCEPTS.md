@@ -3054,3 +3054,7 @@ git 히스토리(`96987e2^`, 화음 API 제거 직전 최종 상태)에서 WORLD
 ## 125. WORLD 복원 2단계 — Swift 래퍼 + 합성 신호로 피치 정확도 검증
 
 git 히스토리(`96987e2^`)에서 `PitchShifterWorld.swift`(브릿지 호출 래퍼)와 `PitchShifterWorldTests.swift`(10개)를 그대로 복원 — 아직 `VoiceHarmonyTrackBuilder`에는 연결하지 않았다. 유닛테스트로 장3도/완전5도/1옥타브 시프트 정확도(YIN 재검출, ±50cent 이내)와 포먼트/피치 독립성, 30초 클립 처리 성능(10초 이내)까지 전부 확인 — 10개 전부 통과, 전체 스위트 141개(131+10) 통과. **다음 단계**: `VoiceHarmonyTrackBuilder`가 `PitchShifter.shift`(WSOLA) 대신 `PitchShifterWorld.shift`를 쓰도록 연결하고 실기기로 청취 검증.
+
+## 126. WORLD 복원 3단계 — VoiceHarmonyTrackBuilder에 연결
+
+`VoiceHarmonyTrackBuilder`의 피치시프트 호출을 `PitchShifter.shift`(WSOLA)에서 `PitchShifterWorld.shift`(WORLD)로 교체 — "내 목소리로 화음" 버튼(UI)은 그대로, 내부 알고리즘만 바뀌었다(93~115절에서 WSOLA→PSOLA→WORLD로 갈아탈 때도 항상 이런 식으로 호출부만 바꾸는 패턴을 유지했다). `expectedFrequency` 파라미터는 WORLD가 자체적으로 F0를 추정해서 안 쓴다(빈 자리로 남김). 유닛테스트 141개 유지 통과(WSOLA 전용이 아니라 일반적인 주파수 정확도만 검증하는 테스트라 그대로 통과) — 아이패드 시뮬레이터+실기기 빌드 확인. **다음: 사용자가 실기기에서 직접 청취 검증.**
