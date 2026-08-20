@@ -10,11 +10,18 @@ targets:
     platform: iOS
     sources:
       - path: HarmonyUp/Sources
+      # WORLD(고품질 음성 분석/합성 라이브러리, modified-BSD 라이선스) — 123절 화음 재설계
+      # 2단계에서 목소리 피치시프트를 다시 시도하며 복원(124절, 1단계: 빌드만 먼저 확인).
+      # HarmonyUpWorldBridge.h/.cpp가 Swift에서 부를 수 있는 C 링키지 진입점이다.
+      - path: HarmonyUp/ThirdParty/World
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.kimjiwon.HarmonyUp
         DEVELOPMENT_TEAM: C5P7V9S6NT
         CODE_SIGN_STYLE: Automatic
+        SWIFT_OBJC_BRIDGING_HEADER: HarmonyUp/Sources/HarmonyUp-Bridging-Header.h
+        HEADER_SEARCH_PATHS: HarmonyUp/ThirdParty/World
+        CLANG_CXX_LANGUAGE_STANDARD: "gnu++17"
       configs:
         # 기본 Debug 빌드(-Onone)는 YIN/MelodySegmenter처럼 윈도우마다 도는 신호처리
         # 루프가 실기기에서도 눈에 띄게 느려진다(디버깅용 최적화 해제가 원인). 이 프로젝트는

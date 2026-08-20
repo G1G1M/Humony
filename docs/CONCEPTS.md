@@ -3036,3 +3036,17 @@ UI에 "내 목소리로 화음" 버튼을 기존 "화음 듣기"(합성음) 옆�
 ### 검증
 
 유닛테스트 131개(115+16: `PitchShifterTests` 10개 복원 + `VoiceHarmonyTrackBuilderTests` 6개 신규) 통과, 아이패드 시뮬레이터 빌드+테스트 확인. **실기기(Ian's iPad) 설치 완료, 사용자 청취 테스트 진행 중 — 결과는 다음 절에 기록.**
+
+## 124. 화음 재설계 2단계, WORLD 복원 — 1단계: 벤더링+빌드 설정만 먼저
+
+### 배경
+
+123절(WSOLA)로도 "둘 다 어색하다"는 확인을 받은 뒤, 웹 서비스/오픈소스 라이브러리를 조사(백그라운드 fork)해 라이선스를 검토했다 — 조사한 화음 생성 웹 서비스 5개는 대부분 API가 없거나 유료 서버 의존이라 온디바이스 원칙과 안 맞았고, 오픈소스 피치시프트 중에서는 SoundTouch(LGPL, WSOLA와 같은 계열)와 WORLD(modified-BSD, 완전히 다른 분석-재합성 방식, 이 프로젝트가 이미 통합 경험 있음)가 상업용 iOS 앱에 안전하다고 확인됐다. WORLD는 93~115절에서 "이상하다"는 이유로 빠졌지 라이선스 문제가 아니었고, 그 불만의 상당 부분이 121절에서 고친 크로스페이드 버그였을 가능성이 있어 WORLD를 다시 시도하기로 결정. **사용자가 "한번에 말고 단계별로 검증하면서 적용하자"고 명시적으로 요청** — 이번 절부터 여러 단계로 나눠 진행한다.
+
+### 1단계: 벤더링 + 빌드 설정만(Swift에서 아직 안 씀)
+
+git 히스토리(`96987e2^`, 화음 API 제거 직전 최종 상태)에서 WORLD 벤더 소스 전체(`HarmonyUp/ThirdParty/World/` — cheaptrick/d4c/dio/fft/harvest/matlabfunctions/stonemask/synthesis + 헤더, modified-BSD 라이선스 파일 포함)와 C 링키지 브릿지(`HarmonyUpWorldBridge.h/.cpp`, `HarmonyUpWorldPitchShift` 함수 하나만 노출), 브리징 헤더(`HarmonyUp-Bridging-Header.h`)를 그대로 복원. `project.yml`에 소스 경로+`SWIFT_OBJC_BRIDGING_HEADER`+`HEADER_SEARCH_PATHS`+`CLANG_CXX_LANGUAGE_STANDARD: gnu++17` 추가. **의도적으로 여기서 멈춤** — Swift 쪽 사용 코드는 아직 하나도 안 만들고, "C++ 라이브러리가 지금 프로젝트 구조에 문제없이 컴파일·링크되는지"만 먼저 확인한다.
+
+### 검증
+
+`xcodebuild build`(아이패드 시뮬레이터)로 빌드만 확인 — 성공. 유닛테스트는 이 단계에서 변경 없음(아직 아무것도 안 씀). **다음 단계**: `HarmonyUpWorldPitchShift`를 부르는 최소 Swift 래퍼(가칭 `PitchShifterWorld`)를 추가해서, 합성 사인파로 피치가 실제로 원하는 만큼 옮겨지는지부터 유닛테스트로 검증(93~115절과 같은 "합성 신호로 먼저 확인" 방식) — `VoiceHarmonyTrackBuilder`에 연결하는 건 그다음.
