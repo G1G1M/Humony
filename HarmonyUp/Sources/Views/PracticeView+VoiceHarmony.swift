@@ -181,6 +181,15 @@ extension PracticeView {
                 return
             }
             voiceClipPlayer.stop()
+            // stop()이 트리거하는 이전 playMixed의 completion은 generation 가드 때문에
+            // voiceClipPlaybackStartedAt/activePlaybackStepIndex를 리셋하지 못하고 조용히
+            // 무시된다(이 값들을 갱신하는 코드가 그 클로저 안에만 있어서) — 그 결과 새
+            // Task가 재생을 다시 시작하기 전까지 짧은 순간 이전 재생의 startedAt이 그대로
+            // 남아있고, 그 사이 50ms 재생헤드 타이머(updatePlaybackStepIndex)가 돌면 그
+            // 낡은 시각 기준으로 엉뚱한(탭한 음보다 앞선) 스텝을 활성으로 표시한다 — "탭한
+            // 음표가 아니라 이전 음표가 눌리는" 현상의 원인. 여기서 즉시 리셋해 그 틈을 없앤다.
+            voiceClipPlaybackStartedAt = nil
+            activePlaybackStepIndex = nil
         }
         guard melodySession.suggestedHarmony != nil else {
             statusText = "아직 화음이 없어요 — 먼저 녹음해주세요"

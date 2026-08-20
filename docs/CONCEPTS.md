@@ -2707,3 +2707,41 @@ v2 전용 동작(경과음 구간 코드 유지, 근음 진행 선호)을 검증
 ### 검증
 
 `AudioGainTests`에 `mixToStereo` 테스트 5개 추가(가운데 pan 등에너지 게인 확인, 완전 좌측 pan이 우측 채널을 무음으로 만드는지, 서로 다른 두 트랙이 같은 인덱스에서 정확히 더해지는지, 길이가 다른 트랙이 있어도 출력이 더 짧아지지 않고 0으로 채워지는지, 빈 입력 처리). 아이패드 시뮬레이터 빌드 + 유닛테스트 129개 전부 통과. 실기기에서 밀림이 실제로 사라졌는지는 재확인 필요.
+
+## 110. 악보 탭 시크 — "탭한 음표가 아니라 이전 음표가 눌린다" 버그 수정
+
+### 배경
+
+"애플 뮤직 기능(음표 탭 시크, 74절) 넣은 게 해당 음표가 아니라 이전 음표들이 눌리는 현상이 있다"는 제보. JS(`render.js`)의 탭 인덱스 계산부터 Swift의 `playHarmonizedVoice(startStepIndex:)`, `HarmonyTrackBuilder`의 샘플 인덱스 슬라이싱까지 전체 경로를 다시 훑었지만, 인덱스 매핑 자체(JS 스텝 인덱스 ↔ `melodySteps` 인덱스 ↔ 샘플 오프셋)는 전부 일관되게 맞았다 — `steps.filter { $0.onsetTime != nil }`(`VexFlowScoreView.buildPayload`)도 실제로는 걸러지는 스텝이 없어 항상 항등 변환이었다.
+
+### 원인
+
+재생 중에 다른 음표를 탭해서 "끊고 그 자리에서 새로 시작"하는 경로(`isPlaybackBusy`일 때 `voiceClipPlayer.stop()`)에 재생헤드 상태 리셋이 빠져 있었다. `voiceClipPlaybackStartedAt`/`activePlaybackStepIndex`를 갱신하는 코드는 오직 `playMixed`의 완료 콜로저 안에만 있는데, 그 콜백은 `generation == playbackGeneration` 가드로 보호돼 있어서 — `stop()`이 트리거하는 "이전" 재생의 완료 콜백은 이미 새 세대 번호가 올라간 뒤라 가드에 막혀 조용히 무시된다. 그 결과 `stop()` 직후부터 새 `Task`가 실제로 새 `voiceClipPlaybackStartedAt`을 설정하기까지의 짧은 틈 동안 **이전 재생의 낡은 시작 시각이 그대로 남아있는다**. 그 사이 50ms 재생헤드 타이머(`updatePlaybackStepIndex`)가 한 번이라도 돌면, 낡은 시작 시각 기준으로 경과 시간을 계산해서 방금 탭한 음보다 앞선 스텝을 활성으로 표시해버린다 — 사용자에게는 "탭한 음이 아니라 이전 음이 눌린" 것처럼 보인다.
+
+### 수정
+
+`playHarmonizedVoice`가 인터럽트-시크 시 `voiceClipPlayer.stop()` 직후, 새 `Task`가 시작되기도 전에 `voiceClipPlaybackStartedAt = nil` + `activePlaybackStepIndex = nil`을 즉시 대입 — 재생헤드 타이머가 그 틈에 낡은 값을 읽을 여지 자체를 없앤다.
+
+### 검증
+
+아이패드 시뮬레이터 빌드 + 유닛테스트 129개 통과(로직 자체는 상태 대입 순서 문제라 기존 테스트로 검증되는 영역 밖 — 실기기에서 "재생 중 다른 음 탭"을 반복 재현해 확인 필요). **재생 중이 아닐 때(정지 상태에서 처음 탭)도 여전히 같은 증상이 있다면, 이번 수정은 원인이 아니었다는 뜻이라 실기기 콘솔 로그로 다시 접근해야 한다.**
+
+## 111. "채점 후 기록 탭에 저장이 안 된다" — 성공 메시지가 실패를 가리고 있었다
+
+### 배경
+
+채점("따라 부르기 채점") 후 기록 탭에 저장이 안 된다는 제보. `finalizeCurrentAttempt`(채점 시도를 `PracticeAttempt`로 압축해 SwiftData에 `insert`)와 `HistoryView`의 `@Query`(정렬만 있고 필터 없음), `ModelContainer`(앱 전체에 하나만 존재) 모두 구조적으로는 문제가 없었다.
+
+### 원인
+
+`finalizeCurrentAttempt`는 `lockedScoringTargets`/`scoreSampleBuffers`/`PracticeSummary.aggregate` 중 하나라도 비어있으면 **조용히 아무것도 저장하지 않고 리턴**하는 `guard let`으로 시작한다(`scores.isEmpty`면 `aggregate`가 `nil`). 그런데 이 함수를 부르는 `toggleScoring`은 저장 성공 여부와 무관하게 항상 `lastSavedInterval = interval`을 대입해서 "OO 채점을 저장했어요" 메시지를 띄웠다 — "채점하기"를 눌렀다가 소리가 거의 안 들어온 채로(또는 아주 짧게) 바로 "중지"를 누르면 `scoreSampleBuffers`가 비어 실제로는 저장이 안 됐는데도 확인 메시지는 그대로 뜬 것. 사용자 입장에선 "저장했다고 했는데 기록 탭엔 없다"로 보였다.
+
+### 수정
+
+- `finalizeCurrentAttempt`가 `@discardableResult` `Bool`을 반환하도록 변경 — 실제로 저장했으면 `true`.
+- `toggleScoring`이 이 반환값을 보고 분기: 저장 성공했을 때만 `lastSavedInterval`을 설정해 확인 메시지를 보여주고, 실패했으면 "채점된 구간이 너무 짧아서 저장하지 못했어요" 문구로 정직하게 알린다.
+- `finalizeCurrentAttempt`의 `modelContext.insert(attempt)` 직후 `try? modelContext.save()` 명시 호출 추가 — `.modelContainer(for:)`의 autosave 타이밍(백그라운드 전환 등 시스템 이벤트에 의존)에 기대는 대신, 채점 시도 하나하나를 그 자리에서 바로 영속화한다.
+
+### 검증
+
+아이패드 시뮬레이터 빌드 + 유닛테스트 129개 통과. **실기기에서 "충분히 길게 채점한 뒤 중지"가 여전히 저장 안 되는 경우가 남아있다면, 이번에 고친 것과는 다른 원인(예: `beginCapturingIfNeeded()`가 실제로 마이크를 못 켜는 경우 등)이라 별도로 봐야 한다.**

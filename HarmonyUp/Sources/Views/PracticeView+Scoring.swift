@@ -120,15 +120,25 @@ extension PracticeView {
     /// 전환하거나 중지해도 지워지지 않고 화면에 남아있는다 — 지워지는 건 "지금 채점 중"인지 여부뿐.
     func toggleScoring(interval: ChordGenerator.Interval) {
         if activeScoringInterval == interval {
-            finalizeCurrentAttempt(interval: interval)
+            // 예전엔 finalizeCurrentAttempt의 성공 여부와 무관하게 항상 "저장했어요"를
+            // 보여줬다 — 채점 샘플이 하나도 안 쌓인 채(예: 시작하자마자 바로 중지) "중지"를
+            // 누르면 finalizeCurrentAttempt가 guard let에서 조용히 아무것도 저장하지 않고
+            // 돌아오는데도 확인 메시지는 그대로 떴다. "채점후에 기록탭에 저장이 안 된다"는
+            // 제보의 실제 정체 — 저장이 실패한 게 아니라 애초에 저장할 샘플이 없었는데,
+            // 성공 메시지가 그걸 가려서 사용자가 알아챌 수 없었다. 이제 실제 저장 성공
+            // 여부로 메시지를 분기한다.
+            let saved = finalizeCurrentAttempt(interval: interval)
             activeScoringInterval = nil
-            lastSavedInterval = interval
+            lastSavedInterval = saved ? interval : nil
+            if !saved {
+                statusText = "채점된 구간이 너무 짧아서 저장하지 못했어요 — 조금 더 길게 따라 불러주세요"
+            }
             return
         }
 
         // 다른 쪽을 채점하고 있었다면 그 시도부터 기록으로 남긴다.
         if let previous = activeScoringInterval {
-            finalizeCurrentAttempt(interval: previous)
+            _ = finalizeCurrentAttempt(interval: previous)
         }
 
         guard let harmony = melodySession.suggestedHarmony,
@@ -164,12 +174,15 @@ extension PracticeView {
 
     /// 지금까지 쌓인 채점 샘플들을 하나의 요약(PracticeSummary.Aggregate)으로 압축해서
     /// SwiftData에 저장하고, 다음 시도를 위해 그 interval의 샘플 버퍼만 비운다.
-    func finalizeCurrentAttempt(interval: ChordGenerator.Interval) {
+    /// - Returns: 실제로 저장했으면 true, 채점 샘플이 하나도 없어서(guard let 실패) 저장할
+    ///   게 없었으면 false — 호출부가 "저장했어요" 메시지를 실제 결과에 맞게 보여줄 수 있게.
+    @discardableResult
+    func finalizeCurrentAttempt(interval: ChordGenerator.Interval) -> Bool {
         defer { scoreSampleBuffers[interval] = [] }
 
         guard let target = lockedScoringTargets[interval],
               let samples = scoreSampleBuffers[interval],
-              let aggregate = PracticeSummary.aggregate(scores: samples) else { return }
+              let aggregate = PracticeSummary.aggregate(scores: samples) else { return false }
 
         let attempt = PracticeAttempt(
             date: Date(),
@@ -180,5 +193,11 @@ extension PracticeView {
             averageAbsCentsOffset: aggregate.averageAbsCentsOffset
         )
         modelContext.insert(attempt)
+        // SwiftUI의 .modelContainer(for:) autosave는 저장 시점이 시스템 타이밍(백그라운드 전환
+        // 등)에 맡겨져 있다 — insert 직후 곧바로 세션을 리셋하거나 앱이 예기치 않게 종료되면
+        // 그 사이 저장이 안 될 수 있다. 채점 시도 하나하나가 사용자에게 의미있는 기록이라
+        // 명시적으로 즉시 저장한다.
+        try? modelContext.save()
+        return true
     }
 }
