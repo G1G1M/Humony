@@ -21,12 +21,12 @@ enum VoiceHarmonyTrackBuilder {
     }
 
     /// 132절 — WORLD 기본값(0.85, `world::kThreshold`)보다 낮춘 실험값. 화음 성부가
-    /// "기계음처럼 들린다"는 피드백(131절)에 대한 첫 시도 — 값을 0으로 낮춰 D4C Love Train
-    /// 지름길(프레임을 순수 톤으로 단순화)을 아예 끄고, 모든 유성음 프레임에서 실제 비주기성
-    /// (숨소리/노이즈 질감)을 정교하게 계산하도록 한다. 극단값으로 먼저 시험해 방향성 자체를
-    /// 확인하고, 너무 거칠거나 노이즈가 심하면 값을 올려 되돌아올 계획(`PitchShifterWorldAnalysis`
-    /// 헤더 주석 참고).
-    private static let harmonyD4CThreshold: Double = 0.0
+    /// "기계음처럼 들린다"는 피드백(131절)에 대한 시도 — D4C Love Train 지름길(프레임을
+    /// 순수 톤으로 단순화)이 너무 자주 발동하면 기계음처럼, 반대로 아예 꺼버리면(0.0으로
+    /// 시도했다가) 화음으로 옮겨진 피치와 실제 비주기성이 안 맞아떨어지는 구간에서
+    /// "지지직"거리는 잡음이 생기는 것으로 확인됨 — 두 극단 사이 중간값(0.5)으로 절충
+    /// (`PitchShifterWorldAnalysis` 헤더 주석 참고).
+    private static let harmonyD4CThreshold: Double = 0.5
 
     /// - Parameters:
     ///   - melodySteps: `RecordingAnalyzer.melodySteps`가 만든, harmony/onsetTime/duration이
