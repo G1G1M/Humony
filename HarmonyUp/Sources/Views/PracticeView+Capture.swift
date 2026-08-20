@@ -294,6 +294,7 @@ extension PracticeView {
         isPlayingHarmony = false
         voiceHarmonyPlayer.stop()
         isPlayingVoiceHarmony = false
+        mutedVoices = []
         soloVoicePlayer.stop()
         playingSoloVoice = nil
         recentVoiceBuffer = []
@@ -393,29 +394,65 @@ extension PracticeView {
             isPlayingVoiceHarmony = false
             return
         }
+        startVoiceHarmonyPlayback()
+    }
+
+    /// 128절 — "재생 중에도 성부를 껐다 켤 수 있게" 요청에 대한 1차 구현(사용자가 두 방식 중
+    /// "즉시 재시작"을 선택). 4성부를 계속 각자 다른 재생 노드에 올려두는 진짜 실시간 믹싱은
+    /// 109절에서 "노드마다 시작 시점이 미세하게 어긋나 화음이 밀린다"는 이유로 일부러
+    /// 피했던 구조라 다시 위험을 감수하지 않는다 — 대신 뮤트 상태를 바꾼 즉시 지금 재생을
+    /// 멈추고 새 뮤트 조합으로 처음부터 다시 시작한다(끊김은 있지만 거의 즉각적).
+    func toggleMute(_ voice: VoiceHarmonyTrackBuilder.Voice) {
+        if mutedVoices.contains(voice) {
+            mutedVoices.remove(voice)
+        } else {
+            mutedVoices.insert(voice)
+        }
+        guard isPlayingVoiceHarmony else { return }
+        voiceHarmonyPlayer.stop()
+        startVoiceHarmonyPlayback()
+    }
+
+    /// `toggleVoiceHarmonyPlayback`(버튼으로 처음 시작)과 `toggleMute`(재생 중 뮤트 전환으로
+    /// 재시작) 둘 다 여기로 모인다 — `mutedVoices`에 없는 성부만 골라 섞는다.
+    ///
+    /// **세대 토큰이 필요한 이유**: `voiceHarmonyPlayer.stop()`을 부른 직후 곧바로 새
+    /// `play()`를 스케줄하면, 방금 멈춘 이전 재생의 완료 콜백이 뒤늦게(비동기로) 도착해
+    /// `isPlayingVoiceHarmony = false`로 되돌려서 방금 시작한 새 재생의 상태를 덮어쓸 수
+    /// 있다 — 매 시작마다 새 토큰을 발급하고, 완료 콜백이 자기 토큰과 지금 토큰이 같을
+    /// 때만 상태를 되돌리게 해서 이 경쟁 상태를 막는다.
+    private func startVoiceHarmonyPlayback() {
         guard !recentVoiceBuffer.isEmpty, !melodySteps.isEmpty else { return }
+
+        let allVoices: [VoiceHarmonyTrackBuilder.Voice] = [.melody, .harmony(.bass), .harmony(.third), .harmony(.fifth)]
+        let activeVoices = allVoices.filter { !mutedVoices.contains($0) }
+        guard !activeVoices.isEmpty else {
+            isPlayingVoiceHarmony = false
+            statusText = "전부 음소거 상태예요 — 하나 이상 켜주세요"
+            return
+        }
 
         let bufferLength = recentVoiceBuffer.count
         let rate = recentVoiceSampleRate
-        let melodyTrack = VoiceHarmonyTrackBuilder.build(melodySteps: melodySteps, sourceBuffer: recentVoiceBuffer, bufferLength: bufferLength, voice: .melody, rate: rate)
         // 128절 — 합성음 버전과 같은 이유로 화음 3성부를 backingGain만큼 낮춰 리드 멜로디가
-        // 앞으로 나오게 한다.
+        // 앞으로 나오게 한다(멜로디 자체가 음소거됐으면 이 배율은 아무 트랙에도 안 걸림).
         let backingGain: Float = 0.65
-        let harmonyTracks: [[Float]] = [ChordGenerator.Interval.bass, .third, .fifth].map { interval in
-            VoiceHarmonyTrackBuilder.build(melodySteps: melodySteps, sourceBuffer: recentVoiceBuffer, bufferLength: bufferLength, voice: .harmony(interval), rate: rate)
-                .map { $0 * backingGain }
+        let tracks: [[Float]] = activeVoices.map { voice in
+            let track = VoiceHarmonyTrackBuilder.build(melodySteps: melodySteps, sourceBuffer: recentVoiceBuffer, bufferLength: bufferLength, voice: voice, rate: rate)
+            return voice == .melody ? track : track.map { $0 * backingGain }
         }
-        let tracks = [melodyTrack] + harmonyTracks
         // 합성음(122절)과 같은 이유로 화음 재생 전용 낮춘 목표 음량을 그대로 적용.
         let mixed = AudioGain.applyFadeInOut(
             AudioGain.normalizeLoudness(AudioGain.mix(tracks: tracks), targetRMS: 0.15, peakCeiling: 0.7),
             fadeSampleCount: Int(rate * 0.01)
         )
 
+        let generation = UUID()
+        voiceHarmonyPlaybackGeneration = generation
         do {
             isPlayingVoiceHarmony = true
             try voiceHarmonyPlayer.play(samples: mixed, sampleRate: rate) {
-                isPlayingVoiceHarmony = false
+                if voiceHarmonyPlaybackGeneration == generation { isPlayingVoiceHarmony = false }
             }
         } catch {
             isPlayingVoiceHarmony = false

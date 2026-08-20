@@ -133,6 +133,10 @@ struct PracticeView: View {
     // (harmonyPlayer)과 별개 인스턴스로 둬서 둘을 번갈아 눌러도 서로 끊기지 않게 한다.
     let voiceHarmonyPlayer = RecordingPlayer()
     @State var isPlayingVoiceHarmony = false
+    // 128절 — 어느 성부가 음소거됐는지, 그리고 "재생 중 뮤트 전환으로 재시작"에서 낡은 완료
+    // 콜백이 새 재생 상태를 덮어쓰지 않게 막는 세대 토큰(startVoiceHarmonyPlayback 참고).
+    @State var mutedVoices: Set<VoiceHarmonyTrackBuilder.Voice> = []
+    @State var voiceHarmonyPlaybackGeneration = UUID()
     // 128절 — 멜로디/베이스/3도/5도를 각각 따로 들어볼 수 있는 개별 재생 버튼(성부별 디버깅/비교
     // 용도로 예전에도 있었던 기능, WORLD 버전 위에 다시 만듦). 동시에 하나만 재생되므로 "지금
     // 재생 중인 성부가 뭔지"만 옵셔널 하나로 추적한다.

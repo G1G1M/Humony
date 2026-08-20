@@ -243,7 +243,91 @@ extension PracticeView {
                 if quickRecordPhase == .idle {
                     startingNoteControls
                 }
+
+                // 128절 — "재생 버튼들이 악보 카드 안에 있었는데, 악보 말고 반대편(조작부)에
+                // 만들어달라"는 요청 — 원본/화음 듣기/내 목소리로 화음/성부별 솔로/뮤트 토글을
+                // 전부 여기(악보와 분리된 조작부)로 옮겼다.
+                if !recentVoiceBuffer.isEmpty {
+                    playbackControls
+                }
             }
+        }
+    }
+
+    /// 원본 재생/화음 재생(합성음·목소리)/성부별 솔로/뮤트 토글을 모아둔 조작부 전용 섹션.
+    /// 예전엔 `sheetMusicPanel`(악보 카드) 안에 있었는데, 재생은 "조작"이지 악보의 일부가
+    /// 아니라는 지적으로 여기(캡처 영역과 같은 카드)로 옮겼다(128절).
+    var playbackControls: some View {
+        // 재생 버튼들(원본/합성음 화음/목소리 화음/성부별 솔로)은 항상 하나만 켜지게 서로
+        // 막는다 — 동시에 여러 개가 스피커로 나가면 마이크 피드백 가드(isPlayingRecording 등)
+        // 판단이 꼬이기 쉽다.
+        let anyPlaybackActive = isPlayingRecording || isPlayingHarmony || isPlayingVoiceHarmony || playingSoloVoice != nil
+
+        return VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            HStack(spacing: Theme.Spacing.sm) {
+                Button {
+                    togglePlayback()
+                } label: {
+                    Label(isPlayingRecording ? "정지" : "녹음 다시 듣기", systemImage: isPlayingRecording ? "stop.fill" : "play.fill")
+                }
+                .harmonyButtonStyle()
+                .disabled(anyPlaybackActive && !isPlayingRecording)
+
+                // 120절, 화음 재설계 1단계 — 멜로디+베이스+3도+5도를 합성음으로 들어본다.
+                Button {
+                    toggleHarmonyPlayback()
+                } label: {
+                    Label(isPlayingHarmony ? "정지" : "화음 듣기", systemImage: isPlayingHarmony ? "stop.fill" : "music.note.list")
+                }
+                .harmonyButtonStyle()
+                .disabled(anyPlaybackActive && !isPlayingHarmony)
+
+                // 123절, 화음 재설계 2단계 — 같은 화음을 사용자 자신의 목소리(WORLD 피치시프트)로 들어본다.
+                Button {
+                    toggleVoiceHarmonyPlayback()
+                } label: {
+                    Label(isPlayingVoiceHarmony ? "정지" : "내 목소리로 화음", systemImage: isPlayingVoiceHarmony ? "stop.fill" : "person.wave.2")
+                }
+                .harmonyButtonStyle()
+                .disabled(anyPlaybackActive && !isPlayingVoiceHarmony)
+            }
+
+            // 128절 — 멜로디/베이스/3도/5도를 각각 따로 들어보는 성부별 솔로 버튼(포먼트/음량
+            // 조정이 어느 성부에 어떻게 들리는지 비교하기 위한 디버깅용).
+            HStack(spacing: Theme.Spacing.sm) {
+                ForEach(soloVoiceOptions, id: \.label) { option in
+                    Button {
+                        toggleVoiceSolo(option.voice)
+                    } label: {
+                        Label(
+                            playingSoloVoice == option.voice ? "정지" : option.label,
+                            systemImage: playingSoloVoice == option.voice ? "stop.fill" : "waveform"
+                        )
+                    }
+                    .harmonyButtonStyle()
+                    .disabled(anyPlaybackActive && playingSoloVoice != option.voice)
+                }
+            }
+
+            // 128절 — "전체 화음이 재생될 때도 음을 껐다켰다 할 수 있게" 요청 — 노드를 여러 개로
+            // 나누는 진짜 실시간 믹싱 대신(109절이 이미 그 위험을 겪었음), 뮤트 상태를 바꾸면
+            // 지금 재생 중인 "내 목소리로 화음"을 즉시 새 조합으로 재시작한다(toggleMute 참고).
+            HStack(spacing: Theme.Spacing.xs) {
+                ForEach(soloVoiceOptions, id: \.label) { option in
+                    let isMuted = mutedVoices.contains(option.voice)
+                    Button {
+                        toggleMute(option.voice)
+                    } label: {
+                        Label(option.label, systemImage: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                            .font(Theme.Typography.caption)
+                    }
+                    .harmonyButtonStyle()
+                    .controlSize(.small)
+                    .opacity(isMuted ? 0.5 : 1.0)
+                    .accessibilityLabel(isMuted ? "\(option.label) 음소거됨" : "\(option.label) 켜짐")
+                }
+            }
+            .foregroundStyle(.secondary)
         }
     }
 
@@ -332,60 +416,6 @@ extension PracticeView {
                     Text("감지된 음: " + melodySteps.map(\.noteName).joined(separator: " · "))
                         .font(Theme.Typography.caption)
                         .foregroundStyle(.secondary)
-                }
-
-                // 화음 API 제거(116절) 이후 없어졌던 재생 버튼 — 방금 부른 걸 그대로 들어보며
-                // 위 "감지된 음" 텍스트와 귀로 대조할 수 있게 다시 추가(멜로디 인식 정확도 검증용).
-                if !recentVoiceBuffer.isEmpty {
-                    // 재생 버튼들(원본/합성음 화음/목소리 화음/성부별 솔로)은 항상 하나만
-                    // 켜지게 서로 막는다 — 동시에 여러 개가 스피커로 나가면 마이크 피드백
-                    // 가드(isPlayingRecording 등) 판단이 꼬이기 쉽다.
-                    let anyPlaybackActive = isPlayingRecording || isPlayingHarmony || isPlayingVoiceHarmony || playingSoloVoice != nil
-
-                    HStack(spacing: Theme.Spacing.sm) {
-                        Button {
-                            togglePlayback()
-                        } label: {
-                            Label(isPlayingRecording ? "정지" : "녹음 다시 듣기", systemImage: isPlayingRecording ? "stop.fill" : "play.fill")
-                        }
-                        .harmonyButtonStyle()
-                        .disabled(anyPlaybackActive && !isPlayingRecording)
-
-                        // 120절, 화음 재설계 1단계 — 멜로디+베이스+3도+5도를 합성음으로 들어본다.
-                        Button {
-                            toggleHarmonyPlayback()
-                        } label: {
-                            Label(isPlayingHarmony ? "정지" : "화음 듣기", systemImage: isPlayingHarmony ? "stop.fill" : "music.note.list")
-                        }
-                        .harmonyButtonStyle()
-                        .disabled(anyPlaybackActive && !isPlayingHarmony)
-
-                        // 123절, 화음 재설계 2단계 — 같은 화음을 사용자 자신의 목소리(WSOLA 피치시프트)로 들어본다.
-                        Button {
-                            toggleVoiceHarmonyPlayback()
-                        } label: {
-                            Label(isPlayingVoiceHarmony ? "정지" : "내 목소리로 화음", systemImage: isPlayingVoiceHarmony ? "stop.fill" : "person.wave.2")
-                        }
-                        .harmonyButtonStyle()
-                        .disabled(anyPlaybackActive && !isPlayingVoiceHarmony)
-                    }
-
-                    // 128절 — 멜로디/베이스/3도/5도를 각각 따로 들어보는 성부별 솔로 버튼
-                    // (포먼트/음량 조정이 어느 성부에 어떻게 들리는지 비교하기 위한 디버깅용).
-                    HStack(spacing: Theme.Spacing.sm) {
-                        ForEach(soloVoiceOptions, id: \.label) { option in
-                            Button {
-                                toggleVoiceSolo(option.voice)
-                            } label: {
-                                Label(
-                                    playingSoloVoice == option.voice ? "정지" : option.label,
-                                    systemImage: playingSoloVoice == option.voice ? "stop.fill" : "waveform"
-                                )
-                            }
-                            .harmonyButtonStyle()
-                            .disabled(anyPlaybackActive && playingSoloVoice != option.voice)
-                        }
-                    }
                 }
 
                 if fillAvailable {
