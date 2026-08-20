@@ -336,7 +336,17 @@ extension PracticeView {
         let tracks = voices.map { voice in
             SynthesizedHarmonyTrackBuilder.build(melodySteps: melodySteps, bufferLength: bufferLength, voice: voice, rate: rate)
         }
-        let mixed = AudioGain.applyFadeInOut(AudioGain.normalizeLoudness(AudioGain.mix(tracks: tracks)), fadeSampleCount: Int(rate * 0.01))
+        // 122절 재검증 — 크로스페이드+램프 중첩 수정 이후에도 "살짝 지지직"이 남는다는 제보 —
+        // normalizeLoudness 기본값(targetRMS 0.25, peakCeiling 0.98)은 원래 목소리 녹음(발성이라
+        // 크레스트 팩터가 큼)을 키우려고 잡은 값인데, 순수 사인파 4개를 겹친 신호는 애초에
+        // 크레스트 팩터가 작아서(항상 어느 정도 진폭이 유지됨) 같은 targetRMS만으로도 피크가 쉽게
+        // 0.98 근처까지 올라간다 — 아이패드 내장 스피커가 그 음량에서 사인파를 못 따라가 왜곡을
+        // 낼 가능성이 있어, 화음 재생만 더 낮은 목표치(targetRMS 0.15, peakCeiling 0.7)로 낮춰서
+        // 스피커 헤드룸을 넉넉히 남긴다(녹음 분석용 normalizeLoudness 기본값은 그대로 둠).
+        let mixed = AudioGain.applyFadeInOut(
+            AudioGain.normalizeLoudness(AudioGain.mix(tracks: tracks), targetRMS: 0.15, peakCeiling: 0.7),
+            fadeSampleCount: Int(rate * 0.01)
+        )
 
         do {
             isPlayingHarmony = true

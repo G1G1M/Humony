@@ -15,7 +15,7 @@
 
 ## 진행 상황
 
-전체 체크리스트는 [`docs/PROGRESS.md`](docs/PROGRESS.md) 참고. 최근 작업: 멜로디 세그멘테이션 다회 실기기 재검증 완료(119절 이후) → **화음 재설계 1단계, 순수 사인파 합성음으로 멜로디+베이스+3도+5도 재생**(120절, `ToneSynthesizer`+`SynthesizedHarmonyTrackBuilder` 신규, 아직 실기기 미검증).
+전체 체크리스트는 [`docs/PROGRESS.md`](docs/PROGRESS.md) 참고. 최근 작업: 화음 재설계 1단계(120절, `ToneSynthesizer`+`SynthesizedHarmonyTrackBuilder`) → 실기기 검증 중 "따다다닥" 끊김 발견, 진짜 크로스페이드로 수정(121절) → 잔여 "지지직"을 짧은 음 램프 중첩 방지+화음 재생 음량 조정으로 개선(122절). 다음은 목소리 기반 화음("내 목소리로 화음 만들기") 단계로 넘어갈지 논의 중.
 
 ## 구성 요소 (`HarmonyUp/Sources/PitchEngine/`)
 
