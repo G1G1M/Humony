@@ -177,6 +177,17 @@ extension PracticeView {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    // 128절 — 성부별 솔로 버튼이 순회할 목록. 화면에 보여줄 순서(멜로디 먼저, 그다음 낮은
+    // 음부터)와 라벨을 한곳에 모아둔다.
+    var soloVoiceOptions: [(label: String, voice: VoiceHarmonyTrackBuilder.Voice)] {
+        [
+            (label: "멜로디", voice: .melody),
+            (label: "베이스", voice: .harmony(.bass)),
+            (label: "3도", voice: .harmony(.third)),
+            (label: "5도", voice: .harmony(.fifth)),
+        ]
+    }
+
     // MARK: - 두 레이아웃이 공유하는 섹션
 
     /// 마이크 권한이 꺼져 있을 때 캡처 영역 자리에 보여주는 전용 상태 — "왜 안 되는지" 설명하고
@@ -326,10 +337,10 @@ extension PracticeView {
                 // 화음 API 제거(116절) 이후 없어졌던 재생 버튼 — 방금 부른 걸 그대로 들어보며
                 // 위 "감지된 음" 텍스트와 귀로 대조할 수 있게 다시 추가(멜로디 인식 정확도 검증용).
                 if !recentVoiceBuffer.isEmpty {
-                    // 세 재생 버튼(원본/합성음 화음/목소리 화음)은 항상 하나만 켜지게 서로 막는다 —
-                    // 동시에 여러 개가 스피커로 나가면 마이크 피드백 가드(isPlayingRecording 등)
-                    // 판단이 꼬이기 쉽다.
-                    let anyPlaybackActive = isPlayingRecording || isPlayingHarmony || isPlayingVoiceHarmony
+                    // 재생 버튼들(원본/합성음 화음/목소리 화음/성부별 솔로)은 항상 하나만
+                    // 켜지게 서로 막는다 — 동시에 여러 개가 스피커로 나가면 마이크 피드백
+                    // 가드(isPlayingRecording 등) 판단이 꼬이기 쉽다.
+                    let anyPlaybackActive = isPlayingRecording || isPlayingHarmony || isPlayingVoiceHarmony || playingSoloVoice != nil
 
                     HStack(spacing: Theme.Spacing.sm) {
                         Button {
@@ -357,6 +368,23 @@ extension PracticeView {
                         }
                         .harmonyButtonStyle()
                         .disabled(anyPlaybackActive && !isPlayingVoiceHarmony)
+                    }
+
+                    // 128절 — 멜로디/베이스/3도/5도를 각각 따로 들어보는 성부별 솔로 버튼
+                    // (포먼트/음량 조정이 어느 성부에 어떻게 들리는지 비교하기 위한 디버깅용).
+                    HStack(spacing: Theme.Spacing.sm) {
+                        ForEach(soloVoiceOptions, id: \.label) { option in
+                            Button {
+                                toggleVoiceSolo(option.voice)
+                            } label: {
+                                Label(
+                                    playingSoloVoice == option.voice ? "정지" : option.label,
+                                    systemImage: playingSoloVoice == option.voice ? "stop.fill" : "waveform"
+                                )
+                            }
+                            .harmonyButtonStyle()
+                            .disabled(anyPlaybackActive && playingSoloVoice != option.voice)
+                        }
                     }
                 }
 

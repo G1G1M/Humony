@@ -133,6 +133,11 @@ struct PracticeView: View {
     // (harmonyPlayer)과 별개 인스턴스로 둬서 둘을 번갈아 눌러도 서로 끊기지 않게 한다.
     let voiceHarmonyPlayer = RecordingPlayer()
     @State var isPlayingVoiceHarmony = false
+    // 128절 — 멜로디/베이스/3도/5도를 각각 따로 들어볼 수 있는 개별 재생 버튼(성부별 디버깅/비교
+    // 용도로 예전에도 있었던 기능, WORLD 버전 위에 다시 만듦). 동시에 하나만 재생되므로 "지금
+    // 재생 중인 성부가 뭔지"만 옵셔널 하나로 추적한다.
+    let soloVoicePlayer = RecordingPlayer()
+    @State var playingSoloVoice: VoiceHarmonyTrackBuilder.Voice?
     // 악보 카드가 뜬 시점엔 항상 true로 시작 — WKWebView 프로세스가 늦게 뜰 수 있어서(76절),
     // 첫 렌더가 끝날 때까지는 화면이 비어 보이는 대신 "만드는 중" 표시를 겹쳐 보여준다.
     // VexFlowScoreView.Coordinator가 renderScore 자바스크립트 호출이 끝나면 false로 되돌린다.
@@ -185,6 +190,8 @@ struct PracticeView: View {
             isPlayingHarmony = false
             voiceHarmonyPlayer.stop()
             isPlayingVoiceHarmony = false
+            soloVoicePlayer.stop()
+            playingSoloVoice = nil
             startingNotePlayer.stop()
             isPlayingStartingNote = false
         }

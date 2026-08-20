@@ -45,7 +45,7 @@ extension PracticeView {
             try audioCapture.start { result, rawSamples, rawSampleRate in
                 // 녹음/화음 재생 중엔 마이크를 무시한다 — 스피커로 낸 소리가 다시 마이크로
                 // 들어가는 피드백 루프를 막기 위한 기존 원칙(화음 재생 때부터 이어옴).
-                guard !isPlayingRecording, !isPlayingHarmony, !isPlayingVoiceHarmony else { return }
+                guard !isPlayingRecording, !isPlayingHarmony, !isPlayingVoiceHarmony, playingSoloVoice == nil else { return }
 
                 // 녹음 중엔 이 프레임을 quickRecordBuffer에 쌓기만 한다. 녹음이 끝난 뒤 "따라 부르기
                 // 채점"으로 마이크가 다시 켜질 때는 quickRecordPhase가 더 이상 .recording이 아니므로
@@ -294,6 +294,8 @@ extension PracticeView {
         isPlayingHarmony = false
         voiceHarmonyPlayer.stop()
         isPlayingVoiceHarmony = false
+        soloVoicePlayer.stop()
+        playingSoloVoice = nil
         recentVoiceBuffer = []
         isScoringExpanded = false
         lastSavedInterval = nil
@@ -418,6 +420,36 @@ extension PracticeView {
         } catch {
             isPlayingVoiceHarmony = false
             statusText = "목소리 화음 재생 실패: \(error.localizedDescription)"
+        }
+    }
+
+    /// 128절 — 멜로디/베이스/3도/5도를 각각 따로 들어본다(WORLD 버전). 포먼트/음량 조정이
+    /// 실제로 어느 성부에 어떻게 들리는지 하나씩 떼어서 비교하기 위한 디버깅/비교용 버튼.
+    func toggleVoiceSolo(_ voice: VoiceHarmonyTrackBuilder.Voice) {
+        if playingSoloVoice == voice {
+            soloVoicePlayer.stop()
+            playingSoloVoice = nil
+            return
+        }
+        guard !recentVoiceBuffer.isEmpty, !melodySteps.isEmpty else { return }
+
+        let bufferLength = recentVoiceBuffer.count
+        let rate = recentVoiceSampleRate
+        let track = VoiceHarmonyTrackBuilder.build(melodySteps: melodySteps, sourceBuffer: recentVoiceBuffer, bufferLength: bufferLength, voice: voice, rate: rate)
+        let processed = AudioGain.applyFadeInOut(
+            AudioGain.normalizeLoudness(track, targetRMS: 0.15, peakCeiling: 0.7),
+            fadeSampleCount: Int(rate * 0.01)
+        )
+
+        do {
+            soloVoicePlayer.stop() // 다른 성부를 재생 중이었다면 먼저 끊고 새로 시작
+            playingSoloVoice = voice
+            try soloVoicePlayer.play(samples: processed, sampleRate: rate) {
+                if playingSoloVoice == voice { playingSoloVoice = nil }
+            }
+        } catch {
+            playingSoloVoice = nil
+            statusText = "성부 재생 실패: \(error.localizedDescription)"
         }
     }
 }
