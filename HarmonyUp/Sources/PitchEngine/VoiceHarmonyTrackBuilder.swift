@@ -77,12 +77,18 @@ enum VoiceHarmonyTrackBuilder {
             guard extStart < extEnd else { continue }
             let targetLength = extEnd - extStart
 
-            // 소스도 같은 범위(+크로스페이드 확장분)만큼 원본 녹음에서 그대로 슬라이싱한다 —
-            // 확장 구간의 목소리가 엄밀히는 다음/이전 음으로 넘어가는 부분일 수 있지만, 크로스
-            // 페이드 폭이 짧아서(기본 20ms) 청감상 문제되지 않는다.
-            let sourceStart = max(0, min(sourceBuffer.count, extStart))
-            let sourceEnd = max(sourceStart, min(sourceBuffer.count, extEnd))
-            let sourceSlice = Array(sourceBuffer[sourceStart..<sourceEnd])
+            // 128절: 크로스페이드 확장분을 이웃 세그먼트(다른 음높이)의 실제 목소리에서
+            // 빌리지 않는다 — 그러면 "다음 음의 목소리"가 "현재 화음 음정"으로 잘못 옮겨진
+            // 소리가 크로스페이드 안쪽(가중치가 큰 구간)에 섞인다. 대신 이 세그먼트 자신의
+            // 오디오를 경계에서 거울반사해서 확장분을 채운다 — 이웃 침범 없이, 무음도 아닌
+            // "같은 음의 실제 신호"로 크로스페이드 목적을 유지한다.
+            let sourceSlice = mirrorExtendedSlice(
+                sourceBuffer: sourceBuffer,
+                segmentStart: segment.start,
+                segmentEnd: segment.end,
+                extStart: extStart,
+                extEnd: extEnd
+            )
 
             var tone: [Float]
             if segment.pitchRatio == 1.0 {
@@ -144,5 +150,46 @@ enum VoiceHarmonyTrackBuilder {
         if samples.count == length { return samples }
         if samples.count > length { return Array(samples.prefix(length)) }
         return samples + [Float](repeating: 0, count: length - samples.count)
+    }
+
+    /// 128절 — 크로스페이드 확장 구간(`extStart..<extEnd`)을 이 세그먼트 자신의 오디오
+    /// (`segmentStart..<segmentEnd`)만으로 채운다. 세그먼트 경계 바로 안쪽 샘플부터 거울처럼
+    /// 뒤집어서 바깥으로 이어 붙이는 방식(대칭 반사 패딩)이라, 이웃 세그먼트(다른 음높이)의
+    /// 오디오는 전혀 섞이지 않고 경계에서 값이 자연스럽게 이어진다(불연속 없음).
+    /// `internal`로 열어둔 이유: 유닛테스트에서 이웃 침범이 실제로 없는지 직접 검증하기 위함
+    /// (`MelodySegmenter.absorbShortRuns`와 같은 관례).
+    static func mirrorExtendedSlice(
+        sourceBuffer: [Float],
+        segmentStart: Int,
+        segmentEnd: Int,
+        extStart: Int,
+        extEnd: Int
+    ) -> [Float] {
+        let clampedStart = max(0, min(sourceBuffer.count, segmentStart))
+        let clampedEnd = max(clampedStart, min(sourceBuffer.count, segmentEnd))
+        let core = Array(sourceBuffer[clampedStart..<clampedEnd])
+        guard !core.isEmpty else { return [Float](repeating: 0, count: max(0, extEnd - extStart)) }
+
+        let leadingCount = max(0, clampedStart - extStart)
+        let trailingCount = max(0, extEnd - clampedEnd)
+        return mirror(core, count: leadingCount, fromStart: true) + core + mirror(core, count: trailingCount, fromStart: false)
+    }
+
+    /// `core`의 시작(또는 끝) 근처 `count`개를 뒤집어 만든 확장분. `count`가 `core.count`보다
+    /// 크면(세그먼트 자체가 크로스페이드 확장보다 짧은 극단적인 경우 — 최소 음 길이 0.18초
+    /// ≈ 7900샘플이 크로스페이드 확장 최대 10ms ≈ 441샘플보다 훨씬 길어 실전에선 거의 없다)
+    /// 남는 만큼은 가장자리 샘플을 반복해 방어적으로 채운다.
+    private static func mirror(_ core: [Float], count: Int, fromStart: Bool) -> [Float] {
+        guard count > 0, !core.isEmpty else { return [] }
+        let mirrorCount = min(count, core.count)
+        if fromStart {
+            var result = Array(core.prefix(mirrorCount).reversed())
+            if count > mirrorCount { result = [Float](repeating: core[0], count: count - mirrorCount) + result }
+            return result
+        } else {
+            var result = Array(core.suffix(mirrorCount).reversed())
+            if count > mirrorCount { result += [Float](repeating: core[core.count - 1], count: count - mirrorCount) }
+            return result
+        }
     }
 }

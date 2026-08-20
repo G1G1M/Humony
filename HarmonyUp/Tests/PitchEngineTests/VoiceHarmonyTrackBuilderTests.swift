@@ -130,4 +130,50 @@ final class VoiceHarmonyTrackBuilderTests: XCTestCase {
         let track = VoiceHarmonyTrackBuilder.build(melodySteps: steps, sourceBuffer: source, bufferLength: bufferLength, voice: .melody, rate: rate)
         XCTAssertEqual(track, source)
     }
+
+    // 128절 — 크로스페이드 확장분이 이웃 세그먼트(다른 음)의 오디오를 침범하면 안 된다.
+    // 이웃 구간을 뚜렷이 다른 값(99)으로 채워두고, 결과에 그 값이 전혀 섞이지 않았는지 확인한다.
+    func testMirrorExtendedSliceReflectsOwnSegmentAudioOnly() {
+        // [이웃(99×20) | 세그먼트(0..<10, 0...9) | 이웃(99×20)]
+        let neighborLeft: [Float] = [Float](repeating: 99, count: 20)
+        let core: [Float] = (0..<10).map { Float($0) }
+        let neighborRight: [Float] = [Float](repeating: 99, count: 20)
+        let buffer = neighborLeft + core + neighborRight
+        let segmentStart = neighborLeft.count       // 20
+        let segmentEnd = segmentStart + core.count  // 30
+        let extStart = segmentStart - 5             // 15
+        let extEnd = segmentEnd + 5                 // 35
+
+        let result = VoiceHarmonyTrackBuilder.mirrorExtendedSlice(
+            sourceBuffer: buffer, segmentStart: segmentStart, segmentEnd: segmentEnd, extStart: extStart, extEnd: extEnd
+        )
+
+        XCTAssertFalse(result.contains(99), "이웃 세그먼트의 오디오(99)가 섞이면 안 된다")
+        // 앞쪽 확장(5개) = core[0..<5]를 뒤집은 것 = [4,3,2,1,0], 뒤쪽 확장(5개) = core[5..<10]을
+        // 뒤집은 것 = [9,8,7,6,5].
+        XCTAssertEqual(result, [4, 3, 2, 1, 0] + core + [9, 8, 7, 6, 5])
+    }
+
+    // 세그먼트 자체가 확장 요청보다 짧은 방어적 경우 — 가장자리 샘플 반복으로 채워야 한다.
+    func testMirrorExtendedSliceHandlesExtensionLongerThanSegment() {
+        let buffer: [Float] = [10, 20, 0, 1, 2, 30, 40]
+        // segment = [0,1,2](인덱스 2..<5), 확장을 세그먼트 길이(3)보다 긴 4씩 요청.
+        let result = VoiceHarmonyTrackBuilder.mirrorExtendedSlice(
+            sourceBuffer: buffer, segmentStart: 2, segmentEnd: 5, extStart: -2, extEnd: 9
+        )
+        XCTAssertEqual(result.count, 11) // extEnd - extStart
+        XCTAssertFalse(result.contains(10))
+        XCTAssertFalse(result.contains(20))
+        XCTAssertFalse(result.contains(30))
+        XCTAssertFalse(result.contains(40))
+    }
+
+    // 길이 불변식 — 결과는 항상 extEnd - extStart와 정확히 같아야 한다.
+    func testMirrorExtendedSliceLengthMatchesRequestedRange() {
+        let buffer: [Float] = (0..<50).map { Float($0) }
+        let result = VoiceHarmonyTrackBuilder.mirrorExtendedSlice(
+            sourceBuffer: buffer, segmentStart: 20, segmentEnd: 30, extStart: 15, extEnd: 35
+        )
+        XCTAssertEqual(result.count, 20)
+    }
 }
