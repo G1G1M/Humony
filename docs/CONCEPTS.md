@@ -2806,3 +2806,34 @@ v2 전용 동작(경과음 구간 코드 유지, 근음 진행 선호)을 검증
 ### 검증
 
 유닛테스트 139개 유지, 아이패드 시뮬레이터 빌드 통과. **실기기 재확인 필요.**
+
+## 115. WSOLA/PSOLA/WORLD 3-way 전환 — 목소리 피치시프트 알고리즘도 직접 A/B 비교
+
+### 배경
+
+114절로 목소리 기반(WORLD)에 복귀했는데도 실기기에서 "타이밍이 안 맞음/기계음 같음/음정 자체가 틀린 느낌" 세 가지가 다 이상하다는 재확인. 사용자가 "API를 추가해서(=WORLD) 이상해진 것 같다, 그냥 코딩으로 짠 알고리즘이 더 나았던 것 같다"고 판단 — git log를 확인해보니 실제로는 WSOLA(최초, `92b4585`)→PSOLA(포먼트 보존 재작성, `c94288b`)→WORLD(`e1d0ff2`) 순으로 두 번 교체된 히스토리가 있었고, **WSOLA·PSOLA 둘 다 그 당시 "이상하다"는 이유로 다음 알고리즘에 자리를 내준 전적**이 있었다(WSOLA: "화음이 기계음 같다" → PSOLA: "전체 화음이 더 이상하게 들린다" → WORLD 도입). 즉 어느 쪽도 무조건 낫다고 단정할 근거가 없어서, 사용자가 셋 다 실기기로 직접 A/B 비교해보기로 함.
+
+### 구현 — 3개 알고리즘을 나란히 살려두고 한 줄로 전환
+
+112절에서 화음 소리 생성 방식(목소리 vs 합성음)을 전환 가능하게 만들었던 패턴을 그대로 PitchShifter에도 적용:
+
+- `PitchShifterWSOLA.swift`(신규, 214줄) — git 히스토리(`c94288b^`, PSOLA로 교체되기 직전 최종 다듬어진 버전)에서 그대로 복원. `timeStretch`(WSOLA 시간축 변형)→`resample`(리샘플링) 2단계.
+- `PitchShifterPSOLA.swift`(신규, 173줄) — git 히스토리(`c94288b`, WORLD로 교체되기 직전)에서 그대로 복원. `estimateLocalPeriods`(로컬 피치 주기 추정)→`pitchSynchronousResynthesize`(리샘플링 없는 피치 동기 재합성) 2단계.
+- `PitchShifterWorld.swift`(기존 `PitchShifter.swift`를 이름만 바꿈) — WORLD 보코더 브릿지 호출, 지금까지 쓰던 그대로.
+- `PitchShifter.swift`(재작성, 스위처) — `activePitchShiftAlgorithm: PitchShiftAlgorithm`(`.wsola`/`.psola`/`.world`) 상수 하나로 셋 중 하나를 고른다. `HarmonyTrackBuilder.swift`가 부르는 `PitchShifter.shift(...)`는 시그니처 그대로, 내부에서만 위임 — **호출부는 전혀 안 건드림**. `formantRatio`는 WORLD 전용 개념이라 WSOLA/PSOLA로 위임할 때는 그냥 버려진다(애초에 그 두 알고리즘엔 그 파라미터가 없음).
+
+WSOLA/PSOLA는 지운 적이 없으니 복원이라기보다는 "다시 이름 붙여서 스위처에 연결"에 가깝다 — 정확히는 git 히스토리에서 파일을 끌어와 새 이름의 파일로 만든 것.
+
+### 테스트
+
+- `PitchShifterWSOLATests.swift`(신규 10개) / `PitchShifterPSOLATests.swift`(신규 13개) — 각 알고리즘이 교체되기 직전 시점의 원래 테스트 파일을 git 히스토리에서 그대로 가져와 이름만 맞춤(`PitchShifter.shift` → `PitchShifterWSOLA.shift`/`PitchShifterPSOLA.shift`). 둘 다 그 알고리즘의 타입을 직접 호출하므로 `activePitchShiftAlgorithm` 설정과 무관하게 항상 실행됨.
+- 기존 `PitchShifterTests.swift` → `PitchShifterWorldTests.swift`로 이름 변경, 참조도 `PitchShifterWorld.shift`로 교체 — WORLD 전용 검증(`formantRatio`, 30초 클립 성능 상한)을 포함해 그대로 유지.
+- 유닛테스트 162개(139+23) 통과, `.wsola`/`.psola`/`.world` 세 설정 전부 빌드 확인.
+
+### 전환 방법 (실기기 A/B 테스트용)
+
+`HarmonyUp/Sources/PitchEngine/PitchShifter.swift`의 `activePitchShiftAlgorithm` 값을 바꾸고 다시 빌드+설치하면 된다. 지금은 `.wsola`로 맞춰서 실기기(Ian's iPhone)에 설치해둔 상태 — 사용자가 들어보고 다음(`.psola` 또는 다시 `.world`)으로 바꿔달라고 하면 그때 전환.
+
+### 검증
+
+유닛테스트 162개 통과, 세 알고리즘 전부 시뮬레이터+실기기 빌드 성공. `.wsola` 설정으로 실기기 설치 완료. **실기기 청취로 세 알고리즘 중 어느 게 이 화음 파이프라인(짧은 세그먼트 단위 피치시프트)에 제일 나은지 확인 필요 — 사용자가 직접 비교 후 최종 선택.**

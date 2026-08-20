@@ -15,7 +15,7 @@
 
 ## 진행 상황
 
-전체 체크리스트는 [`docs/PROGRESS.md`](docs/PROGRESS.md) 참고. 최근 작업: 화음 소리 생성 방식을 목소리(WORLD)↔합성음(TonePlayer) 사이에서 실기기 청취로 왕복 실험 중(112~114절) — 지금은 다시 목소리 피치시프트(`HarmonyTrackBuilder`) 사용.
+전체 체크리스트는 [`docs/PROGRESS.md`](docs/PROGRESS.md) 참고. 최근 작업: 화음 소리 생성 방식(목소리↔합성음, 112~114절)에 이어 목소리 피치시프트 알고리즘 자체도 WSOLA/PSOLA/WORLD 3-way 전환 가능하게 만듦(115절, `PitchShifter.swift`의 `activePitchShiftAlgorithm` 한 줄로 전환) — 지금은 `.wsola`로 실기기 테스트 중.
 
 ## 구성 요소 (`HarmonyUp/Sources/PitchEngine/`)
 

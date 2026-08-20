@@ -1,7 +1,7 @@
 import XCTest
 @testable import HarmonyUp
 
-final class PitchShifterTests: XCTestCase {
+final class PitchShifterWorldTests: XCTestCase {
 
     private let sampleRate: Double = 44100.0
 
@@ -34,7 +34,7 @@ final class PitchShifterTests: XCTestCase {
         let input = voiceLikeWave(frequency: 440.0, sampleCount: 16384)
         let ratio = pow(2.0, 4.0 / 12.0) // 장3도 위
 
-        let shifted = PitchShifter.shift(samples: input, pitchRatio: ratio, sampleRate: sampleRate)
+        let shifted = PitchShifterWorld.shift(samples: input, pitchRatio: ratio, sampleRate: sampleRate)
         XCTAssertEqual(shifted.count, input.count)
 
         // 버퍼 맨 앞/끝은 WORLD의 프레임 경계 처리 특성상 불안정할 수 있어서 안정된
@@ -52,7 +52,7 @@ final class PitchShifterTests: XCTestCase {
         let input = voiceLikeWave(frequency: 440.0, sampleCount: 16384)
         let ratio = pow(2.0, -7.0 / 12.0) // 완전5도 아래
 
-        let shifted = PitchShifter.shift(samples: input, pitchRatio: ratio, sampleRate: sampleRate)
+        let shifted = PitchShifterWorld.shift(samples: input, pitchRatio: ratio, sampleRate: sampleRate)
 
         let middle = middleSegment(of: shifted, length: 4096)
         let candidates = YINPitchDetector.detectPitch(samples: middle, sampleRate: sampleRate)
@@ -69,7 +69,7 @@ final class PitchShifterTests: XCTestCase {
         let input = voiceLikeWave(frequency: 440.0, sampleCount: 16384)
         let ratio = 0.5
 
-        let shifted = PitchShifter.shift(samples: input, pitchRatio: ratio, sampleRate: sampleRate)
+        let shifted = PitchShifterWorld.shift(samples: input, pitchRatio: ratio, sampleRate: sampleRate)
 
         let middle = middleSegment(of: shifted, length: 4096)
         let candidates = YINPitchDetector.detectPitch(samples: middle, sampleRate: sampleRate)
@@ -82,7 +82,7 @@ final class PitchShifterTests: XCTestCase {
 
     func testIdentityRatioPreservesPitch() throws {
         let input = voiceLikeWave(frequency: 440.0, sampleCount: 16384)
-        let shifted = PitchShifter.shift(samples: input, pitchRatio: 1.0, sampleRate: sampleRate)
+        let shifted = PitchShifterWorld.shift(samples: input, pitchRatio: 1.0, sampleRate: sampleRate)
         let middle = middleSegment(of: shifted, length: 4096)
         let candidates = YINPitchDetector.detectPitch(samples: middle, sampleRate: sampleRate)
         let detected = try XCTUnwrap(candidates.first)
@@ -91,18 +91,18 @@ final class PitchShifterTests: XCTestCase {
 
     func testOutputLengthMatchesInput() {
         let input = voiceLikeWave(frequency: 440.0, sampleCount: 16384)
-        let shifted = PitchShifter.shift(samples: input, pitchRatio: 1.26, sampleRate: sampleRate)
+        let shifted = PitchShifterWorld.shift(samples: input, pitchRatio: 1.26, sampleRate: sampleRate)
         XCTAssertEqual(shifted.count, input.count)
     }
 
     func testEmptyInputReturnsEmpty() {
-        XCTAssertTrue(PitchShifter.shift(samples: [], pitchRatio: 1.5, sampleRate: sampleRate).isEmpty)
+        XCTAssertTrue(PitchShifterWorld.shift(samples: [], pitchRatio: 1.5, sampleRate: sampleRate).isEmpty)
     }
 
     func testInvalidPitchRatioReturnsInputUnchanged() {
         let input = voiceLikeWave(frequency: 440.0, sampleCount: 4096)
-        XCTAssertEqual(PitchShifter.shift(samples: input, pitchRatio: 0, sampleRate: sampleRate), input)
-        XCTAssertEqual(PitchShifter.shift(samples: input, pitchRatio: -1, sampleRate: sampleRate), input)
+        XCTAssertEqual(PitchShifterWorld.shift(samples: input, pitchRatio: 0, sampleRate: sampleRate), input)
+        XCTAssertEqual(PitchShifterWorld.shift(samples: input, pitchRatio: -1, sampleRate: sampleRate), input)
     }
 
     // formantRatio를 안 넘기면 예전 호출부(포먼트 개념이 없던 시절)와 완전히 같은 경로를
@@ -112,8 +112,8 @@ final class PitchShifterTests: XCTestCase {
         let input = voiceLikeWave(frequency: 440.0, sampleCount: 8192)
         let ratio = pow(2.0, -7.0 / 12.0)
 
-        let withDefault = PitchShifter.shift(samples: input, pitchRatio: ratio, sampleRate: sampleRate)
-        let withExplicitIdentity = PitchShifter.shift(samples: input, pitchRatio: ratio, formantRatio: 1.0, sampleRate: sampleRate)
+        let withDefault = PitchShifterWorld.shift(samples: input, pitchRatio: ratio, sampleRate: sampleRate)
+        let withExplicitIdentity = PitchShifterWorld.shift(samples: input, pitchRatio: ratio, formantRatio: 1.0, sampleRate: sampleRate)
 
         XCTAssertEqual(withDefault, withExplicitIdentity)
     }
@@ -124,7 +124,7 @@ final class PitchShifterTests: XCTestCase {
     func testFormantRatioDoesNotChangeDetectedPitch() throws {
         let input = voiceLikeWave(frequency: 440.0, sampleCount: 16384)
 
-        let shifted = PitchShifter.shift(samples: input, pitchRatio: 1.0, formantRatio: 1.15, sampleRate: sampleRate)
+        let shifted = PitchShifterWorld.shift(samples: input, pitchRatio: 1.0, formantRatio: 1.15, sampleRate: sampleRate)
         XCTAssertEqual(shifted.count, input.count)
 
         let middle = middleSegment(of: shifted, length: 4096)
@@ -154,7 +154,7 @@ final class PitchShifterTests: XCTestCase {
         }
 
         let start = Date()
-        _ = PitchShifter.shift(samples: input, pitchRatio: 1.5, sampleRate: 44100.0)
+        _ = PitchShifterWorld.shift(samples: input, pitchRatio: 1.5, sampleRate: 44100.0)
         let elapsed = Date().timeIntervalSince(start)
 
         XCTAssertLessThan(elapsed, 10.0)
