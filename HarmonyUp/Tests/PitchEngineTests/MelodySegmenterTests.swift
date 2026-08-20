@@ -176,11 +176,45 @@ final class MelodySegmenterTests: XCTestCase {
         XCTAssertEqual(result[0].duration, 0.56, accuracy: 0.001) // 전체 구간(0.0~0.56)을 다 흡수
     }
 
-    func testAbsorbShortRunsDropsOrphanNoteWithNoNeighbors() {
-        // 녹음 전체가 짧은 음 하나뿐이면(흡수할 이웃이 없음) 버리는 수밖에 없다.
+    func testAbsorbShortRunsKeepsOrphanNoteWithNoNeighbors() {
+        // 118절: "흡수할 무음-없는 이웃이 없다"는 이제 "버릴 이유"가 아니라 "짧아도 진짜 음일
+        // 가능성이 높다"는 신호로 바뀌었다 — 녹음 전체가 짧은 음 하나뿐이어도(이웃 자체가
+        // 없음) 그대로 남긴다.
         let notes = [MelodySegmenter.SegmentedNote(midiNote: 64, onsetTime: 0.0, duration: 0.05, averageConfidence: 0.5)]
 
-        XCTAssertTrue(MelodySegmenter.absorbShortRuns(notes, minimumDuration: 0.18).isEmpty)
+        XCTAssertEqual(MelodySegmenter.absorbShortRuns(notes, minimumDuration: 0.18), notes)
+    }
+
+    func testAbsorbShortRunsKeepsShortNoteIsolatedBySilenceOnBothSides() {
+        // 118절 실기기 로그 실측: 빠르게 부른 "도레미파솔라시도"에서 "파"(F3, 0.12초)가 앞뒤로
+        // 뚜렷한 무음 간격(직전 E3과 34ms, 직후 F#3 잡음과 93ms)을 두고 독립적으로 불렸는데도
+        // 짧다는 이유만으로 흡수돼 사라졌다 — 무음으로 갈라져 있으면 짧아도 흡수하지 않고
+        // 그대로 남아야 한다.
+        let notes = [
+            MelodySegmenter.SegmentedNote(midiNote: 64, onsetTime: 0.0, duration: 0.30, averageConfidence: 0.9),   // E3
+            MelodySegmenter.SegmentedNote(midiNote: 65, onsetTime: 0.334, duration: 0.12, averageConfidence: 0.97), // F3, 앞뒤 무음으로 고립
+            MelodySegmenter.SegmentedNote(midiNote: 66, onsetTime: 0.547, duration: 0.30, averageConfidence: 0.9)   // F#3(잡음)
+        ]
+
+        let result = MelodySegmenter.absorbShortRuns(notes, minimumDuration: 0.18)
+
+        XCTAssertEqual(result.map(\.midiNote), [64, 65, 66])
+        XCTAssertEqual(result[1].duration, 0.12, accuracy: 0.001) // F3가 흡수되지 않고 그대로 유지
+    }
+
+    func testAbsorbShortRunsDoesNotMergeRepeatedNoteAcrossRealSilenceGap() {
+        // 118절 실기기 로그 실측: "도"를 여러 번 따로(무음 간격 69~232ms) 불러도, 각 반복이
+        // 개별적으로 0.18초보다 짧으면 예전엔 서로 흡수돼 하나의 "도"로 뭉개졌다 — 무음
+        // 간격이 이 정도로 뚜렷하면(허용 오차 0.02초를 훨씬 넘음) 절대 흡수하지 않아야 한다.
+        let notes = [
+            MelodySegmenter.SegmentedNote(midiNote: 48, onsetTime: 0.0, duration: 0.14, averageConfidence: 0.97),   // 도(1차)
+            MelodySegmenter.SegmentedNote(midiNote: 48, onsetTime: 0.209, duration: 0.13, averageConfidence: 0.97), // 도(2차), 69ms 간격
+            MelodySegmenter.SegmentedNote(midiNote: 48, onsetTime: 0.571, duration: 0.15, averageConfidence: 0.95)  // 도(3차), 232ms 간격
+        ]
+
+        let result = MelodySegmenter.absorbShortRuns(notes, minimumDuration: 0.18)
+
+        XCTAssertEqual(result.count, 3, "무음으로 뚜렷이 갈라진 반복음은 흡수되지 않고 각각 남아야 한다")
     }
 
     func testAbsorbShortRunsKeepsNotesAlreadyAboveThreshold() {

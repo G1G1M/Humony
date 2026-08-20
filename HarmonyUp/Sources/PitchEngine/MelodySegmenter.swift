@@ -251,6 +251,19 @@ enum MelodySegmenter {
 
     // MARK: - 5단계: 짧은 과도구간을 인접 음으로 흡수
 
+    /// 흡수 대상 이웃과 "무음 없이 진짜로 붙어있는지" 판정하는 여유값(초). 윈도우가 서로
+    /// 겹치는 특성(hop < windowSize) 때문에, 무음이 전혀 없는 진짜 연속 전환도 재구성한
+    /// onset/duration 값으로는 살짝 겹치거나(음수 간격) 최대 몇 ms 정도까지만 벌어져 보인다 —
+    /// 무음 프레임이 실제로 몇 개 끼어들어야 이 재구성 간격이 양수로 넘어가는지 계산해보면,
+    /// windowSize/hop(2048/512=4) 프레임 미만의 무음은 항상 음수(겹침)로 나오고, 그 이상부터
+    /// 뚜렷한 양수 간격이 생긴다. 20ms면 이 경계를 넉넉히 포함하면서도, 실측(아래 118절)에서
+    /// 나온 진짜 무음 간격(69~232ms)과는 명확히 구분된다.
+    static let contiguousGapTolerance: Double = 0.02
+
+    private static func isContiguous(_ earlier: SegmentedNote, _ later: SegmentedNote) -> Bool {
+        (later.onsetTime - (earlier.onsetTime + earlier.duration)) <= contiguousGapTolerance
+    }
+
     /// 지속시간이 `minimumDuration`보다 짧은 음은 "진짜 새로 부른 음"이 아니라, 한 음에서
     /// 다음 음으로 넘어가는 과도구간(포르타멘토 슬라이드, 반음 경계 근처 비브라토 떨림)일
     /// 가능성이 훨씬 높다 — 실측(실기기 로그)으로 두 패턴을 직접 확인했다: (1) 도->레->미로
@@ -260,18 +273,39 @@ enum MelodySegmenter {
     /// 데이터도 줄어드니, 음높이가 더 가까운 이웃(앞 또는 뒤)에 흡수시켜 그 이웃의 길이를
     /// 늘리는 쪽을 택했다 — 가장 짧은 후보부터 하나씩 흡수해나가면(반복), 여러 개가 연쇄로
     /// 짧은 경우(반음 경계에서 여러 번 왕복)도 결국 하나의 안정된 음으로 수렴한다.
+    ///
+    /// **118절: 흡수 전에 "무음 없이 진짜로 붙어있는지"(`isContiguous`)부터 확인한다.** 이전엔
+    /// 짧기만 하면 무조건 가까운 음높이 쪽으로 흡수했는데, 실기기 로그로 두 가지 실패 사례를
+    /// 확인했다 — (1) 빠르게 부른 "파"(F3, 0.12초)가 앞뒤로 뚜렷한 무음 간격(34ms, 93ms)을
+    /// 두고 독립적으로 불렸는데도 짧다는 이유만으로 옆 잡음에 흡수돼 사라짐, (2) "도"를 여러 번
+    /// 따로(무음 간격 69~232ms) 불러도 각 반복이 개별적으로 0.18초보다 짧으면 서로 흡수돼
+    /// 하나로 뭉개짐. 두 경우 다 "짧다"는 신호만으로는 "포르타멘토 과도구간"과 "짧지만 진짜로
+    /// 부른 음"을 구분 못 했던 것 — 무음 간격 유무가 그 구분 기준이 된다(포르타멘토는 정의상
+    /// 무음 없이 미끄러지는 것이므로). 양쪽 이웃 다 무음으로 갈라져 있으면 짧아도 흡수하지 않고
+    /// 독립된 음으로 남긴다.
     static func absorbShortRuns(_ candidates: [SegmentedNote], minimumDuration: Double) -> [SegmentedNote] {
         var notes = candidates
+        // 무음으로 갈라져 있어 "짧아도 진짜 음"으로 판단해 보존하기로 확정한 인덱스는 더 이상
+        // 흡수 후보로 재검토하지 않는다 — 안 그러면 매번 다시 "가장 짧은 것"으로 뽑혀 무한
+        // 루프에 빠진다. notes와 같은 길이를 유지하며 제거/삽입마다 같이 맞춰준다.
+        var isProtected = [Bool](repeating: false, count: notes.count)
 
-        while let shortestIndex = notes.indices.min(by: { notes[$0].duration < notes[$1].duration }),
-              notes[shortestIndex].duration < minimumDuration {
+        while true {
+            guard let shortestIndex = notes.indices
+                .filter({ !isProtected[$0] && notes[$0].duration < minimumDuration })
+                .min(by: { notes[$0].duration < notes[$1].duration })
+            else { break }
+
             let shortNote = notes[shortestIndex]
             let previous = shortestIndex > 0 ? notes[shortestIndex - 1] : nil
             let next = shortestIndex < notes.count - 1 ? notes[shortestIndex + 1] : nil
 
-            guard previous != nil || next != nil else {
-                // 흡수할 이웃이 아예 없다(녹음 전체가 이 음 하나뿐) — 버리는 수밖에 없다.
-                notes.remove(at: shortestIndex)
+            let previousIsContiguous = previous.map { isContiguous($0, shortNote) } ?? false
+            let nextIsContiguous = next.map { isContiguous(shortNote, $0) } ?? false
+
+            guard previousIsContiguous || nextIsContiguous else {
+                // 양쪽 다(또는 이웃 자체가 없어) 무음으로 갈라져 있다 — 흡수하지 않고 그대로 둔다.
+                isProtected[shortestIndex] = true
                 continue
             }
 
@@ -279,12 +313,12 @@ enum MelodySegmenter {
             // 음에 더 가깝지, 양쪽에 똑같이 걸쳐있지 않다. 둘 다 있고 거리가 같으면 이전 음으로
             // (전환 과도구간은 대개 "떠나는 음"의 꼬리에 더 가깝다는 관찰에 근거).
             let mergeIntoPrevious: Bool
-            switch (previous, next) {
-            case let (.some(previous), .some(next)):
-                let distanceToPrevious = abs(shortNote.midiNote - previous.midiNote)
-                let distanceToNext = abs(shortNote.midiNote - next.midiNote)
+            switch (previousIsContiguous, nextIsContiguous) {
+            case (true, true):
+                let distanceToPrevious = abs(shortNote.midiNote - previous!.midiNote)
+                let distanceToNext = abs(shortNote.midiNote - next!.midiNote)
                 mergeIntoPrevious = distanceToPrevious <= distanceToNext
-            case (.some, nil):
+            case (true, false):
                 mergeIntoPrevious = true
             default:
                 mergeIntoPrevious = false
@@ -308,6 +342,7 @@ enum MelodySegmenter {
                 )
             }
             notes.remove(at: shortestIndex)
+            isProtected.remove(at: shortestIndex)
         }
 
         return notes
