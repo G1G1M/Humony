@@ -7,6 +7,7 @@ struct WaveformView: View {
     let samples: [Float]
     var barCount: Int = 40
     var color: Color = Theme.tint
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         GeometryReader { geo in
@@ -21,9 +22,11 @@ struct WaveformView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // 값이 갱신될 때마다(마이크 프레임마다) 막대 높이가 툭툭 끊기지 않고 자연스럽게
-            // 따라가도록 짧은 애니메이션을 건다.
-            .animation(.easeOut(duration: 0.08), value: bars)
+            // 135절 — 값이 갱신될 때마다(마이크 프레임마다) 막대 높이가 툭툭 끊기지 않고
+            // 자연스럽게 따라가도록 애니메이션을 건다. 예전엔 선형 easeOut(0.08초)이라 막대가
+            // 딱딱하게 멈춰 섰는데, 짧은 스프링으로 바꿔 목소리에 맞춰 살짝 통통 튀는 느낌을
+            // 준다 — response를 짧게 잡아 실시간성은 그대로 유지.
+            .animation(reduceMotion ? nil : .spring(response: 0.24, dampingFraction: 0.6), value: bars)
         }
     }
 

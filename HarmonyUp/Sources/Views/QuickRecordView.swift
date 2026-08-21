@@ -72,6 +72,12 @@ struct QuickRecordView: View {
     // 이름의 다른 동작(컨텍스트 유지 재녹음)을 상단 툴바가 전담해서 false로 끈다 — 나머지
     // 모든 경우(아이폰 포함)는 기본값 true로 기존 동작 그대로.
     var showsInlineRetry: Bool = true
+    // 135절 — 분석중/결과/에러 상태가 스스로 그리는 글래스 카드(+패딩) 노출 여부. 아이패드
+    // 2단계 스플릿의 조작부는 컬럼 전체를 이미 하나의 글래스 카드로 감싸고 있어서, 이 뷰가
+    // 또 자기 카드를 그리면 패딩이 두 겹(바깥 카드 md + 이 카드 md/lg)으로 겹쳐 오른쪽 악보
+    // 카드보다 콘텐츠가 훨씬 안쪽에서 시작하는 걸로 보였다(실기기 확인, 좌 49px vs 우
+    // 27px) — 이미 카드로 감싸인 컨테이너 안에서만 false로 꺼서 겹침을 없앤다.
+    var showsCardBackground: Bool = true
 
     private var heroButtonDiameter: CGFloat { prominent ? 168 : 128 }
     private var stopButtonDiameter: CGFloat { prominent ? 108 : 88 }
@@ -142,13 +148,18 @@ struct QuickRecordView: View {
                         in: RoundedRectangle(cornerRadius: Theme.cardCornerRadius, style: .continuous)
                     )
 
-                Text(formattedTime(elapsed))
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, Theme.Spacing.sm)
-                    .padding(.vertical, 4)
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .padding(Theme.Spacing.sm)
+                // 135절 — 숨쉬듯 깜빡이는 REC 점을 시간 앞에 붙여, 숫자를 읽기 전에 "지금
+                // 녹음 중"이라는 게 먼저 눈에 들어오게 했다(전통적인 REC 표시 관례).
+                HStack(spacing: Theme.Spacing.xs) {
+                    RecPulseDot()
+                    Text(formattedTime(elapsed))
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, Theme.Spacing.sm)
+                .padding(.vertical, 4)
+                .background(.ultraThinMaterial, in: Capsule())
+                .padding(Theme.Spacing.sm)
             }
 
             ProgressView(value: min(elapsed, maxDuration), total: maxDuration)
@@ -168,15 +179,11 @@ struct QuickRecordView: View {
 
                 Button(action: onStop) {
                     ZStack {
-                        // 마이크가 지금 듣고 있는 음량에 맞춰 부드럽게 커지는 헤일로 — 값이 튈 때마다
-                        // 뚝뚝 끊기지 않도록 짧은 애니메이션을 건다(WaveformView의 0.08초 관례와 동일).
-                        Circle()
-                            .fill(Color.red.opacity(0.16 + Double(currentLevel) * 0.22))
-                            .frame(
-                                width: stopButtonDiameter + 20 + CGFloat(currentLevel) * 44,
-                                height: stopButtonDiameter + 20 + CGFloat(currentLevel) * 44
-                            )
-                            .animation(.easeOut(duration: 0.08), value: currentLevel)
+                        // 마이크가 지금 듣고 있는 음량에 맞춰 부드럽게 커지는 헤일로 — 값이 튈
+                        // 때마다 뚝뚝 끊기지 않도록 스프링으로 감싼다(WaveformView와 같은 곡선).
+                        // 조용한 구간에도 완전히 멈춰 있지 않도록 아주 약한 숨쉬기(breathing)를
+                        // 겹쳐서, 음량 반응이 없을 때도 "살아있다"는 느낌을 유지한다.
+                        RecordingHalo(currentLevel: currentLevel, baseDiameter: stopButtonDiameter)
                         Theme.glassCircle(tint: .red, diameter: stopButtonDiameter)
                         Image(systemName: "stop.fill")
                             .font(.system(size: 28, weight: .semibold))
@@ -207,8 +214,8 @@ struct QuickRecordView: View {
             AnalysisProgressBar(stage: stage)
         }
         .frame(maxWidth: .infinity)
-        .padding(Theme.Spacing.lg)
-        .harmonyGlassCard()
+        .padding(showsCardBackground ? Theme.Spacing.lg : 0)
+        .modifier(OptionalGlassCard(enabled: showsCardBackground))
     }
 
     private func resultContent(noteCount: Int) -> some View {
@@ -225,8 +232,8 @@ struct QuickRecordView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(Theme.Spacing.md)
-        .harmonyGlassCard()
+        .padding(showsCardBackground ? Theme.Spacing.md : 0)
+        .modifier(OptionalGlassCard(enabled: showsCardBackground))
     }
 
     private func errorContent(message: String) -> some View {
@@ -243,8 +250,72 @@ struct QuickRecordView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(Theme.Spacing.md)
-        .harmonyGlassCard()
+        .padding(showsCardBackground ? Theme.Spacing.md : 0)
+        .modifier(OptionalGlassCard(enabled: showsCardBackground))
+    }
+}
+
+/// `showsCardBackground`가 false면 아무것도 안 하고 원본 뷰를 그대로 통과시킨다 — 이미 카드로
+/// 감싸인 컨테이너 안에 놓일 때(아이패드 스플릿 조작부) 이중 카드가 되지 않도록 한다.
+private struct OptionalGlassCard: ViewModifier {
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.harmonyGlassCard()
+        } else {
+            content
+        }
+    }
+}
+
+/// 135절 — 녹음 중 타이머 배지 앞에 붙는 숨쉬듯 깜빡이는 빨간 점. 카메라 앱들의 "REC" 표시
+/// 관례를 그대로 빌려와서, 숫자를 읽기 전에 "지금 녹음되고 있다"는 걸 먼저 알아챌 수 있게 한다.
+private struct RecPulseDot: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isPulsing = false
+
+    var body: some View {
+        Circle()
+            .fill(Color.red)
+            .frame(width: 7, height: 7)
+            .opacity(reduceMotion ? 1.0 : (isPulsing ? 1.0 : 0.35))
+            .onAppear {
+                guard !reduceMotion else { return }
+                withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) {
+                    isPulsing = true
+                }
+            }
+    }
+}
+
+/// 135절 — 정지 버튼 뒤 헤일로. 예전엔 `currentLevel`(실시간 음량)에만 반응해서, 음량이 낮은
+/// 구간(숨 고르기, 조용한 소절)에는 완전히 멈춘 것처럼 보였다 — 음량 반응(스프링으로 부드럽게)
+/// 위에 아주 약한 숨쉬기(breathing, ±3.5% 스케일)를 겹쳐서 조용할 때도 "지금 살아있다"는
+/// 느낌을 유지한다. 두 애니메이션은 서로 다른 속성(frame 크기 vs scaleEffect)에 걸려 있어
+/// 독립적으로 동작한다.
+private struct RecordingHalo: View {
+    let currentLevel: Float
+    let baseDiameter: CGFloat
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isBreathing = false
+
+    private var levelDiameter: CGFloat {
+        baseDiameter + 20 + CGFloat(currentLevel) * 44
+    }
+
+    var body: some View {
+        Circle()
+            .fill(Color.red.opacity(0.16 + Double(currentLevel) * 0.22))
+            .frame(width: levelDiameter, height: levelDiameter)
+            .animation(.spring(response: 0.28, dampingFraction: 0.55), value: currentLevel)
+            .scaleEffect(reduceMotion ? 1.0 : (isBreathing ? 1.035 : 1.0))
+            .onAppear {
+                guard !reduceMotion else { return }
+                withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
+                    isBreathing = true
+                }
+            }
     }
 }
 

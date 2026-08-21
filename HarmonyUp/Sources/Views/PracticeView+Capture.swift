@@ -45,7 +45,7 @@ extension PracticeView {
             try audioCapture.start { result, rawSamples, rawSampleRate in
                 // 녹음/화음 재생 중엔 마이크를 무시한다 — 스피커로 낸 소리가 다시 마이크로
                 // 들어가는 피드백 루프를 막기 위한 기존 원칙(화음 재생 때부터 이어옴).
-                guard !isPlayingRecording, !isPlayingHarmony, !isPlayingVoiceHarmony, playingSoloVoice == nil else { return }
+                guard !isPlayingVoiceHarmony, playingSoloVoice == nil else { return }
 
                 // 녹음 중엔 이 프레임을 quickRecordBuffer에 쌓기만 한다. 녹음이 끝난 뒤 "따라 부르기
                 // 채점"으로 마이크가 다시 켜질 때는 quickRecordPhase가 더 이상 .recording이 아니므로
@@ -290,8 +290,6 @@ extension PracticeView {
             finalizeCurrentAttempt(interval: active) // 리셋 직전까지의 채점 시도도 버리지 않고 기록으로 남긴다
         }
 
-        harmonyPlayer.stop()
-        isPlayingHarmony = false
         voiceHarmonyPlayer.stop()
         isPlayingVoiceHarmony = false
         mutedVoices = []
@@ -316,78 +314,11 @@ extension PracticeView {
         recordingLevel = 0
     }
 
-    /// 방금 녹음한 원본을 그대로 들어본다 — 화음 없이, 화음 API 제거(116절) 이후 멜로디
-    /// 인식 정확도를 귀로도 확인할 수 있게 다시 추가한 재생 버튼의 동작.
-    func togglePlayback() {
-        if isPlayingRecording {
-            recordingPlayer.stop()
-            isPlayingRecording = false
-            return
-        }
-        guard !recentVoiceBuffer.isEmpty else { return }
-        do {
-            isPlayingRecording = true
-            try recordingPlayer.play(samples: recentVoiceBuffer, sampleRate: recentVoiceSampleRate) {
-                isPlayingRecording = false
-            }
-        } catch {
-            isPlayingRecording = false
-            statusText = "재생 실패: \(error.localizedDescription)"
-        }
-    }
-
-    /// 120절, 화음 재설계 1단계 — 멜로디+베이스+3도+5도를 전부 합성음으로 만들어 한 번에
-    /// 재생한다. 목소리 피치시프트는 전혀 쓰지 않는다(변수 격리) — "화음 자체가 맞게 들리는지"
-    /// 부터 깨끗하게 검증하는 게 이 단계의 목적이다. 매번 새로 만드는 이유: WSOLA 같은 무거운
-    /// 계산이 없는 순수 합성이라(vDSP 없이도) 버튼 누를 때 즉시 만들어도 체감 지연이 없다 —
-    /// 미리 계산해뒀다가 재녹음 시 갱신을 놓치는 캐시 무효화 버그(107절류)를 아예 만들지 않는다.
-    func toggleHarmonyPlayback() {
-        if isPlayingHarmony {
-            harmonyPlayer.stop()
-            isPlayingHarmony = false
-            return
-        }
-        guard !recentVoiceBuffer.isEmpty, !melodySteps.isEmpty else { return }
-
-        let bufferLength = recentVoiceBuffer.count
-        let rate = recentVoiceSampleRate
-        let melodyTrack = SynthesizedHarmonyTrackBuilder.build(melodySteps: melodySteps, bufferLength: bufferLength, voice: .melody, rate: rate)
-        // 128절 — "아카펠라/화음에서는 멜로디가 더 잘 들려야 하지 않냐"는 피드백 — 화음 3성부는
-        // backingGain만큼 낮춰서 섞고, 리드 멜로디만 원래 크기(1.0)로 남겨 앞으로 나오게 한다.
-        let backingGain: Float = 0.65
-        let harmonyTracks: [[Float]] = [ChordGenerator.Interval.bass, .third, .fifth].map { interval in
-            SynthesizedHarmonyTrackBuilder.build(melodySteps: melodySteps, bufferLength: bufferLength, voice: .harmony(interval), rate: rate)
-                .map { $0 * backingGain }
-        }
-        let tracks = [melodyTrack] + harmonyTracks
-        // 122절 재검증 — 크로스페이드+램프 중첩 수정 이후에도 "살짝 지지직"이 남는다는 제보 —
-        // normalizeLoudness 기본값(targetRMS 0.25, peakCeiling 0.98)은 원래 목소리 녹음(발성이라
-        // 크레스트 팩터가 큼)을 키우려고 잡은 값인데, 순수 사인파 4개를 겹친 신호는 애초에
-        // 크레스트 팩터가 작아서(항상 어느 정도 진폭이 유지됨) 같은 targetRMS만으로도 피크가 쉽게
-        // 0.98 근처까지 올라간다 — 아이패드 내장 스피커가 그 음량에서 사인파를 못 따라가 왜곡을
-        // 낼 가능성이 있어, 화음 재생만 더 낮은 목표치(targetRMS 0.15, peakCeiling 0.7)로 낮춰서
-        // 스피커 헤드룸을 넉넉히 남긴다(녹음 분석용 normalizeLoudness 기본값은 그대로 둠).
-        let mixed = AudioGain.applyFadeInOut(
-            AudioGain.normalizeLoudness(AudioGain.mix(tracks: tracks), targetRMS: 0.15, peakCeiling: 0.7),
-            fadeSampleCount: Int(rate * 0.01)
-        )
-
-        do {
-            isPlayingHarmony = true
-            try harmonyPlayer.play(samples: mixed, sampleRate: rate) {
-                isPlayingHarmony = false
-            }
-        } catch {
-            isPlayingHarmony = false
-            statusText = "화음 재생 실패: \(error.localizedDescription)"
-        }
-    }
-
     /// 123절, 화음 재설계 2단계 — 멜로디+베이스+3도+5도를 전부 **사용자 자신의 목소리**로
-    /// 만든다(`VoiceHarmonyTrackBuilder`, WSOLA 피치시프트). `toggleHarmonyPlayback`(합성음
-    /// 버전)과 구조는 동일하고 트랙 빌더와 플레이어만 다르다 — 두 버전을 나란히 남겨서
-    /// 언제든 비교해 들어볼 수 있게 한다(93~115절에서 목소리 vs 합성음을 여러 번 오갔던
-    /// 전례가 있어, 이번에도 확정 전까지는 둘 다 유지).
+    /// 만든다(`VoiceHarmonyTrackBuilder`, WORLD 피치시프트). 재생 조작부의 유일한 재생
+    /// 수단이다 — 합성음 전용 "화음 듣기"(120절)는 135절에서, 원본 그대로 듣기는 135절에서
+    /// 각각 뺐다(전자는 "내 목소리"로도 화음을 들을 수 있어 중복, 후자는 "원본/내 목소리
+    /// 두 섹션을 하나로 합쳐달라"는 요청).
     func toggleVoiceHarmonyPlayback() {
         if isPlayingVoiceHarmony {
             voiceHarmonyPlayer.stop()

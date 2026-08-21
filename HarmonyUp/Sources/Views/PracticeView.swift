@@ -117,22 +117,19 @@ struct PracticeView: View {
     // 녹음하면 지운다.
     @State var lastSavedInterval: ChordGenerator.Interval?
     @State var melodySteps: [MelodyStep] = []
-    // 방금 녹음한 목소리 원본 — "녹음 다시 듣기"(원본 그대로 재생, 117절)와
-    // "내 목소리로 화음 듣기"(123절, VoiceHarmonyTrackBuilder가 이 버퍼에서 음마다 슬라이싱해
-    // 피치시프트하는 소스)에 둘 다 쓰인다.
+    // 방금 녹음한 목소리 원본 — "내 목소리로 화음 듣기"(123절, VoiceHarmonyTrackBuilder가 이
+    // 버퍼에서 음마다 슬라이싱해 피치시프트하는 소스)에 쓰인다.
     @State var recentVoiceBuffer: [Float] = []
     @State var recentVoiceSampleRate: Double = 44100
-    let recordingPlayer = RecordingPlayer()
-    @State var isPlayingRecording = false
-    // 120절, 화음 재설계 — 멜로디+베이스+3도+5도를 합성음으로 섞어 재생하는 전용 플레이어.
-    // recordingPlayer(원본 재생)와 별개 인스턴스를 쓰는 이유: 둘을 같은 인스턴스로 공유하면
-    // "녹음 다시 듣기"와 "화음 듣기"를 빠르게 번갈아 누를 때 서로의 재생을 끊어버릴 수 있다.
-    let harmonyPlayer = RecordingPlayer()
-    @State var isPlayingHarmony = false
-    // 123절, 화음 재설계 2단계 — 목소리 피치시프트(WSOLA) 버전 전용 플레이어. 합성음 버전
-    // (harmonyPlayer)과 별개 인스턴스로 둬서 둘을 번갈아 눌러도 서로 끊기지 않게 한다.
+    // 123절, 화음 재설계 2단계 — 목소리 피치시프트(WORLD) 버전 전용 플레이어.
     let voiceHarmonyPlayer = RecordingPlayer()
     @State var isPlayingVoiceHarmony = false
+    // 135절 — 재생 조작부에서 "원본"/"내 목소리" 두 섹션을 하나로 합쳤다("화음은 내 목소리로도
+    // 들을 수 있으니 원본은 굳이 따로 없어도 된다"는 판단) — 세그먼트 선택 상태(PlaybackMode)와
+    // 원본 전용 재생(recordingPlayer/isPlayingRecording/togglePlayback)은 이제 안 쓰여서 함께
+    // 제거했다.
+    // 135절 — 성부별 솔로/뮤트 4행을 더 이상 접지 않고 항상 펼쳐서 보여준다("열었다 닫았다 하지
+    // 말고 처음부터 보이게" 요청) — isVoiceDisclosureExpanded 제거.
     // 128절 — 어느 성부가 음소거됐는지, 그리고 "재생 중 뮤트 전환으로 재시작"에서 낡은 완료
     // 콜백이 새 재생 상태를 덮어쓰지 않게 막는 세대 토큰(startVoiceHarmonyPlayback 참고).
     @State var mutedVoices: Set<VoiceHarmonyTrackBuilder.Voice> = []
@@ -188,10 +185,6 @@ struct PracticeView: View {
             // 생길 수 있다 — 뷰를 벗어날 땐 항상 false로 확실히 되돌린다.
             audioCapture.stop()
             isCapturing = false
-            recordingPlayer.stop()
-            isPlayingRecording = false
-            harmonyPlayer.stop()
-            isPlayingHarmony = false
             voiceHarmonyPlayer.stop()
             isPlayingVoiceHarmony = false
             soloVoicePlayer.stop()

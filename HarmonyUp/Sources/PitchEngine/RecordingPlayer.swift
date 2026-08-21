@@ -5,10 +5,11 @@ import AVFoundation
 /// `completionCallbackType: .dataPlayedBack`)만 남겼다.
 ///
 /// 116절에서 화음 재생 인프라(`VoiceClipPlayer` — 다중 트랙/pan/리버브)를 통째로 지우면서
-/// 재생 버튼 자체가 없어졌던 걸, 녹음 원본을 다시 들어볼 수 있게 새로 만들었다(`PracticeView`의
-/// `recordingPlayer` 인스턴스). 120절부터는 같은 타입을 두 번째 인스턴스(`harmonyPlayer`)로
-/// 재사용해 `SynthesizedHarmonyTrackBuilder`가 만든 합성 화음 믹스도 재생한다 — 이 타입
-/// 자체엔 "녹음"이라는 특정 의미가 없어서(그냥 버퍼 재생기) 새 타입을 또 만들 필요가 없었다.
+/// 재생 버튼 자체가 없어졌던 걸, 녹음 원본을 다시 들어볼 수 있게 새로 만들었다. 이 타입
+/// 자체엔 "녹음"이라는 특정 의미가 없어서(그냥 버퍼 재생기) `PracticeView`가 용도별로 여러
+/// 인스턴스를 만들어 재사용해왔다 — 원본 전용 인스턴스는 135절에 "원본" 재생 자체가 UI에서
+/// 빠지며 함께 정리됐고, 지금은 `voiceHarmonyPlayer`(내 목소리 화음)와 `soloVoicePlayer`
+/// (성부별 솔로 재생)가 이 타입을 쓴다.
 final class RecordingPlayer {
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()

@@ -138,21 +138,47 @@ extension PracticeView {
                         .frame(width: controlWidth)
                 }
             }
-            .padding()
+            // 135절 — 좌우 여백을 컬럼 사이 간격(Theme.Spacing.lg)과 같은 값으로 맞췄다. 예전엔
+            // 기본 .padding()(시스템 기본값)을 썼는데, 툴바("홈으로"/"새로 부르기"/스왑) 버튼의
+            // 좌우 정렬선과 아래 두 컬럼의 좌우 정렬선이 안 맞아 보인다는 지적 — 툴바는 앱 전체
+            // 화면에서 값을 직접 조절할 수 없는 시스템 여백을 쓰므로, 대신 본문 쪽 여백을 이미
+            // 쓰고 있던 디자인 토큰(lg=24)으로 통일해 적어도 본문 안에서는 일관된 격자가
+            // 되도록 했다.
+            .padding(.horizontal, Theme.Spacing.lg)
+            .padding(.vertical, Theme.Spacing.md)
         }
     }
 
     /// 조작부 — 지금은 캡처만. 스왑 시에도 내용은 그대로, 위치만 바뀐다.
+    ///
+    /// **135절, 악보 카드와 높이·색 맞추기**: 예전엔 이 컬럼이 내용 높이만큼만 차지해서
+    /// 오른쪽 악보 카드(글래스, `maxHeight: .infinity`)보다 짧게 끝나고 그 아래는 배경색
+    /// 그대로 비어 보였다 — 두 컬럼이 나란히 있는데 높이도 색도 안 맞아 어색했다는 지적.
+    /// 컬럼 전체를 악보 카드와 같은 `harmonyGlassCard()`로 감싸고 남은 높이까지 꽉 채워서
+    /// 두 컬럼이 같은 색·같은 높이의 블록으로 짝을 이루게 했다.
     private var controlColumn: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
-                // showsInlineRetry: false — "다시 녹음"은 이제 툴바가 전담한다. 이 카드 안에도
-                // 같은 이름의 버튼을 남겨두면 툴바 버전과 의미가 갈려서(하나는 컨텍스트 유지,
-                // 하나는 완전 리셋) 헷갈린다.
-                captureHero(prominent: false, showsInlineRetry: false)
+        // ScrollView에 harmonyGlassCard()를 바로 붙이면 글래스 배경이 스크롤 "뷰포트"가 아니라
+        // 스크롤 "콘텐츠" 크기에 맞춰 그려져서, 콘텐츠가 짧을 땐 카드가 컬럼 상단에만 작게
+        // 그려지고 나머지는 배경색 그대로 비어 보이는 문제가 있었다(실기기 확인) — ScrollView를
+        // VStack으로 한 겹 감싸고, 그 VStack에 프레임+글래스 카드를 적용해서 실제로 배정된
+        // 전체 높이만큼 카드가 그려지게 했다.
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                    // showsInlineRetry: false — "다시 녹음"은 이제 툴바가 전담한다. 이 카드
+                    // 안에도 같은 이름의 버튼을 남겨두면 툴바 버전과 의미가 갈려서(하나는
+                    // 컨텍스트 유지, 하나는 완전 리셋) 헷갈린다.
+                    // showsCardBackground: false — 이 컬럼 전체가 이미 카드(아래 harmonyGlassCard())라
+                    // QuickRecordView가 또 자기 카드를 그리면 패딩이 겹쳐 오른쪽 악보 카드보다
+                    // 콘텐츠가 안쪽에서 시작하는 것처럼 보인다(135절).
+                    captureHero(prominent: false, showsInlineRetry: false, showsCardBackground: false)
+                }
+                .padding(Theme.Spacing.md)
+                .frame(maxWidth: .infinity, alignment: .top)
             }
-            .padding()
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .harmonyGlassCard()
     }
 
     /// "다시 녹음" 중(악보부는 새 분석이 끝날 때까지 대기 상태)이면 진행 표시를, 아니면
@@ -218,8 +244,11 @@ extension PracticeView {
     ///   - prominent: 아이패드 1단계 대기 화면처럼 이 뷰가 화면의 유일한 주인공일 때 크게.
     ///   - showsInlineRetry: 결과/에러 상태의 "다시 녹음" 인라인 버튼 노출 여부(기본 true, 아이폰은
     ///     항상 유지). 아이패드 2단계에서만 false로 꺼서 툴바의 "다시 녹음"과 의미가 안 겹치게 한다.
+    ///   - showsCardBackground: 결과/에러/분석중 상태가 스스로 카드 배경을 그릴지(기본 true).
+    ///     아이패드 2단계 조작부(`controlColumn`)처럼 바깥에서 이미 카드로 감싸는 컨테이너
+    ///     안에서만 false로 꺼서 카드가 두 겹으로 겹치지 않게 한다(135절).
     @ViewBuilder
-    func captureHero(prominent: Bool, showsInlineRetry: Bool = true) -> some View {
+    func captureHero(prominent: Bool, showsInlineRetry: Bool = true, showsCardBackground: Bool = true) -> some View {
         if micPermissionDenied {
             micPermissionDeniedContent
         } else {
@@ -235,7 +264,8 @@ extension PracticeView {
                     onReset: resetSession,
                     prominent: prominent,
                     currentLevel: recordingLevel,
-                    showsInlineRetry: showsInlineRetry
+                    showsInlineRetry: showsInlineRetry,
+                    showsCardBackground: showsCardBackground
                 )
 
                 // 녹음 버튼 아래에 작게 — 녹음이 시작되면(또는 이미 결과/에러 상태면) 참고음은
@@ -254,81 +284,90 @@ extension PracticeView {
         }
     }
 
-    /// 원본 재생/화음 재생(합성음·목소리)/성부별 솔로/뮤트 토글을 모아둔 조작부 전용 섹션.
+    /// 원본 재생/화음 재생(목소리)/성부별 솔로/뮤트 토글을 모아둔 조작부 전용 섹션.
     /// 예전엔 `sheetMusicPanel`(악보 카드) 안에 있었는데, 재생은 "조작"이지 악보의 일부가
     /// 아니라는 지적으로 여기(캡처 영역과 같은 카드)로 옮겼다(128절).
+    ///
+    /// **135절, 재생 버튼 하나+성부별 목록으로 재설계**: 예전엔 재생 방식(원본/합성음 화음/
+    /// 목소리 화음)마다 버튼이 따로 있고 성부별 솔로 4개+뮤트 4개까지 항상 펼쳐져 있어 버튼이
+    /// 최대 11개까지 쌓였다(정보 밀도 지적). 135절에서 우선 세그먼트(원본/내 목소리) 방식으로
+    /// 압축했었지만, **135절에서 "원본"까지 없애고 "내 목소리" 하나로 더 합쳤다** — 화음은
+    /// 이미 "내 목소리"로 다 들을 수 있어 원본 재생이 굳이 따로 있을 이유가 없다는 판단(원본
+    /// 전용 재생 로직도 함께 제거). 성부별 솔로/뮤트도 접어뒀던 디스클로저를 없애고 **항상
+    /// 펼쳐서** 보여준다 — "열었다 닫았다 하지 말고 처음부터 보이게" 요청.
     var playbackControls: some View {
-        // 재생 버튼들(원본/합성음 화음/목소리 화음/성부별 솔로)은 항상 하나만 켜지게 서로
-        // 막는다 — 동시에 여러 개가 스피커로 나가면 마이크 피드백 가드(isPlayingRecording 등)
-        // 판단이 꼬이기 쉽다.
-        let anyPlaybackActive = isPlayingRecording || isPlayingHarmony || isPlayingVoiceHarmony || playingSoloVoice != nil
+        // 재생 버튼들(목소리 화음/성부별 솔로)은 항상 하나만 켜지게 서로 막는다 — 동시에 여러
+        // 개가 스피커로 나가면 마이크 피드백 가드(isPlayingVoiceHarmony 등) 판단이 꼬이기 쉽다.
+        let anyPlaybackActive = isPlayingVoiceHarmony || playingSoloVoice != nil
 
         return VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-            HStack(spacing: Theme.Spacing.sm) {
-                Button {
-                    togglePlayback()
-                } label: {
-                    Label(isPlayingRecording ? "정지" : "녹음 다시 듣기", systemImage: isPlayingRecording ? "stop.fill" : "play.fill")
-                }
-                .harmonyButtonStyle()
-                .disabled(anyPlaybackActive && !isPlayingRecording)
-
-                // 120절, 화음 재설계 1단계 — 멜로디+베이스+3도+5도를 합성음으로 들어본다.
-                Button {
-                    toggleHarmonyPlayback()
-                } label: {
-                    Label(isPlayingHarmony ? "정지" : "화음 듣기", systemImage: isPlayingHarmony ? "stop.fill" : "music.note.list")
-                }
-                .harmonyButtonStyle()
-                .disabled(anyPlaybackActive && !isPlayingHarmony)
-
-                // 123절, 화음 재설계 2단계 — 같은 화음을 사용자 자신의 목소리(WORLD 피치시프트)로 들어본다.
-                Button {
-                    toggleVoiceHarmonyPlayback()
-                } label: {
-                    Label(isPlayingVoiceHarmony ? "정지" : "내 목소리로 화음", systemImage: isPlayingVoiceHarmony ? "stop.fill" : "person.wave.2")
-                }
-                .harmonyButtonStyle()
-                .disabled(anyPlaybackActive && !isPlayingVoiceHarmony)
+            Button {
+                toggleVoiceHarmonyPlayback()
+            } label: {
+                Label(isPlayingVoiceHarmony ? "정지" : "내 목소리로 화음 듣기", systemImage: isPlayingVoiceHarmony ? "stop.fill" : "play.fill")
+                    .frame(maxWidth: .infinity)
             }
+            .harmonyButtonStyle(prominent: true)
+            .disabled(anyPlaybackActive && !isPlayingVoiceHarmony)
 
-            // 128절 — 멜로디/베이스/3도/5도를 각각 따로 들어보는 성부별 솔로 버튼(포먼트/음량
-            // 조정이 어느 성부에 어떻게 들리는지 비교하기 위한 디버깅용).
-            HStack(spacing: Theme.Spacing.sm) {
-                ForEach(soloVoiceOptions, id: \.label) { option in
-                    Button {
-                        toggleVoiceSolo(option.voice)
-                    } label: {
-                        Label(
-                            playingSoloVoice == option.voice ? "정지" : option.label,
-                            systemImage: playingSoloVoice == option.voice ? "stop.fill" : "waveform"
-                        )
+            Label("성부별로 듣기", systemImage: "waveform")
+                .font(Theme.Typography.caption)
+                .foregroundStyle(.secondary)
+                .padding(.top, Theme.Spacing.xs)
+
+            // 128절 — 멜로디/베이스/3도/5도를 각각 따로 들어보는 성부별 솔로+뮤트.
+            VStack(spacing: 0) {
+                ForEach(Array(soloVoiceOptions.enumerated()), id: \.element.label) { index, option in
+                    voiceRow(option: option, anyPlaybackActive: anyPlaybackActive)
+                    if index < soloVoiceOptions.count - 1 {
+                        Divider()
                     }
-                    .harmonyButtonStyle()
-                    .disabled(anyPlaybackActive && playingSoloVoice != option.voice)
                 }
             }
-
-            // 128절 — "전체 화음이 재생될 때도 음을 껐다켰다 할 수 있게" 요청 — 노드를 여러 개로
-            // 나누는 진짜 실시간 믹싱 대신(109절이 이미 그 위험을 겪었음), 뮤트 상태를 바꾸면
-            // 지금 재생 중인 "내 목소리로 화음"을 즉시 새 조합으로 재시작한다(toggleMute 참고).
-            HStack(spacing: Theme.Spacing.xs) {
-                ForEach(soloVoiceOptions, id: \.label) { option in
-                    let isMuted = mutedVoices.contains(option.voice)
-                    Button {
-                        toggleMute(option.voice)
-                    } label: {
-                        Label(option.label, systemImage: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                            .font(Theme.Typography.caption)
-                    }
-                    .harmonyButtonStyle()
-                    .controlSize(.small)
-                    .opacity(isMuted ? 0.5 : 1.0)
-                    .accessibilityLabel(isMuted ? "\(option.label) 음소거됨" : "\(option.label) 켜짐")
-                }
-            }
-            .foregroundStyle(.secondary)
         }
+    }
+
+    /// 성부 하나(멜로디/베이스/3도/5도)의 솔로 재생+뮤트 토글 한 줄. 베이스/3도/5도는
+    /// `Theme.intervalColor`로 라벨을 물들여, 채점이 다시 붙었을 때 HistoryView 정확도
+    /// 차트와 같은 색으로 이어지게 한다(135절).
+    private func voiceRow(option: (label: String, voice: VoiceHarmonyTrackBuilder.Voice), anyPlaybackActive: Bool) -> some View {
+        let isMuted = mutedVoices.contains(option.voice)
+        let isSoloPlaying = playingSoloVoice == option.voice
+        let labelColor: Color = {
+            if case .harmony(let interval) = option.voice { return Theme.intervalColor(for: interval) }
+            return .primary
+        }()
+
+        return HStack(spacing: Theme.Spacing.sm) {
+            Text(option.label)
+                .font(Theme.Typography.subheadline)
+                .foregroundStyle(labelColor)
+
+            Spacer()
+
+            Button {
+                toggleVoiceSolo(option.voice)
+            } label: {
+                Image(systemName: isSoloPlaying ? "stop.fill" : "play.fill")
+            }
+            .harmonyButtonStyle()
+            .controlSize(.small)
+            .frame(minWidth: 44, minHeight: 44)
+            .disabled(anyPlaybackActive && !isSoloPlaying)
+            .accessibilityLabel(isSoloPlaying ? "\(option.label) 정지" : "\(option.label) 솔로 재생")
+
+            Button {
+                toggleMute(option.voice)
+            } label: {
+                Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+            }
+            .harmonyButtonStyle()
+            .controlSize(.small)
+            .frame(minWidth: 44, minHeight: 44)
+            .opacity(isMuted ? 0.5 : 1.0)
+            .accessibilityLabel(isMuted ? "\(option.label) 음소거됨" : "\(option.label) 켜짐")
+        }
+        .padding(.vertical, Theme.Spacing.xs)
     }
 
     /// 녹음 전 참고음(첫음)을 골라 들어보는 작은 컨트롤 — 드롭다운(Picker)으로 C3~C6 범위에서
