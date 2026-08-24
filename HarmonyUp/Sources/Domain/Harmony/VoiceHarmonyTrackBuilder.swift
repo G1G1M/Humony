@@ -121,7 +121,19 @@ enum VoiceHarmonyTrackBuilder {
         for i in 0..<bufferLength {
             output[i] = fitted[i] * envelope[i]
         }
-        return output
+        return delayedByOnsetOffset(output, interval: interval, rate: rate)
+    }
+
+    /// 성부 트랙 전체를 그 성부의 발성 시작 지연만큼 뒤로 민다(145절 휴머나이즈).
+    /// 길이는 그대로 유지한다 — 앞은 무음으로 채우고 뒤는 잘라낸다(잘리는 건 트랙 맨 끝의
+    /// 잔향/무음 구간이라 실질적 손실이 없다).
+    private static func delayedByOnsetOffset(_ track: [Float], interval: ChordGenerator.Interval, rate: Double) -> [Float] {
+        let offset = Int(interval.onsetOffsetSeconds * rate)
+        guard offset > 0, offset < track.count else { return track }
+
+        var delayed = [Float](repeating: 0, count: track.count)
+        delayed.replaceSubrange(offset..<track.count, with: track[0..<(track.count - offset)])
+        return delayed
     }
 
     /// 여러 성부를 **한 번의 분석**으로 만들어 하나의 트랙으로 섞는다.
@@ -254,7 +266,9 @@ enum VoiceHarmonyTrackBuilder {
             let sourceFrequency = NoteNameConverter.frequency(forMIDINote: step.midiNote)
 
             guard let targetFrequency = step.harmony?.first(where: { $0.interval == interval })?.frequency else { return nil }
-            let pitchRatio = targetFrequency / sourceFrequency
+            // 성부별 미세 디튠(145절) — 목표 음에서 몇 cent만 비껴놓아야 세 성부가 하나로
+            // 뭉치지 않고 "여러 명"으로 들린다. 근거는 `Interval.detuneCents` 주석 참고.
+            let pitchRatio = targetFrequency / sourceFrequency * interval.detuneRatio
 
             let start = max(0, min(bufferLength, Int(onset * rate)))
             let end = max(0, min(bufferLength, Int((onset + duration) * rate)))

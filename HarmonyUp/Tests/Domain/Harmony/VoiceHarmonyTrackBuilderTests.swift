@@ -251,6 +251,49 @@ final class VoiceHarmonyTrackBuilderTests: XCTestCase {
         }
     }
 
+    // MARK: - 휴머나이즈 (145절)
+
+    /// 성부마다 발성 시작이 조금씩 어긋나야 "여러 명"으로 들린다 — 트랙 맨 앞에 그 성부의
+    /// 오프셋만큼 무음이 생겨야 한다.
+    func testHarmonyVoiceIsDelayedByItsOnsetOffset() {
+        let steps = [step(midiNote: 60, onset: 0.0, duration: 0.4, harmony: harmonyNotes(bass: 48, third: 64, fifth: 67))]
+        let bufferLength = Int(0.4 * rate)
+        let source = sineWave(frequency: NoteNameConverter.frequency(forMIDINote: 60), sampleCount: bufferLength)
+
+        let track = VoiceHarmonyTrackBuilder.build(
+            melodySteps: steps, sourceBuffer: source, bufferLength: bufferLength,
+            voice: .harmony(.fifth), rate: rate, fadeDuration: 0
+        )
+
+        let offsetSamples = Int(ChordGenerator.Interval.fifth.onsetOffsetSeconds * rate)
+        XCTAssertGreaterThan(offsetSamples, 0, "테스트 전제: 5도에 오프셋이 있어야 한다")
+        for i in 0..<offsetSamples {
+            XCTAssertEqual(track[i], 0, accuracy: 1e-6, "\(i)번째 샘플 — 지연 구간이 무음이 아니다")
+        }
+        XCTAssertEqual(track.count, bufferLength, "지연을 줘도 길이는 보존돼야 한다")
+    }
+
+    /// 성부끼리 시작 지점이 실제로 달라야 한다(둘 다 같은 지연이면 여전히 클론이다).
+    func testHarmonyVoicesStartAtDifferentTimes() {
+        let steps = [step(midiNote: 60, onset: 0.0, duration: 0.4, harmony: harmonyNotes(bass: 48, third: 64, fifth: 67))]
+        let bufferLength = Int(0.4 * rate)
+        let source = sineWave(frequency: NoteNameConverter.frequency(forMIDINote: 60), sampleCount: bufferLength)
+
+        func firstAudibleIndex(_ voice: VoiceHarmonyTrackBuilder.Voice) -> Int? {
+            let track = VoiceHarmonyTrackBuilder.build(
+                melodySteps: steps, sourceBuffer: source, bufferLength: bufferLength,
+                voice: voice, rate: rate, fadeDuration: 0
+            )
+            return track.firstIndex { abs($0) > 0.0001 }
+        }
+
+        let third = firstAudibleIndex(.harmony(.third))
+        let fifth = firstAudibleIndex(.harmony(.fifth))
+        XCTAssertNotNil(third)
+        XCTAssertNotNil(fifth)
+        XCTAssertNotEqual(third, fifth, "3도와 5도가 정확히 같은 시각에 시작한다 — 어긋남이 없다")
+    }
+
     func testMixedStereoTrackWithNoVoicesIsEmpty() {
         let (steps, source, bufferLength) = mixFixture
         let (left, right) = VoiceHarmonyTrackBuilder.mixedStereoTrack(

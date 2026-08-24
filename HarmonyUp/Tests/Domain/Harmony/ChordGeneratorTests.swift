@@ -163,4 +163,34 @@ final class ChordGeneratorTests: XCTestCase {
             XCTAssertLessThan(midiNotes[0], melodyMIDINote)
         }
     }
+    // MARK: - 성부 휴머나이즈 (145절)
+
+    /// 이 기능의 존재 이유 자체 — 세 성부가 같은 값을 가지면 "완벽히 겹친 클론"으로 되돌아간다.
+    func testHarmonyVoicesHaveDistinctDetuneAndTiming() {
+        let intervals: [ChordGenerator.Interval] = [.bass, .third, .fifth]
+
+        let detunes = intervals.map(\.detuneCents)
+        XCTAssertEqual(Set(detunes).count, intervals.count, "성부끼리 디튠 값이 겹친다")
+
+        let offsets = intervals.map(\.onsetOffsetSeconds)
+        XCTAssertEqual(Set(offsets).count, intervals.count, "성부끼리 타이밍 오프셋이 겹친다")
+    }
+
+    /// 휴머나이즈는 "미세하게" 어긋나야 한다 — 크면 음정 오류/박자 밀림으로 들린다.
+    func testHumanizationStaysWithinPerceptuallySafeRange() {
+        for interval in [ChordGenerator.Interval.bass, .third, .fifth] {
+            XCTAssertLessThanOrEqual(abs(interval.detuneCents), 10.0, "\(interval.koreanLabel) 디튠이 음정 오류로 들릴 만큼 크다")
+            XCTAssertGreaterThanOrEqual(interval.onsetOffsetSeconds, 0)
+            XCTAssertLessThanOrEqual(interval.onsetOffsetSeconds, 0.04, "\(interval.koreanLabel) 지연이 박자 밀림으로 들릴 만큼 크다")
+        }
+    }
+
+    /// cent → 주파수 비율 변환이 맞는지(1200 cent = 2배).
+    func testDetuneRatioMatchesCentDefinition() {
+        for interval in [ChordGenerator.Interval.bass, .third, .fifth] {
+            let expected = pow(2.0, interval.detuneCents / 1200.0)
+            XCTAssertEqual(interval.detuneRatio, expected, accuracy: 1e-9)
+        }
+    }
+
 }
