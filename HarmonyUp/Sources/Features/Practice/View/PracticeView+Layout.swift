@@ -393,45 +393,56 @@ extension PracticeView {
     /// 안 되는 보조 기능이라 카드 배경 없이 작게 둔다. `TonePlayer`는 자체 오디오 엔진이라
     /// 아직 마이크가 켜지기 전(대기 상태)에만 노출되므로 되먹임 걱정이 없다.
     var startingNoteControls: some View {
-        // 음 선택 메뉴와 재생 버튼이 나란히 붙어 있는 작은 묶음 — 둘 다 글래스라 컨테이너로 묶는다.
-        Theme.glassGroup {
-            HStack(spacing: Theme.Spacing.xs) {
-                // Picker(.menu 스타일)는 눌러야 할 것처럼 안 보인다는 피드백 — 재생 버튼과 똑같이
-                // Menu를 직접 써서 harmonyButtonStyle()을 입힌다(리퀴드 글래스 버튼과 동일한
-                // 시각적 무게감을 주기 위해 Button과 같은 방식으로 스타일링).
-                Menu {
-                    ForEach(Array(stride(from: 48, through: 84, by: 1)), id: \.self) { midi in
-                        Button {
-                            startingNoteMIDI = midi
-                            startingNotePlayer.setFrequency(NoteNameConverter.frequency(forMIDINote: midi))
-                        } label: {
-                            Text(NoteNameConverter.convert(frequency: NoteNameConverter.frequency(forMIDINote: midi))?.noteName ?? "?")
-                        }
-                    }
-                } label: {
-                    Label(
-                        NoteNameConverter.convert(frequency: NoteNameConverter.frequency(forMIDINote: startingNoteMIDI))?.noteName ?? "?",
-                        systemImage: "tuningfork"
-                    )
-                    .font(Theme.Typography.caption)
-                }
-                .harmonyButtonStyle()
-                .controlSize(.small)
-                // controlSize(.small)만으로는 실제 탭 영역이 HIG 최소 44×44pt보다 작아질 수 있어서
-                // (크리틱 P2) — 시각적 크기(작은 알약)는 그대로 두고 탭 영역만 프레임으로 넓힌다.
-                .frame(minWidth: 44, minHeight: 44)
-                .accessibilityLabel("첫음 선택")
+        VStack(spacing: Theme.Spacing.xs) {
+            // 컨트롤만 두면 "🎼 C4 ▶"가 무슨 기능인지 알 수가 없다 — 기능 이름("첫 음 듣기")만
+            // 적는 대신 **왜 필요한지**를 앞에 둔다. 반주 없이 부른다는 사실을 사용자가 스스로
+            // 알아채야 손이 가기 때문이다. 마이크 버튼(화면의 주인공)과 시선을 다투면 안 되는
+            // 보조 기능이라 caption+secondary로 가장 가볍게 둔다.
+            Text("반주가 없으니, 첫 음만 듣고 시작해 보세요")
+                .font(Theme.Typography.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
 
-                Button {
-                    toggleStartingNotePlayback()
-                } label: {
-                    Image(systemName: isPlayingStartingNote ? "stop.fill" : "play.fill")
+            // 음 선택 메뉴와 재생 버튼이 나란히 붙어 있는 작은 묶음 — 둘 다 글래스라 컨테이너로 묶는다.
+            Theme.glassGroup {
+                HStack(spacing: Theme.Spacing.xs) {
+                    // Picker(.menu 스타일)는 눌러야 할 것처럼 안 보인다는 피드백 — 재생 버튼과 똑같이
+                    // Menu를 직접 써서 harmonyButtonStyle()을 입힌다(리퀴드 글래스 버튼과 동일한
+                    // 시각적 무게감을 주기 위해 Button과 같은 방식으로 스타일링).
+                    Menu {
+                        ForEach(Array(stride(from: 48, through: 84, by: 1)), id: \.self) { midi in
+                            Button {
+                                startingNoteMIDI = midi
+                                startingNotePlayer.setFrequency(NoteNameConverter.frequency(forMIDINote: midi))
+                            } label: {
+                                Text(NoteNameConverter.convert(frequency: NoteNameConverter.frequency(forMIDINote: midi))?.noteName ?? "?")
+                            }
+                        }
+                    } label: {
+                        Label(
+                            NoteNameConverter.convert(frequency: NoteNameConverter.frequency(forMIDINote: startingNoteMIDI))?.noteName ?? "?",
+                            systemImage: "tuningfork"
+                        )
                         .font(Theme.Typography.caption)
+                    }
+                    .harmonyButtonStyle()
+                    .controlSize(.small)
+                    // controlSize(.small)만으로는 실제 탭 영역이 HIG 최소 44×44pt보다 작아질 수 있어서
+                    // (크리틱 P2) — 시각적 크기(작은 알약)는 그대로 두고 탭 영역만 프레임으로 넓힌다.
+                    .frame(minWidth: 44, minHeight: 44)
+                    .accessibilityLabel("첫 음 선택")
+
+                    Button {
+                        toggleStartingNotePlayback()
+                    } label: {
+                        Image(systemName: isPlayingStartingNote ? "stop.fill" : "play.fill")
+                            .font(Theme.Typography.caption)
+                    }
+                    .harmonyButtonStyle()
+                    .controlSize(.small)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .accessibilityLabel(isPlayingStartingNote ? "첫 음 재생 정지" : "첫 음 듣기")
                 }
-                .harmonyButtonStyle()
-                .controlSize(.small)
-                .frame(minWidth: 44, minHeight: 44)
-                .accessibilityLabel(isPlayingStartingNote ? "첫음 재생 정지" : "첫음 듣기")
             }
         }
         .foregroundStyle(.secondary)
@@ -448,7 +459,7 @@ extension PracticeView {
             try startingNotePlayer.start()
             isPlayingStartingNote = true
         } catch {
-            statusText = "첫음 재생 실패: \(error.localizedDescription)"
+            statusText = "첫 음 재생 실패: \(error.localizedDescription)"
         }
     }
 
