@@ -10,7 +10,7 @@
 | | |
 |---|---|
 | **녹음 → 채보** | 한 소절을 부르면 음표별 음높이·시작시각·길이를 뽑아냅니다 |
-| **악보와 대조** | 부른 뒤 악보를 붙이면 채보를 그 악보에 맞춰 다듬습니다. 악보는 **사진으로 찍어도** 되고 MusicXML·MIDI 파일이어도 됩니다 |
+| **악보와 대조** | 부른 뒤 악보를 붙이면 채보를 그 악보에 맞춰 다듬습니다. 악보는 **사진으로 찍어도** 되고 MusicXML(`.musicxml`/`.xml`/`.mxl`)·MIDI 파일이어도 됩니다 |
 | **화음 생성** | 조성을 판별하고, 노트 시퀀스 전체의 문맥을 보고(HMM + Viterbi) 베이스·3도·5도를 얹습니다 |
 | **내 목소리로 듣기** | 만들어진 화음을 사용자 본인 목소리로 재생합니다 |
 | **악보** | 멜로디와 3성부를 4단 오선보로 그립니다 |
@@ -75,7 +75,7 @@ xcodebuild -project HarmonyUp.xcodeproj -scheme HarmonyUp \
   -destination 'platform=iOS Simulator,name=iPad Air 11-inch (M3)' test
 ```
 
-유닛테스트 394개. `.xcodeproj`는 커밋하지 않고 `project.yml`에서 생성합니다.
+유닛테스트 403개. `.xcodeproj`는 커밋하지 않고 `project.yml`에서 생성합니다.
 
 ## 문서
 
