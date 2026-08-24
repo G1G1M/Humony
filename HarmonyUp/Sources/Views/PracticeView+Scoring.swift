@@ -45,7 +45,7 @@ extension PracticeView {
     /// 어느 성부를 연습할지 — 멜로디는 원곡 그대로라 연습 대상이 아니고, 화음 3성부만 고른다.
     private var voicePicker: some View {
         Picker("연습할 성부", selection: $scoringVoice) {
-            ForEach(ChordGenerator.Interval.allCases, id: \.self) { interval in
+            ForEach(ChordGenerator.Interval.displayOrder, id: \.self) { interval in
                 Text(interval.koreanLabel).tag(interval)
             }
         }

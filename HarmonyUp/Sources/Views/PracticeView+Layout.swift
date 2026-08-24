@@ -209,15 +209,16 @@ extension PracticeView {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // 128절 — 성부별 솔로 버튼이 순회할 목록. 화면에 보여줄 순서(멜로디 먼저, 그다음 낮은
-    // 음부터)와 라벨을 한곳에 모아둔다.
+    // 128절 — 성부별 솔로 버튼이 순회할 목록.
+    //
+    // 순서는 `ChordGenerator.Interval.displayOrder`(악보와 같은 음높이 내림차순)를 따른다 —
+    // 예전엔 여기만 "낮은 음부터"(멜로디/베이스/3도/5도)라 악보와 정반대였고, "멜로디 바로
+    // 아래"가 화면마다 다른 성부를 가리켰다.
     var soloVoiceOptions: [(label: String, voice: VoiceHarmonyTrackBuilder.Voice)] {
-        [
-            (label: "멜로디", voice: .melody),
-            (label: "베이스", voice: .harmony(.bass)),
-            (label: "3도", voice: .harmony(.third)),
-            (label: "5도", voice: .harmony(.fifth)),
-        ]
+        [(label: "멜로디", voice: .melody)]
+            + ChordGenerator.Interval.displayOrder.map {
+                (label: $0.koreanLabel, voice: .harmony($0))
+            }
     }
 
     // MARK: - 두 레이아웃이 공유하는 섹션

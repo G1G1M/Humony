@@ -199,12 +199,12 @@ struct HistoryView: View {
         sessions.flatMap(\.attempts)
     }
 
-    /// 성부 순서를 화면마다 뒤바뀌지 않게 고정한다(베이스 → 3도 → 5도, `allCases` 순서).
+    /// 성부 순서를 화면마다 뒤바뀌지 않게 고정한다 — 악보와 같은 음높이 내림차순
+    /// (`ChordGenerator.Interval.displayOrder`).
     private func sortedAttempts(of session: PracticeSession) -> [PracticeAttempt] {
-        let order = ChordGenerator.Interval.allCases
-        return session.attempts.sorted { lhs, rhs in
-            let lhsIndex = lhs.interval.flatMap { order.firstIndex(of: $0) } ?? order.count
-            let rhsIndex = rhs.interval.flatMap { order.firstIndex(of: $0) } ?? order.count
+        session.attempts.sorted { lhs, rhs in
+            let lhsIndex = lhs.interval?.displayIndex ?? ChordGenerator.Interval.displayOrder.count
+            let rhsIndex = rhs.interval?.displayIndex ?? ChordGenerator.Interval.displayOrder.count
             if lhsIndex != rhsIndex { return lhsIndex < rhsIndex }
             return lhs.date < rhs.date
         }
@@ -261,7 +261,7 @@ struct HistoryView: View {
     /// 페르소나 시나리오의 "5도 화음에서 정확도가 낮음을 확인"에 해당한다. 기록이 없는 성부는
     /// 비교 대상에서 자연히 빠진다.
     private var weakestIntervalMessage: String? {
-        let averages = ChordGenerator.Interval.allCases.compactMap { interval -> (ChordGenerator.Interval, Double)? in
+        let averages = ChordGenerator.Interval.displayOrder.compactMap { interval -> (ChordGenerator.Interval, Double)? in
             let list = allAttempts.filter { $0.intervalRawValue == interval.storageKey }
             guard !list.isEmpty else { return nil }
             return (interval, list.map(\.onPitchRatio).reduce(0, +) / Double(list.count))

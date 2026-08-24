@@ -76,12 +76,12 @@ struct SessionDetailView: View {
         }
     }
 
-    /// 성부 순서를 화면마다 뒤바뀌지 않게 고정한다(베이스 → 3도 → 5도).
+    /// 성부 순서를 화면마다 뒤바뀌지 않게 고정한다 — 악보와 같은 음높이 내림차순
+    /// (`ChordGenerator.Interval.displayOrder`).
     private var sortedAttempts: [PracticeAttempt] {
-        let order = ChordGenerator.Interval.allCases
-        return session.attempts.sorted { lhs, rhs in
-            let lhsIndex = lhs.interval.flatMap { order.firstIndex(of: $0) } ?? order.count
-            let rhsIndex = rhs.interval.flatMap { order.firstIndex(of: $0) } ?? order.count
+        session.attempts.sorted { lhs, rhs in
+            let lhsIndex = lhs.interval?.displayIndex ?? ChordGenerator.Interval.displayOrder.count
+            let rhsIndex = rhs.interval?.displayIndex ?? ChordGenerator.Interval.displayOrder.count
             if lhsIndex != rhsIndex { return lhsIndex < rhsIndex }
             return lhs.date < rhs.date
         }

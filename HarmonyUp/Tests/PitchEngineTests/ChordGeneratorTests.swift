@@ -138,4 +138,29 @@ final class ChordGeneratorTests: XCTestCase {
         XCTAssertEqual(ChordGenerator.Interval.fifth.gain, 1.0)
     }
 
+    /// 화면에 성부를 나열하는 순서(`Interval.displayOrder`)는 **실제 음높이 내림차순과 항상
+    /// 일치해야 한다** — 악보든 조작부든 "위에 있는 게 높은 음"이라는 오선보 관례를 따르는데,
+    /// 그 순서가 실제 배치와 어긋나면 화면이 거짓말을 하게 된다. 순서를 한 곳
+    /// (`displayOrder`)에 모아 화면끼리는 통일했으니, 이제 그 순서 자체가 맞는지를 여기서
+    /// 지킨다(139절 이후 UI 크리틱으로 조작부/악보 순서가 정반대였던 게 드러나 통일한 뒤 추가).
+    func testDisplayOrderMatchesActualPitchOrderAcrossFullRange() {
+        for melodyMIDINote in 48...84 {
+            let result = ChordGenerator.harmonizeSequence(
+                melodyNotes: [(midiNote: melodyMIDINote, duration: 0.3)],
+                key: key(tonic: 0, mode: .major)
+            )
+            guard let harmony = result.first ?? nil else { continue }
+
+            let midiNotes = ChordGenerator.Interval.displayOrder.compactMap { interval in
+                harmony.first { $0.interval == interval }?.midiNote
+            }
+            XCTAssertEqual(midiNotes.count, ChordGenerator.Interval.displayOrder.count, "성부가 빠졌다")
+            XCTAssertEqual(
+                midiNotes, midiNotes.sorted(by: >),
+                "멜로디 \(melodyMIDINote)에서 displayOrder가 음높이 내림차순이 아니다: \(midiNotes)"
+            )
+            // 멜로디는 언제나 모든 화음 성부보다 위에 있다.
+            XCTAssertLessThan(midiNotes[0], melodyMIDINote)
+        }
+    }
 }

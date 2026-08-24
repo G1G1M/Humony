@@ -43,19 +43,13 @@ enum VexFlowScorePayload {
     /// 악보에 그릴 성부와, 각 성부의 음을 `MelodyStep`에서 꺼내는 방법 — 배열 순서가 그대로
     /// 위에서 아래로 그려지는 오선 순서다.
     ///
-    /// **왜 멜로디 → 5도 → 3도 → 베이스인가**: 오선보는 높은 성부를 위에 놓는 게 관례고,
-    /// `ChordGenerator`가 "베이스 < 3도 < 5도 < 멜로디" 순서를 수학적으로 보장한다
-    /// (`ChordGenerator.innerVoiceNote` 문서 참고 — 온음계에서 3도는 근음 기준 3~4반음,
-    /// 5도는 6~8반음 위이고 멜로디까지는 항상 9반음 이상 벌려두므로 성부 교차가 구조적으로
-    /// 생기지 않는다). 그래서 이 고정 순서가 항상 실제 음높이 순서와 일치한다 — 녹음마다
-    /// 순서가 뒤바뀔 걱정이 없다. 조작부(`PracticeView+Layout.soloVoiceOptions`)는 재생/뮤트용
-    /// 목록이라 사람이 고르기 편한 별도 순서(멜로디/베이스/3도/5도)를 쓴다.
-    static let voiceOrder: [(label: String, interval: ChordGenerator.Interval?)] = [
-        (label: "멜로디", interval: nil),
-        (label: "5도", interval: .fifth),
-        (label: "3도", interval: .third),
-        (label: "베이스", interval: .bass),
-    ]
+    /// **왜 멜로디 → 5도 → 3도 → 베이스인가**: 오선보는 높은 성부를 위에 놓는 게 관례이고,
+    /// `ChordGenerator`가 그 순서를 수학적으로 보장한다(`ChordGenerator.Interval.displayOrder`
+    /// 문서 참고). 그 순서는 이제 앱 전체가 공유하므로 여기서 따로 적지 않고 그대로 가져온다 —
+    /// 예전엔 조작부(`soloVoiceOptions`)가 정반대 순서를 쓰고 있었다.
+    static let voiceOrder: [(label: String, interval: ChordGenerator.Interval?)] =
+        [(label: "멜로디", interval: nil)]
+        + ChordGenerator.Interval.displayOrder.map { (label: $0.koreanLabel, interval: $0) }
 
     /// 스텝 하나에서 특정 성부의 MIDI 노트를 꺼낸다. `interval`이 nil이면 멜로디 자신.
     /// 화음이 아예 없는 스텝(`harmony == nil` — 조성 판별 실패 등)은 nil을 돌려주고,

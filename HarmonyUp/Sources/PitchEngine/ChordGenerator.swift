@@ -88,6 +88,24 @@ enum ChordGenerator {
         static func from(storageKey: String) -> Interval? {
             allCases.first { $0.storageKey == storageKey }
         }
+
+        /// 화면에 성부를 나열할 때 쓰는 순서 — 오선보 관례대로 **높은 성부부터**.
+        ///
+        /// `allCases`(선언 순서: 베이스/3도/5도)를 화면마다 그대로 쓰다 보니 순서가 갈렸다 —
+        /// 악보는 음높이 내림차순(멜로디/5도/3도/베이스)인데 조작부와 기록은 오름차순이라,
+        /// "멜로디 바로 아래"가 한쪽에선 최저음이고 다른 쪽에선 두 번째 고음이었다(139절 이후
+        /// UI 크리틱 지적). 사용자 결정으로 **악보 순서로 통일**하면서, 다시 갈리지 않도록
+        /// 순서를 여기 한 곳에만 둔다.
+        ///
+        /// 이 순서가 실제 음높이와 항상 일치하는 근거: `innerVoiceNote`가 "베이스 < 3도 < 5도 <
+        /// 멜로디"를 수학적으로 보장한다(온음계에서 근음 기준 3도는 3~4반음, 5도는 6~8반음 위이고
+        /// 멜로디까지는 `minimumBassToMelodyGap`(9반음) 이상 벌어져 성부 교차가 불가능하다).
+        static let displayOrder: [Interval] = [.fifth, .third, .bass]
+
+        /// `displayOrder`에서의 자리 — 성부별 데이터를 화면 순서대로 정렬할 때 쓴다.
+        var displayIndex: Int {
+            Self.displayOrder.firstIndex(of: self) ?? Self.displayOrder.count
+        }
     }
 
     struct HarmonyNote {
