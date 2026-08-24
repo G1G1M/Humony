@@ -8,6 +8,12 @@
 #   scripts/apply-mvvm-structure.sh            # 드라이런 — 무엇이 어디로 갈지만 출력
 #   scripts/apply-mvvm-structure.sh --apply    # 실제로 git mv 수행 + project.yml 경로 갱신
 #
+# 목록은 작성 시점 기준이라, 그 뒤에 생긴 파일은 여기 없다 — 실행 전에 아래 명령으로
+# 빠진 게 없는지 대조할 것(139절 TempoEstimator가 실제로 이렇게 누락됐다):
+#   comm -23 <(find HarmonyUp/Sources HarmonyUp/Tests -type f \( -name '*.swift' -o -name '*.h' \
+#     -o -name '*.plist' \) | sort) <(scripts/apply-mvvm-structure.sh | grep -oE '^  HarmonyUp/[^ ]+' \
+#     | sed 's/^  //' | sort) | grep -v ThirdParty
+#
 # 이 스크립트는 여러 번 돌려도 안전하다(이미 옮겨진 파일은 건너뛴다). 다만 **작업 중인
 # 세션이 없을 때** 돌려야 한다 — 다른 에이전트가 같은 파일을 편집하는 중에 경로를 바꾸면
 # 그쪽 편집이 엉뚱한 자리에 떨어진다(이 프로젝트에서 실제로 겪은 오염 패턴).
@@ -59,6 +65,7 @@ HarmonyUp/Sources/PitchEngine/MelodySegmenter.swift               HarmonyUp/Sour
 HarmonyUp/Sources/PitchEngine/MelodySession.swift                 HarmonyUp/Sources/Domain/Melody
 HarmonyUp/Sources/PitchEngine/RecordingAnalyzer.swift             HarmonyUp/Sources/Domain/Melody
 HarmonyUp/Sources/PitchEngine/RhythmQuantizer.swift               HarmonyUp/Sources/Domain/Melody
+HarmonyUp/Sources/PitchEngine/TempoEstimator.swift                HarmonyUp/Sources/Domain/Melody
 HarmonyUp/Sources/PitchEngine/KeyDetector.swift                  HarmonyUp/Sources/Domain/Melody
 HarmonyUp/Sources/Views/MelodyStep.swift                          HarmonyUp/Sources/Domain/Melody
 
@@ -104,6 +111,7 @@ HarmonyUp/Tests/PitchEngineTests/MelodySegmenterTests.swift              Harmony
 HarmonyUp/Tests/PitchEngineTests/MelodySessionTests.swift                HarmonyUp/Tests/Domain/Melody
 HarmonyUp/Tests/PitchEngineTests/RecordingAnalyzerTests.swift            HarmonyUp/Tests/Domain/Melody
 HarmonyUp/Tests/PitchEngineTests/RhythmQuantizerTests.swift              HarmonyUp/Tests/Domain/Melody
+HarmonyUp/Tests/PitchEngineTests/TempoEstimatorTests.swift               HarmonyUp/Tests/Domain/Melody
 HarmonyUp/Tests/PitchEngineTests/KeyDetectorTests.swift                  HarmonyUp/Tests/Domain/Melody
 HarmonyUp/Tests/PitchEngineTests/ChordGeneratorTests.swift               HarmonyUp/Tests/Domain/Harmony
 HarmonyUp/Tests/PitchEngineTests/VoiceHarmonyTrackBuilderTests.swift     HarmonyUp/Tests/Domain/Harmony

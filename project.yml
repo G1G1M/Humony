@@ -19,7 +19,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.kimjiwon.HarmonyUp
         DEVELOPMENT_TEAM: C5P7V9S6NT
         CODE_SIGN_STYLE: Automatic
-        SWIFT_OBJC_BRIDGING_HEADER: HarmonyUp/Sources/HarmonyUp-Bridging-Header.h
+        SWIFT_OBJC_BRIDGING_HEADER: HarmonyUp/Sources/App/Source/HarmonyUp-Bridging-Header.h
         HEADER_SEARCH_PATHS: HarmonyUp/ThirdParty/World
         CLANG_CXX_LANGUAGE_STANDARD: "gnu++17"
       configs:
@@ -30,7 +30,7 @@ targets:
           SWIFT_OPTIMIZATION_LEVEL: "-O"
           GCC_OPTIMIZATION_LEVEL: "s"
     info:
-      path: HarmonyUp/Sources/Info.plist
+      path: HarmonyUp/Sources/App/Source/Info.plist
       properties:
         UILaunchScreen: {}
         NSMicrophoneUsageDescription: "멜로디를 녹음해서 화음을 분석하기 위해 마이크가 필요합니다."
