@@ -422,31 +422,15 @@ extension PracticeView {
         }
     }
 
-    /// 재생 위치를 읽어 악보에서 강조할 자리를 갱신한다(149절).
+    /// 지금 재생 중인 위치(초). 재생 중이 아니면 nil — `PlaybackHighlightingScoreView`가
+    /// 이걸 주기적으로 읽어 악보에서 강조할 자리를 정한다(149절).
     ///
-    /// 시간 -> 자리 변환 자체는 `ScoreTimeline.activeEventIndex`(순수 함수, 유닛테스트로 고정)가
-    /// 하고, 여기서는 "어느 플레이어의 시계를 읽을지"와 "값이 바뀔 때만 상태를 쓴다"만 담당한다 —
-    /// 매 틱마다 같은 값을 다시 대입하면 초당 20번씩 불필요하게 body가 재평가된다.
-    func updatePlaybackHighlight() {
-        let playbackTime: TimeInterval?
-        if isPlayingVoiceHarmony {
-            playbackTime = voiceHarmonyPlayer.currentTime
-        } else if playingSoloVoice != nil {
-            playbackTime = soloVoicePlayer.currentTime
-        } else {
-            playbackTime = nil
-        }
-
-        guard let playbackTime else {
-            if activePlaybackStepIndex != nil { activePlaybackStepIndex = nil }
-            return
-        }
-
-        let index = ScoreTimeline.activeEventIndex(
-            at: playbackTime,
-            events: ScoreTimeline.events(from: melodySteps)
-        )
-        if activePlaybackStepIndex != index { activePlaybackStepIndex = index }
+    /// 벽시계가 아니라 플레이어 노드의 샘플 시계를 쓴다(`RecordingPlayer.currentTime`) —
+    /// 시작 시각을 들고 있다가 빼는 방식은 엔진 시작·버퍼 스케줄 지연만큼 밀린다.
+    func currentPlaybackTime() -> TimeInterval? {
+        if isPlayingVoiceHarmony { return voiceHarmonyPlayer.currentTime }
+        if playingSoloVoice != nil { return soloVoicePlayer.currentTime }
+        return nil
     }
 
     /// 128절 — 멜로디/베이스/3도/5도를 각각 따로 들어본다(WORLD 버전). 포먼트/음량 조정이

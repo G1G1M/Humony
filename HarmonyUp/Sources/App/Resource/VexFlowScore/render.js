@@ -103,7 +103,16 @@ function setActiveStep(index) {
     noteState.stepElements[noteState.activeIndex].forEach(function (el) { recolor(el, BASE_NOTE_COLOR); });
   }
   noteState.activeIndex = (index === null || index === undefined) ? null : index;
-  if (noteState.activeIndex === null) return;
+  if (noteState.activeIndex === null) {
+    // 149절 — 재생이 끝나면(Swift가 null을 보낸다) 악보를 처음으로 되감는다. 노래가 끝났는데
+    // 마지막 마디에 머물러 있으면 다시 듣기 전에 매번 손으로 맨 앞까지 스크롤해야 한다.
+    // 쉼표 구간에서는 null이 오지 않는다(ScoreTimeline.highlightIndex가 직전 음표를 유지한다) —
+    // 안 그러면 노래 중간에 악보가 맨 앞으로 튕긴다.
+    lastScrollTargetX = null;
+    var wrapper = document.getElementById('scoreWrapper');
+    if (wrapper) wrapper.scrollTo({ left: 0, behavior: 'smooth' });
+    return;
+  }
   scrollActiveStepIntoView(noteState.activeIndex);
   var elements = noteState.stepElements[noteState.activeIndex];
   if (!elements) return;

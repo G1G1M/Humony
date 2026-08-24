@@ -93,24 +93,36 @@ final class ScoreTimelineTests: XCTestCase {
 
     /// 인덱스는 **이벤트 배열 기준**이다 — `render.js`의 `setActiveStep`이 그려진 음표 배열을
     /// 그대로 인덱싱하므로, 쉼표도 한 자리를 차지한다.
-    func testActiveEventIndexFollowsPlaybackPosition() {
+    func testHighlightIndexFollowsPlaybackPosition() {
         let steps = [
             step(60, onset: 0.0, duration: 0.20),
             step(62, onset: 1.0, duration: 0.50)
         ]
         let events = ScoreTimeline.events(from: steps)  // [음표, 쉼표, 음표]
 
-        XCTAssertEqual(ScoreTimeline.activeEventIndex(at: 0.10, events: events), 0)
-        XCTAssertNil(ScoreTimeline.activeEventIndex(at: 0.50, events: events), "쉼표 구간에서는 아무것도 강조하지 않는다")
-        XCTAssertEqual(ScoreTimeline.activeEventIndex(at: 1.20, events: events), 2)
+        XCTAssertEqual(ScoreTimeline.highlightIndex(at: 0.10, events: events), 0)
+        XCTAssertEqual(ScoreTimeline.highlightIndex(at: 1.20, events: events), 2)
     }
 
-    func testActiveEventIndexIsNilOutsideTheSong() {
+    /// 쉼표 구간에서는 **직전 음표를 계속 강조**한다 — nil은 "재생이 아니다"만 뜻해야 한다.
+    /// 그래야 재생이 끝날 때만 악보를 처음으로 되감을 수 있다(쉼표마다 nil이면 노래 중간에
+    /// 악보가 맨 앞으로 튕긴다).
+    func testHighlightIndexHoldsThePreviousNoteThroughRests() {
+        let steps = [
+            step(60, onset: 0.0, duration: 0.20),
+            step(62, onset: 1.0, duration: 0.50)
+        ]
+        let events = ScoreTimeline.events(from: steps)
+
+        XCTAssertEqual(ScoreTimeline.highlightIndex(at: 0.50, events: events), 0, "쉼표 구간이어도 직전 음표를 유지")
+        XCTAssertEqual(ScoreTimeline.highlightIndex(at: 3.00, events: events), 2, "마지막 음 이후에도 마지막 음을 유지")
+    }
+
+    func testHighlightIndexIsNilOnlyBeforeTheFirstNote() {
         let steps = [step(60, onset: 0.5, duration: 0.5)]
         let events = ScoreTimeline.events(from: steps)
 
-        XCTAssertNil(ScoreTimeline.activeEventIndex(at: 0.10, events: events), "첫 음 전")
-        XCTAssertNil(ScoreTimeline.activeEventIndex(at: 5.00, events: events), "마지막 음 이후")
-        XCTAssertNil(ScoreTimeline.activeEventIndex(at: 0.60, events: []), "이벤트가 없으면 nil")
+        XCTAssertNil(ScoreTimeline.highlightIndex(at: 0.10, events: events), "첫 음 전")
+        XCTAssertNil(ScoreTimeline.highlightIndex(at: 0.60, events: []), "이벤트가 없으면 nil")
     }
 }

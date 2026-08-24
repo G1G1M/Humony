@@ -73,17 +73,25 @@ enum ScoreTimeline {
         return events
     }
 
-    /// 재생 위치에 해당하는 **이벤트 인덱스**. 쉼표 구간이거나 노래 밖이면 nil(아무것도 강조 안 함).
+    /// 재생 위치에 해당하는 **이벤트 인덱스** — 강조할 자리.
+    ///
+    /// **쉼표나 음 사이 틈에서는 직전 음표를 계속 강조한다.** 엄밀하게는 그 순간 소리 나는
+    /// 음표가 없지만, 하이라이트가 음마다 껐다 켜지면 눈이 피곤하고 애플 뮤직도 간주 동안
+    /// 마지막 줄을 유지한다. 무엇보다 **nil의 의미를 "재생이 아니다" 하나로 좁혀야** 하는
+    /// 실용적인 이유가 있다 — 재생이 끝나면 악보를 처음으로 되감는데(149절, `setActiveStep(null)`),
+    /// 쉼표마다 nil이 되면 노래 중간에 악보가 맨 앞으로 튕겨 돌아간다.
+    ///
+    /// 그래서 nil은 첫 음이 시작되기 전(또는 이벤트가 없을 때)만이다.
     ///
     /// 뷰가 아니라 여기 두는 이유: 이건 순수 계산이고 유닛테스트로 고정할 수 있다 —
     /// `CLAUDE.md` 코딩 컨벤션("View의 `@State`에 묶인 메서드 안에 조합 로직을 두지 말 것").
-    static func activeEventIndex(at time: Double, events: [Event]) -> Int? {
+    static func highlightIndex(at time: Double, events: [Event]) -> Int? {
+        var latest: Int?
         for (index, event) in events.enumerated() {
             guard case .note = event else { continue }
-            if time >= event.start, time < event.start + event.duration {
-                return index
-            }
+            guard event.start <= time else { break }
+            latest = index
         }
-        return nil
+        return latest
     }
 }

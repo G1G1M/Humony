@@ -525,12 +525,11 @@ extension PracticeView {
     /// 분기가 똑같이 재사용한다.
     var scoreViewWithLoadingOverlay: some View {
         ZStack {
-            VexFlowScoreView(
+            PlaybackHighlightingScoreView(
                 steps: melodySteps,
-                activeStepIndex: activePlaybackStepIndex,
-                onSeekToStep: { _ in },
+                contentVersion: scoreContentVersion,
                 isRendering: $isScoreRendering,
-                contentVersion: scoreContentVersion
+                currentPlaybackTime: currentPlaybackTime
             )
             if isScoreRendering {
                 PulsingLoadingLabel(message: "악보를 만드는 중이에요")
