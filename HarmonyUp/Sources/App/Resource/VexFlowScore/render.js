@@ -237,6 +237,11 @@ function renderScore(data) {
       var keys = isRest ? [REST_KEY[clef]] : [n.key];
       var duration = n.duration + (isRest ? 'r' : '');
       var note = new VF.StaveNote({ clef: clef, keys: keys, duration: duration });
+      // VexFlow 4는 duration에 'd'를 넣어도 **점을 그려주지 않는다** — 길이 계산에만 반영되고,
+      // 점 자체는 Dot 모디파이어를 붙여야 나온다. 안 붙이면 점4분음표(1.5박)가 그냥 4분음표로
+      // 그려져서, 마디 안 음표를 더하면 4/4가 안 맞는 악보가 된다(149절 실기기 제보
+      // "저런 음표는 실제로 없지 않아?"). 쉼표도 마찬가지라 둘 다 붙인다.
+      if (n.duration.indexOf('d') !== -1) { VF.Dot.buildAndAttach([note], { all: true }); }
       if (!isRest && n.sharp) { note.addModifier(new VF.Accidental('#'), 0); }
       return note;
     });
