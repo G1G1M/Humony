@@ -50,11 +50,9 @@ struct PracticeView: View {
     // 분석 완료 시점에 지금 발급된 토큰과 같을 때만 그 결과를 반영한다.
     @State var activeAnalysisToken: UUID?
     // 명세서(v1.0) "최대 녹음 시간 확장" — 한 구절(Verse)/후렴구(Chorus)를 넉넉하게 부를 수
-    // 있도록 60초로 늘렸다(기존 30초). WSOLA 피치시프트 비용은 프레임별로 선형이라 시간이
-    // 늘어도 체감 지연은 크지 않고, 분석 쪽 안전망은 별도로 12초 타임아웃(stopQuickRecording)을 둔다.
+    // 있도록 60초로 늘렸다(기존 30초). 분석이 오래 걸려도 메인 스레드를 막지 않으므로
+    // (`stopQuickRecording`이 `Task.detached`로 돌린다) 길이 자체는 부담이 되지 않는다.
     let quickRecordMaxDuration: Double = 60.0
-    // "12초 타임아웃 적용" — 60초 분량 녹음도 분석이 이보다 오래 걸리면 타임아웃 처리한다.
-    let analysisTimeout: TimeInterval = 12.0
 
     // 녹음 전 참고음(첫음) 골라 듣기 — 무반주로 노래를 시작할 때 음정을 잡기 위한 순수 참고용
     // 기능이다. 예전엔 "조성과 화음" 카드 안에 있었는데(54절에서 카드째 정리) 사용자가 다시

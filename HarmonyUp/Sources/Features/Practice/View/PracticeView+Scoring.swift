@@ -282,18 +282,19 @@ extension PracticeView {
         // 빠른 녹음(activeAnalysisToken)과 같은 이유의 세대 토큰 — 타임아웃으로 이미 에러 처리한
         // 뒤에도 백그라운드 세그멘테이션은 계속 돌 수 있고, 그 결과가 뒤늦게 도착해 사용자가
         // 이미 시작한 다음 시도를 덮어쓰면 안 된다.
+        // 녹음 분석 쪽(`stopQuickRecording`)과 같은 이유로 타임아웃을 두지 않는다 — 예전 구현은
+        // 동기 함수를 `withTaskGroup` 자식으로 넣어서, 타임아웃이 지나도 끝까지 기다린 뒤에
+        // 정상 결과를 버리고 에러를 보여줬다. 채점은 메인 스레드를 막지 않고 돌고("채점하는
+        // 중이에요" 표시), 세대 토큰이 낡은 결과를 걸러준다.
         let token = UUID()
         activeScoringToken = token
         Task {
-            let scored = await Self.scoreWithTimeout(
-                samples: samples,
-                sampleRate: rate,
-                targets: targets,
-                timeout: analysisTimeout
-            )
+            let scored = await Task.detached(priority: .userInitiated) {
+                HarmonyPracticeScorer.score(recordingSamples: samples, sampleRate: rate, targetFrequencies: targets)
+            }.value
             guard activeScoringToken == token else { return }
             guard let scored else {
-                scoringPhase = .error("채점이 너무 오래 걸리고 있어요 — 다시 시도해주세요")
+                scoringPhase = .error("부른 소리에서 음을 찾지 못했어요 — 조금 더 또렷하게 불러주세요")
                 return
             }
             scoringResult = scored
@@ -345,25 +346,4 @@ extension PracticeView {
         recordingLevel = 0
     }
 
-    /// `MelodySegmenter`는 동기·취소 불가라 타임아웃과 경합시킨다 — 빠른 녹음의
-    /// `analyzeWithTimeout`과 같은 패턴이고, 이유도 같다(60초 녹음이면 YIN을 윈도우마다 도는
-    /// 비용이 커서 붙잡고 기다리는 대신 통제권을 사용자에게 돌려준다).
-    private static func scoreWithTimeout(
-        samples: [Float],
-        sampleRate: Double,
-        targets: [Double],
-        timeout: TimeInterval
-    ) async -> HarmonyPracticeScorer.Result? {
-        await withTaskGroup(of: HarmonyPracticeScorer.Result?.self) { group in
-            group.addTask {
-                HarmonyPracticeScorer.score(recordingSamples: samples, sampleRate: sampleRate, targetFrequencies: targets)
-            }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                return nil
-            }
-            defer { group.cancelAll() }
-            return await group.next() ?? nil
-        }
-    }
 }

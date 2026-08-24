@@ -139,21 +139,23 @@ extension PracticeView {
         // 음표가 더 많이 나온다" 같은 문제를 어느 단계에서 조사할지 좁힐 수 있게 한다.
         print("[PracticeView] 녹음 종료 — 길이 \(String(format: "%.2fs", Double(quickRecordBuffer.count) / rate)), 원본 최대 진폭 \(String(format: "%.5f", rawPeak))")
         #endif
-        // 명세서(v1.0) "안전망 장치" — 60초 분량 녹음은 YIN을 윈도우마다 도는 RecordingAnalyzer가
-        // 평소보다 오래 걸릴 수 있어서, 12초를 넘기면 붙잡고 기다리는 대신 에러로 즉시 알리고
-        // (기존 errorContent의 "다시 녹음" 버튼이 곧 재시도 버튼) 사용자에게 통제권을 돌려준다.
-        // 토큰으로 "이 시도가 아직 최신인지"를 확인하는 이유: 타임아웃으로 이미 에러 처리한 뒤에도
-        // 백그라운드 analyze() 자체는 계속 돌고 있을 수 있는데(진짜로 취소되는 게 아니라 결과를
-        // 무시하는 것뿐), 그게 뒤늦게 끝나 사용자가 이미 새로 시작한 다음 시도의 결과를 덮어쓰면 안 된다.
+        // 토큰으로 "이 시도가 아직 최신인지"를 확인한다 — 사용자가 결과를 기다리다 새로 녹음하면
+        // 이전 분석이 뒤늦게 끝나 새 시도의 결과를 덮어쓸 수 있다.
+        //
+        // **136절까지 있던 12초 타임아웃은 없앴다.** 원래 목적은 "오래 걸리면 통제권을 돌려주기"
+        // 였는데, 구현이 `withTaskGroup`의 자식으로 **동기** 함수를 넣는 형태라 타임아웃 태스크가
+        // 먼저 끝나도 그룹이 자식 완료를 기다렸다(`cancelAll()`을 해도 동기 코드는 취소를 관찰하지
+        // 않는다). 결과적으로 사용자는 끝까지 기다린 뒤에 "너무 오래 걸린다"는 에러를 봤고 —
+        // **정상 결과를 손에 쥔 채 버렸다.** 지금은 분석이 메인 스레드를 막지 않고(아래
+        // `Task.detached`) 진행 표시도 있으므로, 유효한 결과를 버릴 이유가 없다.
         let token = UUID()
         activeAnalysisToken = token
         Task {
-            let analyzed = await Self.analyzeWithTimeout(samples: samples, sampleRate: rate, timeout: analysisTimeout)
+            // 분석(YIN을 윈도우마다 도는 무거운 동기 계산)을 메인 스레드에서 떼어낸다.
+            let analyzed = await Task.detached(priority: .userInitiated) {
+                RecordingAnalyzer.analyze(recordingSamples: samples, sampleRate: rate)
+            }.value
             guard activeAnalysisToken == token else { return }
-            guard let analyzed else {
-                quickRecordPhase = .error("분석이 너무 오래 걸리고 있어요 — 다시 시도해주세요")
-                return
-            }
             quickRecordPhase = .analyzing(.harmonyGeneration)
             // "진행률 바가 반만 채워진 채로 있다가 그냥 다음으로 넘어간다" 실기기 피드백 —
             // 화음 생성(harmonizeSequence 등) 자체는 거의 즉시 끝나서, 이 줄 바로 다음에
@@ -165,27 +167,6 @@ extension PracticeView {
             try? await Task.sleep(nanoseconds: 450_000_000)
             guard activeAnalysisToken == token else { return } // 대기하는 사이 새 시도가 시작됐으면 여기서도 무시
             applyQuickRecordResult(analyzed)
-        }
-    }
-
-    /// `RecordingAnalyzer.analyze`(동기, 취소 불가)를 타임아웃과 경합시킨다 — 분석이 제때 안
-    /// 끝나면 nil을 돌려주고, 실제 analyze() 자신은 백그라운드에서 계속 돌다 나중에 조용히
-    /// 버려진다(위 activeAnalysisToken 가드가 그 결과를 무시하게 한다).
-    private static func analyzeWithTimeout(
-        samples: [Float],
-        sampleRate: Double,
-        timeout: TimeInterval
-    ) async -> RecordingAnalyzer.AnalyzedRecording? {
-        await withTaskGroup(of: RecordingAnalyzer.AnalyzedRecording?.self) { group in
-            group.addTask {
-                RecordingAnalyzer.analyze(recordingSamples: samples, sampleRate: sampleRate)
-            }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                return nil
-            }
-            defer { group.cancelAll() }
-            return await group.next() ?? nil
         }
     }
 
