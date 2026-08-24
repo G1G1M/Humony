@@ -193,4 +193,161 @@ final class ChordGeneratorTests: XCTestCase {
         }
     }
 
+    // MARK: - 보이스 리딩 (146절)
+
+    /// 화음이 바뀔 때 성부가 얼마나 움직이는지(반음 합)를 인접 쌍마다 계산한다.
+    /// 성부는 음높이 순으로 짝지어 비교한다 — 어느 성부가 어느 화음음을 맡는지는
+    /// 보이스 리딩이 매번 새로 정하므로, `interval` 라벨이 아니라 자리로 비교해야 한다.
+    private func movementsPerChange(_ harmonies: [[ChordGenerator.HarmonyNote]?]) -> [Int] {
+        let voicings = harmonies.compactMap { $0?.map(\.midiNote).sorted() }
+        return zip(voicings, voicings.dropFirst()).map { previous, current in
+            zip(previous, current).reduce(0) { $0 + abs($1.1 - $1.0) }
+        }
+    }
+
+    /// 근음 위치로만 쌓던 예전 방식 — 새 방식과 총 이동량을 비교하기 위한 재현.
+    /// (베이스를 멜로디 9반음 아래 이하의 가장 가까운 자리에 놓고, 그 위에 3도·5도를 쌓는다.)
+    private func rootPositionMovements(melodyNotes: [Int], harmonies: [[ChordGenerator.HarmonyNote]?]) -> [Int] {
+        var voicings: [[Int]] = []
+        for (index, harmony) in harmonies.enumerated() {
+            guard let harmony else { continue }
+            let pitchClasses = Set(harmony.map { $0.midiNote.mod(12) })
+            let ceiling = melodyNotes[index] - 9
+            let base = ceiling - ceiling.mod(12)
+            var stacked: [Int] = []
+            for pitchClass in pitchClasses.sorted() {
+                var note = base + pitchClass
+                if note > ceiling { note -= 12 }
+                stacked.append(note)
+            }
+            voicings.append(stacked.sorted())
+        }
+        return zip(voicings, voicings.dropFirst()).map { previous, current in
+            zip(previous, current).reduce(0) { $0 + abs($1.1 - $1.0) }
+        }
+    }
+
+    /// 보이스 리딩의 존재 이유 — 화음이 바뀔 때 세 성부가 통째로 같은 방향으로 옮겨가는
+    /// 병행진행 대신, 각 성부가 가장 가까운 화음음으로 옮겨가야 한다. 근음 위치 스택은
+    /// 코드 루트가 움직이는 만큼 세 성부가 전부 그만큼 움직인다(C→F면 5+5+5=15).
+    func testVoiceLeadingMovesLessThanRootPositionStacking() {
+        let melody = [60, 62, 64, 65, 67, 65, 64, 62, 60, 59, 60]
+        let notes = melody.map { (midiNote: $0, duration: 0.6) }
+        let harmonies = ChordGenerator.harmonizeSequence(melodyNotes: notes, key: key(tonic: 0, mode: .major))
+
+        let newTotal = movementsPerChange(harmonies).reduce(0, +)
+        let oldTotal = rootPositionMovements(melodyNotes: melody, harmonies: harmonies).reduce(0, +)
+
+        XCTAssertLessThan(newTotal, oldTotal, "보이스 리딩이 근음 위치 스택보다 더 많이 움직인다(새 \(newTotal) / 예전 \(oldTotal))")
+    }
+
+    /// 어떤 성부도 한 번에 크게 뛰지 않아야 한다 — 도약이 크면 "사람이 부르는 선율"이 아니라
+    /// 화음이 통째로 순간이동하는 것처럼 들린다. 완전5도(7반음)를 상한으로 잡는다.
+    func testNoVoiceLeapsMoreThanAPerfectFifth() {
+        let melody = [60, 62, 64, 65, 67, 69, 71, 72, 71, 69, 67, 65, 64, 62, 60]
+        let notes = melody.map { (midiNote: $0, duration: 0.5) }
+        let harmonies = ChordGenerator.harmonizeSequence(melodyNotes: notes, key: key(tonic: 0, mode: .major))
+        let voicings = harmonies.compactMap { $0?.map(\.midiNote).sorted() }
+
+        for (previous, current) in zip(voicings, voicings.dropFirst()) {
+            for (before, after) in zip(previous, current) {
+                XCTAssertLessThanOrEqual(abs(after - before), 7, "성부가 \(abs(after - before))반음 도약했다: \(previous) → \(current)")
+            }
+        }
+    }
+
+    /// 인접한 두 화음이 같은 음이름을 공유하면, 그 음을 맡은 성부는 **그대로 머물러야** 한다.
+    /// 공통음 유지는 합창 편곡의 기본이고, 이게 되면 화음이 바뀌어도 선이 끊기지 않는다.
+    func testCommonTonesAreHeldWhenAdjacentChordsShareANote() {
+        let melody = [60, 62, 64, 65, 67, 65, 64, 62, 60]
+        let notes = melody.map { (midiNote: $0, duration: 0.6) }
+        let harmonies = ChordGenerator.harmonizeSequence(melodyNotes: notes, key: key(tonic: 0, mode: .major))
+        let voicings = harmonies.compactMap { $0?.map(\.midiNote).sorted() }
+
+        for (previous, current) in zip(voicings, voicings.dropFirst()) {
+            let sharedPitchClasses = Set(previous.map { $0.mod(12) }).intersection(current.map { $0.mod(12) })
+            guard !sharedPitchClasses.isEmpty else { continue }
+
+            let heldNotes = Set(previous).intersection(current)
+            XCTAssertFalse(
+                heldNotes.isEmpty,
+                "공통 음이름 \(sharedPitchClasses.sorted())이 있는데 붙잡은 성부가 없다: \(previous) → \(current)"
+            )
+        }
+    }
+
+    /// 전위를 쓰더라도 트라이어드 구성음 세 개가 빠짐없이, 중복 없이 들어 있어야 한다.
+    func testEveryVoicingContainsAllThreeChordTonesExactlyOnce() {
+        let melody = [60, 62, 64, 65, 67, 69, 71, 72]
+        let notes = melody.map { (midiNote: $0, duration: 0.6) }
+        let harmonies = ChordGenerator.harmonizeSequence(melodyNotes: notes, key: key(tonic: 0, mode: .major))
+
+        for harmony in harmonies.compactMap({ $0 }) {
+            let pitchClasses = harmony.map { $0.midiNote.mod(12) }
+            XCTAssertEqual(Set(pitchClasses).count, 3, "성부끼리 같은 음이름을 중복해서 부른다: \(pitchClasses.sorted())")
+        }
+    }
+
+    /// 보이스 리딩이 들어가도 지켜야 할 배치 계약 — 시퀀스 어디서든 성부가 교차하지 않고
+    /// 전부 멜로디 아래에 있어야 한다(`displayOrder`가 이 순서에 기대고 있다).
+    func testVoicesStayOrderedAndBelowMelodyThroughoutSequence() {
+        let melody = [60, 67, 62, 72, 64, 59, 65, 71, 60]
+        let notes = melody.map { (midiNote: $0, duration: 0.5) }
+        let harmonies = ChordGenerator.harmonizeSequence(melodyNotes: notes, key: key(tonic: 0, mode: .major))
+
+        for (index, harmony) in harmonies.enumerated() {
+            guard let harmony else { continue }
+            let byInterval = harmonyByInterval(harmony)
+            XCTAssertLessThan(byInterval[.bass]!.midiNote, byInterval[.third]!.midiNote, "\(index)번째")
+            XCTAssertLessThan(byInterval[.third]!.midiNote, byInterval[.fifth]!.midiNote, "\(index)번째")
+            XCTAssertLessThan(byInterval[.fifth]!.midiNote, melody[index], "\(index)번째 성부가 멜로디를 넘었다")
+        }
+    }
+
+    /// 성부 이름은 이제 화음음(3도/5도)이 아니라 **자리**를 가리킨다 — 전위를 쓰면 같은 성부가
+    /// 매번 다른 화음음을 맡기 때문에 "3도"라는 이름이 거짓이 된다(146절, 사용자 결정).
+    func testVoiceLabelsDescribePositionNotChordTone() {
+        XCTAssertEqual(ChordGenerator.Interval.fifth.koreanLabel, "윗소리")
+        XCTAssertEqual(ChordGenerator.Interval.third.koreanLabel, "가운뎃소리")
+        XCTAssertEqual(ChordGenerator.Interval.bass.koreanLabel, "아랫소리")
+    }
+
+    /// 저장 키는 바뀌면 안 된다 — 기존 기록(SwiftData)이 성부를 이 문자열로 찾는다.
+    func testStorageKeysAreUnchangedByRelabeling() {
+        XCTAssertEqual(ChordGenerator.Interval.bass.storageKey, "bass")
+        XCTAssertEqual(ChordGenerator.Interval.third.storageKey, "third")
+        XCTAssertEqual(ChordGenerator.Interval.fifth.storageKey, "fifth")
+    }
+
+    /// 보이스 리딩만 두면 "제자리에 머물기"가 항상 최소 비용이라, 멜로디가 한 옥타브를 올라가도
+    /// 화음이 안 따라 올라간다 — 실제로 덤프해보니 간격이 17반음까지 벌어졌다. 백킹 성부는
+    /// 리드 바로 아래 한 옥타브 안쪽에 붙어 있어야 받쳐주는 소리가 된다.
+    func testHarmonyStaysWithinAnOctaveBelowTheMelody() {
+        let melody = [60, 62, 64, 65, 67, 69, 71, 72, 74, 76, 77, 76, 74, 72, 69, 65, 60]
+        let notes = melody.map { (midiNote: $0, duration: 0.6) }
+        let harmonies = ChordGenerator.harmonizeSequence(melodyNotes: notes, key: key(tonic: 0, mode: .major))
+
+        for (index, harmony) in harmonies.enumerated() {
+            guard let harmony else { continue }
+            let top = harmony.map(\.midiNote).max()!
+            let gap = melody[index] - top
+            XCTAssertLessThanOrEqual(gap, 12, "\(index)번째: 화음이 멜로디에서 \(gap)반음이나 떨어져 있다")
+            XCTAssertGreaterThanOrEqual(gap, 2, "\(index)번째: 화음이 멜로디에 너무 붙어 부딪힌다(\(gap)반음)")
+        }
+    }
+
+    /// 화음은 닫힌 자리(close position)로 유지한다 — 옥타브를 자유롭게 고르게 두면 베이스만
+    /// 저 아래로 떨어져 가운데가 텅 빈 화음이 된다.
+    func testVoicingStaysInClosePosition() {
+        let melody = [60, 64, 67, 72, 67, 64, 60, 59, 62, 65, 69]
+        let notes = melody.map { (midiNote: $0, duration: 0.6) }
+        let harmonies = ChordGenerator.harmonizeSequence(melodyNotes: notes, key: key(tonic: 0, mode: .major))
+
+        for (index, harmony) in harmonies.enumerated() {
+            guard let harmony else { continue }
+            let pitches = harmony.map(\.midiNote).sorted()
+            XCTAssertLessThanOrEqual(pitches[2] - pitches[0], 12, "\(index)번째 화음이 한 옥타브보다 넓게 벌어졌다: \(pitches)")
+        }
+    }
+
 }

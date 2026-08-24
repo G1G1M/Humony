@@ -19,6 +19,14 @@ import Foundation
 /// 편곡 관행을 흉내낸다.
 enum ChordGenerator {
 
+    /// 화음 성부 하나 — **자리**(음높이 순서)를 가리킨다.
+    ///
+    /// 케이스 이름(`third`/`fifth`)은 원래 "화음의 3도/5도"라는 뜻이었지만, 146절에 보이스
+    /// 리딩(전위 사용)이 들어가면서 그 의미가 사라졌다 — 이제 `.bass`/`.third`/`.fifth`는
+    /// 각각 아랫소리/가운뎃소리/윗소리라는 **자리**이고, 그 자리가 어떤 화음음을 맡는지는
+    /// 화음마다 달라진다. 케이스 이름을 그대로 두는 이유는 `storageKey`가 이미 저장된
+    /// 기록(SwiftData)의 성부를 이 문자열로 찾기 때문이다 — 이름을 바꾸면 기존 기록이 성부를
+    /// 잃는다. 사용자에게 보이는 이름은 `koreanLabel`이 자리 이름으로 돌려준다.
     enum Interval: Hashable, CaseIterable {
         case bass
         case third
@@ -26,11 +34,17 @@ enum ChordGenerator {
 
         /// 화면에 보여줄 짧은 한글 라벨 — 여러 화면(멜로디 스텝 목록, 재생 버튼, 채점 패널)에서
         /// 같은 표기를 반복하지 않도록 한 곳에 모았다.
+        ///
+        /// **146절에 "3도/5도"에서 자리 이름으로 바뀌었다.** 보이스 리딩이 들어가면서 전위를
+        /// 쓰게 되어, 같은 성부가 화음마다 다른 구성음(근음/3도/5도)을 맡는다 — "3도"라고
+        /// 이름 붙은 성부가 실제로는 근음을 부르는 일이 생기므로 그 이름은 거짓이 된다.
+        /// 자리 이름은 언제나 참이고(성부 순서는 불변식으로 보장된다), 화성 지식이 없는 첫
+        /// 사용자에게도 "3도"보다 알아보기 쉽다.
         var koreanLabel: String {
             switch self {
-            case .bass: return "베이스"
-            case .third: return "3도"
-            case .fifth: return "5도"
+            case .bass: return "아랫소리"
+            case .third: return "가운뎃소리"
+            case .fifth: return "윗소리"
             }
         }
 
@@ -202,7 +216,14 @@ enum ChordGenerator {
                 results.append(lastValidHarmony)
                 continue
             }
-            let notes = buildHarmonyNotes(candidate: candidates[degree], melodyMIDINote: note.midiNote)
+            // 첫 화음은 기준이 될 직전 보이싱이 없으므로 근음 위치로 배치하고(레지스터를 여기서
+            // 정한다), 이후로는 그 자리에서 가장 적게 움직이는 배치를 고른다(146절).
+            let notes: [HarmonyNote]
+            if let previous = lastValidHarmony {
+                notes = voiceLedHarmonyNotes(candidate: candidates[degree], melodyMIDINote: note.midiNote, previous: previous)
+            } else {
+                notes = buildHarmonyNotes(candidate: candidates[degree], melodyMIDINote: note.midiNote)
+            }
             lastValidHarmony = notes
             results.append(notes)
         }
@@ -323,6 +344,99 @@ enum ChordGenerator {
         let third = innerVoiceNote(interval: .third, targetPitchClass: candidate.thirdPitchClass, bassMIDINote: bass.midiNote)
         let fifth = innerVoiceNote(interval: .fifth, targetPitchClass: candidate.fifthPitchClass, bassMIDINote: bass.midiNote)
         return [bass, third, fifth]
+    }
+
+    /// 화음 성부가 멜로디와 부딪히지 않도록 두는 최소 간격(반음) — 멜로디 바로 아래 반음에
+    /// 화음음을 놓으면 맥놀이가 심해서 편곡에서 피한다. 온음(2반음)까지는 띄운다.
+    private static let minimumMelodyClearance = 2
+
+    /// 화음 맨 윗소리가 멜로디에서 이 이상 멀어지지 않게 하는 상한(반음).
+    ///
+    /// **왜 필요한가**: 보이스 리딩은 "직전에서 적게 움직이기"만 보기 때문에, 그것만 두면
+    /// 멜로디가 한 옥타브를 올라가도 화음은 제자리에 머무는 게 항상 최소 비용이다 — 실제로
+    /// 덤프해보니 멜로디가 C5까지 오르는 동안 화음이 C3에 남아 간격이 17반음까지 벌어졌다.
+    /// 그러면 화음이 리드를 받쳐주는 게 아니라 저 아래 깔린 드론처럼 들린다. 아카펠라의 백킹
+    /// 성부는 리드 바로 아래 한 옥타브 안쪽에 붙어 있으므로 그걸 상한으로 강제한다 — 멜로디가
+    /// 그 밖으로 나가면 화음도 따라 올라갈 수밖에 없고, 그때 "어떻게 올라갈지"를 이동량이 정한다.
+    private static let maximumMelodyToTopVoiceGap = 12
+
+    /// 세 성부가 벌어질 수 있는 최대 폭(반음) — 화음을 닫힌 자리(close position)로 유지한다.
+    /// 옥타브를 자유롭게 고르게 두면 베이스만 저 아래로 떨어져 화음이 텅 빈 것처럼 들린다.
+    private static let maximumVoicingSpread = 12
+
+    /// **보이스 리딩(146절)** — 직전 보이싱에서 성부가 가장 적게 움직이는 배치를 고른다.
+    ///
+    /// **왜 필요한가**: `buildHarmonyNotes`는 화음마다 근음 위치 스택을 처음부터 다시 쌓는다.
+    /// 그래서 코드가 C→F로 가면 세 성부가 전부 5반음씩 같은 방향으로 옮겨간다(병행진행) —
+    /// 합창 편곡에서 제일 먼저 피하는 움직임이고, "화음이 딱딱하다"고 들리는 원인이다. 사람이
+    /// 편곡하면 공통음 C는 그대로 두고 E→F, G→A만 움직여서 총 3반음만 이동한다.
+    ///
+    /// 방법은 단순하다 — 코드 구성음 세 개를 놓을 수 있는 자리(옥타브)를 전부 훑어 조합을
+    /// 만들고, 직전 보이싱과 **음높이 순서대로 짝지어** 이동량 합이 가장 작은 걸 고른다.
+    /// 공통음을 붙잡는 배치는 그 성부의 이동량이 0이라 자연히 최소 비용이 되므로, 공통음 유지
+    /// 규칙을 따로 넣을 필요가 없다. 전위(어느 성부가 어느 화음음을 맡는지)도 정렬 결과로
+    /// 저절로 결정된다.
+    ///
+    /// 후보 수는 (구성음 3개 × 옥타브 두세 개)라 스무 개 남짓이다 — 노트마다 훑어도 부담이 없어
+    /// DP 없이 매 스텝 탐욕적으로 고른다(직전 한 스텝만 보므로 전체 최적은 아니지만, 화음
+    /// 진행 자체는 이미 Viterbi가 전역으로 정해뒀다).
+    private static func voiceLedHarmonyNotes(
+        candidate: ChordCandidate,
+        melodyMIDINote: Int,
+        previous: [HarmonyNote]
+    ) -> [HarmonyNote] {
+        let previousPitches = previous.map(\.midiNote).sorted()
+        guard previousPitches.count == 3 else {
+            return buildHarmonyNotes(candidate: candidate, melodyMIDINote: melodyMIDINote)
+        }
+
+        let ceiling = melodyMIDINote - minimumMelodyClearance
+        let floor = melodyMIDINote - maximumMelodyToTopVoiceGap - maximumVoicingSpread
+        let chordTones = [candidate.rootPitchClass, candidate.thirdPitchClass, candidate.fifthPitchClass]
+
+        // 각 구성음이 놓일 수 있는 자리들(멜로디 아래, 상한 안쪽의 모든 옥타브).
+        let placements: [[Int]] = chordTones.map { pitchClass in
+            stride(from: floor, through: ceiling, by: 1).filter { $0.mod(12) == pitchClass }
+        }
+        guard placements.allSatisfy({ !$0.isEmpty }) else {
+            return buildHarmonyNotes(candidate: candidate, melodyMIDINote: melodyMIDINote)
+        }
+
+        var bestVoicing: [Int]?
+        var bestCost = Int.max
+        for root in placements[0] {
+            for third in placements[1] {
+                for fifth in placements[2] {
+                    let voicing = [root, third, fifth].sorted()
+                    // 두 성부가 같은 자리에 겹치면 트라이어드가 완성되지 않는다.
+                    guard voicing[0] < voicing[1], voicing[1] < voicing[2] else { continue }
+                    // 리드 바로 아래에 닫힌 자리로 붙어 있어야 한다(위 두 상수 주석 참고).
+                    guard melodyMIDINote - voicing[2] <= maximumMelodyToTopVoiceGap else { continue }
+                    guard voicing[2] - voicing[0] <= maximumVoicingSpread else { continue }
+
+                    let cost = zip(voicing, previousPitches).reduce(0) { $0 + abs($1.0 - $1.1) }
+                    if cost < bestCost {
+                        bestCost = cost
+                        bestVoicing = voicing
+                    }
+                }
+            }
+        }
+
+        guard let voicing = bestVoicing else {
+            return buildHarmonyNotes(candidate: candidate, melodyMIDINote: melodyMIDINote)
+        }
+
+        // 낮은 자리부터 아랫소리/가운뎃소리/윗소리 — 이 정렬이 `Interval.displayOrder`가
+        // 기대는 "음높이 내림차순" 불변식을 그대로 지켜준다.
+        return zip([Interval.bass, .third, .fifth], voicing).map { interval, midiNote in
+            HarmonyNote(
+                interval: interval,
+                midiNote: midiNote,
+                frequency: NoteNameConverter.frequency(forMIDINote: midiNote),
+                pitchClass: midiNote.mod(12)
+            )
+        }
     }
 
     /// 3도/5도가 항상 베이스와 멜로디 "사이"에 들어갈 여유를 보장하는 최소 간격(반음).
