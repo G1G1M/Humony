@@ -213,4 +213,50 @@ final class VoiceHarmonyTrackBuilderTests: XCTestCase {
             melodySteps: steps, sourceBuffer: source, bufferLength: bufferLength, voices: [], rate: rate
         ).isEmpty)
     }
+
+    // MARK: - 스테레오 믹스 (145절)
+
+    func testMixedStereoTrackKeepsBufferLengthOnBothChannels() {
+        let (steps, source, bufferLength) = mixFixture
+        let (left, right) = VoiceHarmonyTrackBuilder.mixedStereoTrack(
+            melodySteps: steps, sourceBuffer: source, bufferLength: bufferLength,
+            voices: [.melody, .harmony(.bass), .harmony(.third), .harmony(.fifth)], rate: rate
+        )
+        XCTAssertEqual(left.count, bufferLength)
+        XCTAssertEqual(right.count, bufferLength)
+    }
+
+    /// 이 기능의 존재 이유 자체 — 성부가 좌우로 갈렸다면 두 채널이 같을 수 없다.
+    /// (모노로 합치던 예전 동작이라면 두 채널이 샘플 단위로 동일하다.)
+    func testMixedStereoTrackActuallySeparatesChannels() {
+        let (steps, source, bufferLength) = mixFixture
+        let (left, right) = VoiceHarmonyTrackBuilder.mixedStereoTrack(
+            melodySteps: steps, sourceBuffer: source, bufferLength: bufferLength,
+            voices: [.harmony(.third), .harmony(.fifth)], rate: rate
+        )
+
+        let maxDifference = zip(left, right).map { abs($0 - $1) }.max() ?? 0
+        XCTAssertGreaterThan(maxDifference, 0.001, "좌우 채널이 동일하다 — 팬이 적용되지 않았다")
+    }
+
+    /// 멜로디는 리드라서 정중앙이어야 한다 — 혼자 재생하면 좌우가 같아야 한다.
+    func testMixedStereoTrackKeepsMelodyCentered() {
+        let (steps, source, bufferLength) = mixFixture
+        let (left, right) = VoiceHarmonyTrackBuilder.mixedStereoTrack(
+            melodySteps: steps, sourceBuffer: source, bufferLength: bufferLength,
+            voices: [.melody], rate: rate
+        )
+        for (index, (l, r)) in zip(left, right).enumerated() {
+            XCTAssertEqual(l, r, accuracy: 1e-6, "\(index)번째 샘플에서 멜로디가 중앙이 아니다")
+        }
+    }
+
+    func testMixedStereoTrackWithNoVoicesIsEmpty() {
+        let (steps, source, bufferLength) = mixFixture
+        let (left, right) = VoiceHarmonyTrackBuilder.mixedStereoTrack(
+            melodySteps: steps, sourceBuffer: source, bufferLength: bufferLength, voices: [], rate: rate
+        )
+        XCTAssertTrue(left.isEmpty)
+        XCTAssertTrue(right.isEmpty)
+    }
 }

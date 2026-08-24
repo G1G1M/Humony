@@ -371,9 +371,11 @@ extension PracticeView {
 
         Task {
             let mixed = await Task.detached(priority: .userInitiated) {
-                // 성부가 몇 개든 WORLD 분석은 한 번만 돈다(`mixedTrack`). 화음 3성부는
-                // backingGain으로 낮춰 리드 멜로디가 앞으로 나온다(128절).
-                let track = VoiceHarmonyTrackBuilder.mixedTrack(
+                // 성부가 몇 개든 WORLD 분석은 한 번만 돈다(`mixedStereoTrack`). 화음 3성부는
+                // backingGain으로 낮춰 리드 멜로디가 앞으로 나온다(128절). 145절부터는 성부를
+                // 좌우로 벌려 스테레오로 섞는다 — 모노로 포개면 "여러 명"이 아니라 "두꺼워진
+                // 한 사람"으로 들린다.
+                let (left, right) = VoiceHarmonyTrackBuilder.mixedStereoTrack(
                     melodySteps: steps,
                     sourceBuffer: buffer,
                     bufferLength: bufferLength,
@@ -381,9 +383,14 @@ extension PracticeView {
                     rate: rate
                 )
                 // 합성음(122절)과 같은 이유로 화음 재생 전용 낮춘 목표 음량을 그대로 적용.
-                return AudioGain.applyFadeInOut(
-                    AudioGain.normalizeLoudness(track, targetRMS: 0.15, peakCeiling: 0.7),
-                    fadeSampleCount: Int(rate * 0.01)
+                // 좌우에 **같은** 게인이 걸려야 정위가 유지된다(`normalizeStereo`).
+                let (normalizedLeft, normalizedRight) = AudioGain.normalizeStereo(
+                    left: left, right: right, targetRMS: 0.15, peakCeiling: 0.7
+                )
+                let fadeSampleCount = Int(rate * 0.01)
+                return (
+                    AudioGain.applyFadeInOut(normalizedLeft, fadeSampleCount: fadeSampleCount),
+                    AudioGain.applyFadeInOut(normalizedRight, fadeSampleCount: fadeSampleCount)
                 )
             }.value
 
@@ -392,7 +399,7 @@ extension PracticeView {
             isPreparingHarmony = false
 
             do {
-                try voiceHarmonyPlayer.play(samples: mixed, sampleRate: rate) {
+                try voiceHarmonyPlayer.play(left: mixed.0, right: mixed.1, sampleRate: rate) {
                     if voiceHarmonyPlaybackGeneration == generation { isPlayingVoiceHarmony = false }
                 }
             } catch {

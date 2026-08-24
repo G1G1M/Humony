@@ -144,12 +144,85 @@ enum VoiceHarmonyTrackBuilder {
     ) -> [Float] {
         guard bufferLength > 0, rate > 0, !voices.isEmpty else { return [] }
 
+        let tracks = voiceTracks(
+            melodySteps: melodySteps,
+            sourceBuffer: sourceBuffer,
+            bufferLength: bufferLength,
+            voices: voices,
+            rate: rate,
+            backingGain: backingGain,
+            fadeDuration: fadeDuration,
+            crossfadeDuration: crossfadeDuration
+        )
+        return AudioGain.mix(tracks: tracks)
+    }
+
+    /// `mixedTrack`의 스테레오 판 — 성부를 좌우로 벌려서 섞는다.
+    ///
+    /// **왜 필요한가(145절)**: 사람 귀는 같은 방향에서 겹쳐 나는 소리를 잘 분리하지 못한다.
+    /// 네 성부를 전부 모노 정중앙에 더하면 화음이 "여러 사람"이 아니라 "두꺼워진 한 사람"으로
+    /// 들린다 — 실제 아카펠라 녹음이 자연스러운 큰 이유 하나가 성부가 공간적으로 떨어져 있다는
+    /// 점이다. 위치 값은 이미 `ChordGenerator.Interval.pan`에 정의돼 있었는데(52절에 근거까지
+    /// 적어두고) 재생 경로가 모노라 한 번도 쓰인 적이 없었다.
+    ///
+    /// 리드 멜로디는 정중앙에 둔다 — 화음이 좌우에서 리드를 감싸는 배치가 되어야 리드가
+    /// 묻히지 않는다.
+    static func mixedStereoTrack(
+        melodySteps: [MelodyStep],
+        sourceBuffer: [Float],
+        bufferLength: Int,
+        voices: [Voice],
+        rate: Double,
+        backingGain: Float = 0.65,
+        fadeDuration: Double = 0.01,
+        crossfadeDuration: Double = 0.04
+    ) -> (left: [Float], right: [Float]) {
+        guard bufferLength > 0, rate > 0, !voices.isEmpty else { return ([], []) }
+
+        let tracks = voiceTracks(
+            melodySteps: melodySteps,
+            sourceBuffer: sourceBuffer,
+            bufferLength: bufferLength,
+            voices: voices,
+            rate: rate,
+            backingGain: backingGain,
+            fadeDuration: fadeDuration,
+            crossfadeDuration: crossfadeDuration
+        )
+        let panned = zip(voices, tracks).map { voice, samples in
+            AudioGain.PannedTrack(samples: samples, pan: stereoPan(for: voice))
+        }
+        return AudioGain.mixToStereo(tracks: panned)
+    }
+
+    /// 성부를 스테레오 어디에 놓을지 — 리드는 정중앙, 화음은 `Interval.pan`을 따른다.
+    /// 140절과 같은 이유로 위치 값 자체는 `Interval` 한 곳에만 둔다(화면마다/함수마다 따로
+    /// 적으면 언젠가 반드시 갈린다).
+    private static func stereoPan(for voice: Voice) -> Float {
+        switch voice {
+        case .melody: return 0
+        case .harmony(let interval): return interval.pan
+        }
+    }
+
+    /// 성부별 트랙을 만든다 — 모노/스테레오 믹스가 공유하는 공통 부분.
+    /// WORLD 분석은 성부가 몇 개든 **한 번만** 돈다(143절).
+    private static func voiceTracks(
+        melodySteps: [MelodyStep],
+        sourceBuffer: [Float],
+        bufferLength: Int,
+        voices: [Voice],
+        rate: Double,
+        backingGain: Float,
+        fadeDuration: Double,
+        crossfadeDuration: Double
+    ) -> [[Float]] {
         let needsAnalysis = voices.contains { if case .harmony = $0 { return true } else { return false } }
         let analysis = needsAnalysis
             ? PitchShifterWorldAnalysis(samples: sourceBuffer, sampleRate: rate, d4cThreshold: harmonyD4CThreshold)
             : nil
 
-        let tracks: [[Float]] = voices.map { voice in
+        return voices.map { voice in
             if case .melody = voice {
                 return fitLength(sourceBuffer, to: bufferLength)
             }
@@ -167,8 +240,6 @@ enum VoiceHarmonyTrackBuilder {
             )
             return track.map { $0 * backingGain }
         }
-
-        return AudioGain.mix(tracks: tracks)
     }
 
     private struct Segment {

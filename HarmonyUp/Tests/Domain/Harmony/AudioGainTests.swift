@@ -58,6 +58,91 @@ final class AudioGainTests: XCTestCase {
     func testMixOfEmptyTracksReturnsEmpty() {
         XCTAssertEqual(AudioGain.mix(tracks: []), [])
     }
+
+    // MARK: - 스테레오 팬 (145절)
+
+    func testMixToStereoHardLeftPutsNothingInRightChannel() {
+        let track = AudioGain.PannedTrack(samples: [0.5, 0.5, 0.5], pan: -1)
+        let (left, right) = AudioGain.mixToStereo(tracks: [track])
+
+        assertFloatArrayEqual(left, [0.5, 0.5, 0.5], accuracy: 0.0001)
+        assertFloatArrayEqual(right, [0, 0, 0], accuracy: 0.0001)
+    }
+
+    func testMixToStereoHardRightPutsNothingInLeftChannel() {
+        let track = AudioGain.PannedTrack(samples: [0.5, 0.5], pan: 1)
+        let (left, right) = AudioGain.mixToStereo(tracks: [track])
+
+        assertFloatArrayEqual(left, [0, 0], accuracy: 0.0001)
+        assertFloatArrayEqual(right, [0.5, 0.5], accuracy: 0.0001)
+    }
+
+    // 등파워(equal-power) 팬 법칙의 핵심 — 정중앙에서 각 채널이 0.5가 아니라 1/√2(≈0.707)여야
+    // 좌우로 옮겨도 체감 음량이 일정하다. 0.5씩 나누는 선형 팬은 중앙에서 에너지가 √2배
+    // 작아져서 "가운데 성부만 뒤로 물러난" 것처럼 들린다.
+    func testMixToStereoCenterUsesEqualPowerNotHalfGain() {
+        let track = AudioGain.PannedTrack(samples: [1.0], pan: 0)
+        let (left, right) = AudioGain.mixToStereo(tracks: [track])
+
+        XCTAssertEqual(left[0], 0.7071, accuracy: 0.001)
+        XCTAssertEqual(right[0], 0.7071, accuracy: 0.001)
+    }
+
+    func testMixToStereoSumsOverlappingTracksPerChannel() {
+        let hardLeft = AudioGain.PannedTrack(samples: [0.2, 0.2], pan: -1)
+        let hardRight = AudioGain.PannedTrack(samples: [0.3, 0.3], pan: 1)
+        let (left, right) = AudioGain.mixToStereo(tracks: [hardLeft, hardRight])
+
+        assertFloatArrayEqual(left, [0.2, 0.2], accuracy: 0.0001)
+        assertFloatArrayEqual(right, [0.3, 0.3], accuracy: 0.0001)
+    }
+
+    func testMixToStereoLengthMatchesLongestTrack() {
+        let long = AudioGain.PannedTrack(samples: [0.1, 0.1, 0.1, 0.1], pan: 0)
+        let short = AudioGain.PannedTrack(samples: [0.1], pan: 0)
+        let (left, right) = AudioGain.mixToStereo(tracks: [long, short])
+
+        XCTAssertEqual(left.count, 4)
+        XCTAssertEqual(right.count, 4)
+    }
+
+    func testMixToStereoEmptyInputReturnsEmptyChannels() {
+        let (left, right) = AudioGain.mixToStereo(tracks: [])
+        XCTAssertEqual(left, [])
+        XCTAssertEqual(right, [])
+    }
+
+    // 스테레오 정규화에서 제일 중요한 불변식 — 채널마다 따로 게인을 재면 한쪽만 커져서
+    // 정위(定位)가 통째로 밀린다. 두 채널에 **같은** 게인이 걸려야 한다.
+    func testNormalizeStereoAppliesIdenticalGainToBothChannels() {
+        // 왼쪽이 오른쪽보다 4배 큰 상태 — 정규화 후에도 그 비율이 유지돼야 한다.
+        let left: [Float] = (0..<1000).map { Float(0.4 * sin(2.0 * Double.pi * 10.0 * Double($0) / 1000.0)) }
+        let right = left.map { $0 * 0.25 }
+
+        let (outLeft, outRight) = AudioGain.normalizeStereo(left: left, right: right, targetRMS: 0.25, peakCeiling: 0.98)
+
+        for (l, r) in zip(outLeft, outRight) where abs(l) > 0.0001 {
+            XCTAssertEqual(r / l, 0.25, accuracy: 0.001)
+        }
+    }
+
+    func testNormalizeStereoClampsCombinedPeakToCeiling() {
+        var left = [Float](repeating: 0.02, count: 1000)
+        left[500] = 0.9
+        let right = [Float](repeating: 0.02, count: 1000)
+
+        let (outLeft, outRight) = AudioGain.normalizeStereo(left: left, right: right, targetRMS: 0.25, peakCeiling: 0.7)
+
+        let peak = max(outLeft.map { abs($0) }.max() ?? 0, outRight.map { abs($0) }.max() ?? 0)
+        XCTAssertLessThanOrEqual(peak, 0.7 + 0.001)
+    }
+
+    func testNormalizeStereoSilentInputReturnsUnchanged() {
+        let silence = [Float](repeating: 0, count: 10)
+        let (left, right) = AudioGain.normalizeStereo(left: silence, right: silence)
+        XCTAssertEqual(left, silence)
+        XCTAssertEqual(right, silence)
+    }
 }
 
 // XCTestCase에 이름이 겹치는 멤버(예: XCTAssertEqual)를 추가하면 그 파일 안의 다른
