@@ -12,10 +12,16 @@ import UniformTypeIdentifiers
 /// 하면 된다.
 extension PracticeView {
 
-    /// 파일에서 받아들이는 악보 형식. 사진은 파일 앱에서 골라도 되고(여기 `.image`),
-    /// 앨범이나 카메라에서 바로 가져와도 된다(156절).
+    /// 파일 고르기에서 열어줄 형식.
+    ///
+    /// **`.data`를 넣어 사실상 모든 파일을 고를 수 있게 한다.** 형식 목록으로 조이면 정작
+    /// 넣어야 할 파일이 회색으로 비활성화되는 일이 생긴다 — `.musicxml`처럼 시스템에 등록된
+    /// 타입이 없는 확장자는 파일마다 임시 타입(dynamic UTI)이 붙어 목록과 안 맞을 수 있고,
+    /// 같은 MusicXML이어도 어디서 받았느냐에 따라 `public.xml`이 아니라 그냥 데이터로 잡히기도
+    /// 한다. 무엇을 받아들이는지는 고른 **뒤에** 확장자로 판단하고, 아니면 무엇을 넣어야
+    /// 하는지 알려주는 편이 사용자에게 훨씬 낫다(`ScoreImporter.load` + `importErrorMessage`).
     static var scoreContentTypes: [UTType] {
-        [UTType(filenameExtension: "musicxml"), UTType.xml, UTType.midi, UTType.image]
+        [UTType(filenameExtension: "musicxml"), UTType(filenameExtension: "mxl"), UTType.xml, UTType.midi, UTType.image, UTType.data]
             .compactMap { $0 }
     }
 
@@ -96,21 +102,28 @@ extension PracticeView {
                 // 사용자에게는 무엇을 하면 되는지를 말한다 — 원인 코드가 아니라(UI 크리틱 P1).
                 importedScore = nil
                 importedScoreName = nil
-                scoreImportMessage = Self.importErrorMessage(error)
+                scoreImportMessage = Self.importErrorMessage(error, fileName: url.lastPathComponent)
+                #if DEBUG
+                print("[PracticeView] 악보 파일 읽기 실패 — \(url.lastPathComponent) (\(url.pathExtension)): \(error)")
+                #endif
             }
 
         case let .failure(error):
+            // 시트를 그냥 닫은 것은 실패가 아니다 — 에러 문구를 띄우면 뭘 잘못한 것처럼 보인다.
+            guard (error as NSError).code != NSUserCancelledError else { return }
             scoreImportMessage = "악보를 열지 못했어요 — \(error.localizedDescription)"
         }
     }
 
-    static func importErrorMessage(_ error: Error) -> String {
+    static func importErrorMessage(_ error: Error, fileName: String? = nil) -> String {
         guard let importError = error as? ScoreImporter.ImportError else {
             return "악보를 읽지 못했어요 — 다른 파일로 시도해주세요"
         }
+        // 무엇을 골랐는지 되짚어주면 "왜 안 되지"를 훨씬 빨리 안다(특히 .mxl 같은 사촌 형식).
+        let picked = fileName.map { "\u{2018}\($0)\u{2019}은 " } ?? ""
         switch importError {
         case .unsupportedFileType:
-            return "악보 사진이나 MusicXML(.musicxml/.xml)·MIDI(.mid) 파일이 필요해요 — PDF는 캡처해서 사진으로 넣어주세요"
+            return picked + "지원하지 않는 형식이에요 — 악보 사진이나 MusicXML(.musicxml/.xml/.mxl)·MIDI(.mid)가 필요해요. PDF는 캡처해서 사진으로 넣어주세요"
         case .malformed:
             return "악보를 읽지 못했어요 — 다른 파일이나 사진으로 시도해주세요"
         case .noNotesFound:

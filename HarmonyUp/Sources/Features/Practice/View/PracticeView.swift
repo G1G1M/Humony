@@ -241,7 +241,14 @@ struct PracticeView: View {
             allowedContentTypes: Self.scoreContentTypes,
             allowsMultipleSelection: false
         ) { result in
-            handleScoreImport(result.map { $0.first ?? URL(fileURLWithPath: "") })
+            switch result {
+            case let .success(urls):
+                // 고른 게 없으면(시트를 그냥 닫음) 아무 일도 일어나지 않아야 한다.
+                guard let url = urls.first else { return }
+                handleScoreImport(.success(url))
+            case let .failure(error):
+                handleScoreImport(.failure(error))
+            }
         }
         .photosPicker(isPresented: $isPickingScorePhoto, selection: $pickedScorePhoto, matching: .images)
         .onChange(of: pickedScorePhoto) { _, item in
