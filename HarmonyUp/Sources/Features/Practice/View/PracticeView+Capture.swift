@@ -267,6 +267,15 @@ extension PracticeView {
             // 그 밖의 원인을 가르는 가장 빠른 단서다(조성이 틀리면 그 위에 쌓는 화음이 전부
             // 어긋나므로, 낮은 신뢰도로 통과한 조성인지부터 봐야 한다).
             print(String(format: "[PracticeView] 감지된 조성: %@ (신뢰도 %.2f)", key.name, key.confidence))
+            // 148절 — 신뢰도가 낮을 때 "왜 낮은지"는 2위를 봐야 안다. 나란한조 모호성(무해)과
+            // 이웃 조성 혼동(화음 중심이 어긋남)이 둘 다 낮은 신뢰도로 나오기 때문이다.
+            let weighted = melodySteps.map {
+                KeyDetector.WeightedNote(pitchClass: $0.midiNote.mod(12), duration: $0.duration ?? 0)
+            }
+            let ranked = KeyDetector.topCandidates(notes: weighted)
+                .map { String(format: "%@ %.4f", $0.name, $0.score) }
+                .joined(separator: " / ")
+            print("[PracticeView] 조성 후보 상위: \(ranked)")
         }
         let stepLog = melodySteps.map { step -> String in
             guard let voices = step.harmonyVoices else { return "\(step.noteName)(화음없음-온음계밖)" }

@@ -91,6 +91,34 @@ enum KeyDetector {
         return DetectedKey(tonicPitchClass: best.tonic, mode: best.mode, confidence: confidence)
     }
 
+    /// 진단용 — 상위 후보를 점수와 함께 돌려준다(148절).
+    ///
+    /// 신뢰도 숫자 하나만으로는 "왜 낮은지"를 알 수 없다. 나란한조(구성음이 같아 화음 품질에
+    /// 영향이 거의 없음)와 이웃 조성(으뜸음이 달라 화음 중심이 어긋남)은 둘 다 낮은 신뢰도로
+    /// 나오지만 심각도가 완전히 다르다 — 2위가 무엇인지 봐야 갈린다. 실제로 이 구분이
+    /// 148절 수정의 출발점이었고, 그때는 로그를 손으로 재현해서 알아내야 했다.
+    static func topCandidates(notes: [WeightedNote], count: Int = 3) -> [(name: String, score: Double)] {
+        guard !notes.isEmpty else { return [] }
+
+        var pitchClassProfile = [Double](repeating: 0, count: 12)
+        for note in notes {
+            pitchClassProfile[note.pitchClass] += note.duration
+        }
+        let finalPitchClass = notes.last?.pitchClass
+
+        let scored = (0..<12).flatMap { tonic -> [(name: String, score: Double)] in
+            let bonus = tonic == finalPitchClass ? finalNoteTonicBonus : 0
+            return [
+                (DetectedKey(tonicPitchClass: tonic, mode: .major, confidence: 0).name,
+                 pearsonCorrelation(pitchClassProfile, rotate(majorProfile, toTonic: tonic)) + bonus),
+                (DetectedKey(tonicPitchClass: tonic, mode: .minor, confidence: 0).name,
+                 pearsonCorrelation(pitchClassProfile, rotate(minorProfile, toTonic: tonic)) + bonus)
+            ]
+        }.sorted { $0.score > $1.score }
+
+        return Array(scored.prefix(count))
+    }
+
     /// key profile은 "C를 으뜸음으로 하는 조성" 기준으로 정의돼 있으므로,
     /// 다른 으뜸음의 조성을 만들려면 배열을 그만큼 회전시킨다.
     private static func rotate(_ profile: [Double], toTonic tonic: Int) -> [Double] {
