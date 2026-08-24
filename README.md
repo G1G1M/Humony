@@ -10,6 +10,7 @@
 | | |
 |---|---|
 | **녹음 → 채보** | 한 소절을 부르면 음표별 음높이·시작시각·길이를 뽑아냅니다 |
+| **악보와 대조** | 부른 뒤 악보를 붙이면 채보를 그 악보에 맞춰 다듬습니다. 악보는 **사진으로 찍어도** 되고 MusicXML·MIDI 파일이어도 됩니다 |
 | **화음 생성** | 조성을 판별하고, 노트 시퀀스 전체의 문맥을 보고(HMM + Viterbi) 베이스·3도·5도를 얹습니다 |
 | **내 목소리로 듣기** | 만들어진 화음을 사용자 본인 목소리로 재생합니다 |
 | **악보** | 멜로디와 3성부를 4단 오선보로 그립니다 |
@@ -46,16 +47,20 @@ HarmonyUp/Sources/
 ### 파이프라인
 
 ```
-마이크 → 녹음 → 음표 추출 → 조성 판별 → 화음 생성 ─┬→ 악보 (4성부)
-                                                  ├→ 재생 (내 목소리 화음)
-                                                  └→ 채점 → 기록
+마이크 → 녹음 → 음표 추출 ─(악보가 있으면 대조·교정)→ 조성 판별 → 화음 생성 ─┬→ 악보 (4성부)
+                                                                            ├→ 재생 (내 목소리 화음)
+                                                                            └→ 채점 → 기록
 ```
+
+악보는 선택입니다 — 붙이지 않으면 위 흐름이 그대로 돌고, 붙였는데 잘 맞지 않으면 교정을
+포기하고 부른 그대로 갑니다.
 
 | 갈래 | 하는 일 | 핵심 타입 |
 |---|---|---|
 | `Domain/Pitch` | 기본 주파수 검출, 무음 필터, 음정 판정 | `YINPitchDetector`, `PitchScorer` |
 | `Domain/Melody` | 녹음을 음표로 자르기, 조성 판별, 템포 추정과 리듬 표기 | `MelodySegmenter`, `KeyDetector`, `TempoEstimator` |
 | `Domain/Harmony` | 코드 진행 선택, 피치 시프트, 성부 트랙 합성 | `ChordGenerator`, `PitchShifterWorld`, `VoiceHarmonyTrackBuilder` |
+| `Domain/Score` | 악보를 읽어 채보의 "정답지"로 쓰기 — 사진 해독, 조옮김 추정, 정렬·교정 | `SheetMusicImageReader`, `TranspositionEstimator`, `MelodyScoreCorrector` |
 | `Domain/Scoring` | 부른 음 시퀀스를 목표 성부와 정렬해 채점 | `HarmonyPracticeScorer` |
 
 `Domain/`은 전부 순수 함수로 두고 유닛테스트로 고정합니다. 오디오 품질 문제는 실기기 청취로만
@@ -70,7 +75,7 @@ xcodebuild -project HarmonyUp.xcodeproj -scheme HarmonyUp \
   -destination 'platform=iOS Simulator,name=iPad Air 11-inch (M3)' test
 ```
 
-유닛테스트 220개. `.xcodeproj`는 커밋하지 않고 `project.yml`에서 생성합니다.
+유닛테스트 394개. `.xcodeproj`는 커밋하지 않고 `project.yml`에서 생성합니다.
 
 ## 문서
 
