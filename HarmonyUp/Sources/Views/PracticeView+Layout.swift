@@ -125,19 +125,23 @@ extension PracticeView {
             // 편한 폭)를 다양한 실제 화면 크기에서도 지키기 위한 안전장치.
             let controlWidth = min(480, max(300, geo.size.width * 0.4))
 
-            HStack(alignment: .top, spacing: Theme.Spacing.lg) {
-                if isControlPanelLeading {
-                    controlColumn
-                        .frame(width: controlWidth)
-                    Divider()
-                    scoreColumn
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    scoreColumn
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    Divider()
-                    controlColumn
-                        .frame(width: controlWidth)
+            // 조작부/악보부 두 큰 글래스 판이 나란히 놓이는 자리 — 화면에서 가장 넓은 글래스 면적이라
+            // 컨테이너로 묶는 이득(샘플링 합치기)이 가장 크다.
+            Theme.glassGroup {
+                HStack(alignment: .top, spacing: Theme.Spacing.lg) {
+                    if isControlPanelLeading {
+                        controlColumn
+                            .frame(width: controlWidth)
+                        Divider()
+                        scoreColumn
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        scoreColumn
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        Divider()
+                        controlColumn
+                            .frame(width: controlWidth)
+                    }
                 }
             }
             // 135절 — 좌우 여백을 컬럼 사이 간격(Theme.Spacing.lg)과 같은 값으로 맞췄다. 예전엔
@@ -308,27 +312,31 @@ extension PracticeView {
         // 개가 스피커로 나가면 마이크 피드백 가드(isPlayingVoiceHarmony 등) 판단이 꼬이기 쉽다.
         let anyPlaybackActive = isPlayingVoiceHarmony || playingSoloVoice != nil
 
-        return VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-            Button {
-                toggleVoiceHarmonyPlayback()
-            } label: {
-                Label(isPlayingVoiceHarmony ? "정지" : "내 목소리로 화음 듣기", systemImage: isPlayingVoiceHarmony ? "stop.fill" : "play.fill")
-                    .frame(maxWidth: .infinity)
-            }
-            .harmonyButtonStyle(prominent: true)
-            .disabled(anyPlaybackActive && !isPlayingVoiceHarmony)
+        // 재생 버튼 1개 + 성부 4행 × 2개 = 글래스 표면이 최대 9장 겹치는 자리라, 낱개로 두지 않고
+        // 네이티브 컨테이너로 묶는다(Theme.glassGroup 주석 참고 — 서로 섞이게 하고 샘플링 비용도 합친다).
+        return Theme.glassGroup {
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                Button {
+                    toggleVoiceHarmonyPlayback()
+                } label: {
+                    Label(isPlayingVoiceHarmony ? "정지" : "내 목소리로 화음 듣기", systemImage: isPlayingVoiceHarmony ? "stop.fill" : "play.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .harmonyButtonStyle(prominent: true)
+                .disabled(anyPlaybackActive && !isPlayingVoiceHarmony)
 
-            Label("성부별로 듣기", systemImage: "waveform")
-                .font(Theme.Typography.caption)
-                .foregroundStyle(.secondary)
-                .padding(.top, Theme.Spacing.xs)
+                Label("성부별로 듣기", systemImage: "waveform")
+                    .font(Theme.Typography.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, Theme.Spacing.xs)
 
-            // 128절 — 멜로디/베이스/3도/5도를 각각 따로 들어보는 성부별 솔로+뮤트.
-            VStack(spacing: 0) {
-                ForEach(Array(soloVoiceOptions.enumerated()), id: \.element.label) { index, option in
-                    voiceRow(option: option, anyPlaybackActive: anyPlaybackActive)
-                    if index < soloVoiceOptions.count - 1 {
-                        Divider()
+                // 128절 — 멜로디/베이스/3도/5도를 각각 따로 들어보는 성부별 솔로+뮤트.
+                VStack(spacing: 0) {
+                    ForEach(Array(soloVoiceOptions.enumerated()), id: \.element.label) { index, option in
+                        voiceRow(option: option, anyPlaybackActive: anyPlaybackActive)
+                        if index < soloVoiceOptions.count - 1 {
+                            Divider()
+                        }
                     }
                 }
             }
@@ -384,43 +392,46 @@ extension PracticeView {
     /// 안 되는 보조 기능이라 카드 배경 없이 작게 둔다. `TonePlayer`는 자체 오디오 엔진이라
     /// 아직 마이크가 켜지기 전(대기 상태)에만 노출되므로 되먹임 걱정이 없다.
     var startingNoteControls: some View {
-        HStack(spacing: Theme.Spacing.xs) {
-            // Picker(.menu 스타일)는 눌러야 할 것처럼 안 보인다는 피드백 — 재생 버튼과 똑같이
-            // Menu를 직접 써서 harmonyButtonStyle()을 입힌다(리퀴드 글래스 버튼과 동일한
-            // 시각적 무게감을 주기 위해 Button과 같은 방식으로 스타일링).
-            Menu {
-                ForEach(Array(stride(from: 48, through: 84, by: 1)), id: \.self) { midi in
-                    Button {
-                        startingNoteMIDI = midi
-                        startingNotePlayer.setFrequency(NoteNameConverter.frequency(forMIDINote: midi))
-                    } label: {
-                        Text(NoteNameConverter.convert(frequency: NoteNameConverter.frequency(forMIDINote: midi))?.noteName ?? "?")
+        // 음 선택 메뉴와 재생 버튼이 나란히 붙어 있는 작은 묶음 — 둘 다 글래스라 컨테이너로 묶는다.
+        Theme.glassGroup {
+            HStack(spacing: Theme.Spacing.xs) {
+                // Picker(.menu 스타일)는 눌러야 할 것처럼 안 보인다는 피드백 — 재생 버튼과 똑같이
+                // Menu를 직접 써서 harmonyButtonStyle()을 입힌다(리퀴드 글래스 버튼과 동일한
+                // 시각적 무게감을 주기 위해 Button과 같은 방식으로 스타일링).
+                Menu {
+                    ForEach(Array(stride(from: 48, through: 84, by: 1)), id: \.self) { midi in
+                        Button {
+                            startingNoteMIDI = midi
+                            startingNotePlayer.setFrequency(NoteNameConverter.frequency(forMIDINote: midi))
+                        } label: {
+                            Text(NoteNameConverter.convert(frequency: NoteNameConverter.frequency(forMIDINote: midi))?.noteName ?? "?")
+                        }
                     }
-                }
-            } label: {
-                Label(
-                    NoteNameConverter.convert(frequency: NoteNameConverter.frequency(forMIDINote: startingNoteMIDI))?.noteName ?? "?",
-                    systemImage: "tuningfork"
-                )
-                .font(Theme.Typography.caption)
-            }
-            .harmonyButtonStyle()
-            .controlSize(.small)
-            // controlSize(.small)만으로는 실제 탭 영역이 HIG 최소 44×44pt보다 작아질 수 있어서
-            // (크리틱 P2) — 시각적 크기(작은 알약)는 그대로 두고 탭 영역만 프레임으로 넓힌다.
-            .frame(minWidth: 44, minHeight: 44)
-            .accessibilityLabel("첫음 선택")
-
-            Button {
-                toggleStartingNotePlayback()
-            } label: {
-                Image(systemName: isPlayingStartingNote ? "stop.fill" : "play.fill")
+                } label: {
+                    Label(
+                        NoteNameConverter.convert(frequency: NoteNameConverter.frequency(forMIDINote: startingNoteMIDI))?.noteName ?? "?",
+                        systemImage: "tuningfork"
+                    )
                     .font(Theme.Typography.caption)
+                }
+                .harmonyButtonStyle()
+                .controlSize(.small)
+                // controlSize(.small)만으로는 실제 탭 영역이 HIG 최소 44×44pt보다 작아질 수 있어서
+                // (크리틱 P2) — 시각적 크기(작은 알약)는 그대로 두고 탭 영역만 프레임으로 넓힌다.
+                .frame(minWidth: 44, minHeight: 44)
+                .accessibilityLabel("첫음 선택")
+
+                Button {
+                    toggleStartingNotePlayback()
+                } label: {
+                    Image(systemName: isPlayingStartingNote ? "stop.fill" : "play.fill")
+                        .font(Theme.Typography.caption)
+                }
+                .harmonyButtonStyle()
+                .controlSize(.small)
+                .frame(minWidth: 44, minHeight: 44)
+                .accessibilityLabel(isPlayingStartingNote ? "첫음 재생 정지" : "첫음 듣기")
             }
-            .harmonyButtonStyle()
-            .controlSize(.small)
-            .frame(minWidth: 44, minHeight: 44)
-            .accessibilityLabel(isPlayingStartingNote ? "첫음 재생 정지" : "첫음 듣기")
         }
         .foregroundStyle(.secondary)
     }

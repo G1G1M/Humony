@@ -19,21 +19,24 @@ extension PracticeView {
 
     /// 채점 카드 — 136절부터 여닫기 없이 항상 펼쳐져 있다("바로 불러서 채점할 수 있게" 요청).
     var scoringCard: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-            Label("따라 부르기 채점", systemImage: "target")
-                .font(Theme.Typography.caption)
-                .foregroundStyle(.secondary)
-                .padding(.top, Theme.Spacing.xs)
+        // 세그먼트 피커 + 버튼 2개 + 결과 영역이 모두 글래스 위에 놓이는 묶음.
+        Theme.glassGroup {
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                Label("따라 부르기 채점", systemImage: "target")
+                    .font(Theme.Typography.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, Theme.Spacing.xs)
 
-            voicePicker
-            targetPreview
+                voicePicker
+                targetPreview
 
-            HStack(spacing: Theme.Spacing.sm) {
-                listenButton
-                singButton
+                HStack(spacing: Theme.Spacing.sm) {
+                    listenButton
+                    singButton
+                }
+
+                scoringStatusContent
             }
-
-            scoringStatusContent
         }
     }
 

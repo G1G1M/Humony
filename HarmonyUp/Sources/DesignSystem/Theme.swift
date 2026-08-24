@@ -77,20 +77,61 @@ enum Theme {
                 .frame(width: diameter, height: diameter)
         }
     }
+
+    /// 리퀴드 글래스 요소 여러 개가 가까이 모여 있는 묶음을 감싸는 **네이티브 컨테이너**
+    /// (`GlassEffectContainer`). 배포 타깃(17.0)을 올리지 않으려고 조건부로 감싼다 — 이전
+    /// 버전에서는 컨테이너 없이 내용만 그대로 통과시킨다.
+    ///
+    /// **왜 필요한가**: 글래스는 뒤에 있는 것을 실시간으로 굴절/블러해서 그리는 재질이라,
+    /// 낱개로 쓰면 요소마다 따로 배경을 샘플링한다. 애플이 여러 글래스 요소를 컨테이너로
+    /// 묶으라고 안내하는 이유가 둘이다 — (1) 묶인 요소들이 **하나의 유리판처럼** 서로를
+    /// 인식해 가까워지면 자연스럽게 섞이고(낱개일 때는 각자 따로 놀아 경계가 딱딱하게 보인다),
+    /// (2) 샘플링을 한 번으로 합쳐 **GPU 비용이 요소 수만큼 늘지 않는다**.
+    ///
+    /// 두 번째 이유가 이 앱에서는 특히 중요하다: 84·88절에서 "재생 중 웹뷰 렌더와 오디오가
+    /// CPU를 다퉈 소리가 밀린다"를 실제로 겪었고, 조작부에는 글래스 버튼이 최대 9개까지
+    /// (재생 1 + 성부 4행 × 2) 한 화면에 깔린다 — 녹음/재생 중에 그만큼의 실시간 블러가
+    /// 각자 돌면 같은 계열 문제가 재발할 수 있다.
+    @ViewBuilder
+    static func glassGroup<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer { content() }
+        } else {
+            content()
+        }
+    }
 }
 
 extension View {
     /// 카드형 배경(모서리 둥근 사각형)에 iOS 26+에서는 리퀴드 글래스를, 그 이전에서는 기존
     /// 시스템 시맨틱 배경색을 쓴다.
-    @ViewBuilder
     func harmonyGlassCard(cornerRadius: CGFloat = Theme.cardCornerRadius) -> some View {
+        harmonyGlass(
+            in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous),
+            fallback: Color(uiColor: .secondarySystemGroupedBackground)
+        )
+    }
+
+    /// 알약(캡슐) 모양 표면 — 녹음 중 타이머 배지처럼 콘텐츠 위에 떠 있는 작은 조각에 쓴다.
+    /// 예전엔 `.ultraThinMaterial`을 썼는데, 그건 리퀴드 글래스 이전 세대의 재질이라 같은
+    /// 화면의 다른 글래스 표면과 굴절/반사가 미묘하게 다르게 보인다 — 표면은 전부 같은
+    /// 재질 체계로 통일한다(iOS 26 미만에서는 그대로 `.ultraThinMaterial`로 남는다).
+    @ViewBuilder
+    func harmonyGlassCapsule() -> some View {
         if #available(iOS 26.0, *) {
-            self.glassEffect(.regular, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            self.glassEffect(.regular, in: Capsule())
         } else {
-            self.background(
-                Color(uiColor: .secondarySystemGroupedBackground),
-                in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-            )
+            self.background(.ultraThinMaterial, in: Capsule())
+        }
+    }
+
+    /// 임의의 도형에 리퀴드 글래스를 입히는 공통 구현 — 위 두 헬퍼가 도형만 바꿔 재사용한다.
+    @ViewBuilder
+    func harmonyGlass<S: Shape>(in shape: S, fallback: Color) -> some View {
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular, in: shape)
+        } else {
+            self.background(fallback, in: shape)
         }
     }
 

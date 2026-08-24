@@ -143,9 +143,11 @@ struct QuickRecordView: View {
                     .frame(height: waveformHeight)
                     .padding(Theme.Spacing.md)
                     .frame(maxWidth: .infinity)
-                    .background(
-                        Theme.tint.opacity(0.08),
-                        in: RoundedRectangle(cornerRadius: Theme.cardCornerRadius, style: .continuous)
+                    // 파형이 놓이는 판 — 손으로 칠한 틴트(0.08) 대신 다른 표면들과 같은
+                    // 글래스로 통일한다(iOS 26 미만에서는 예전 틴트 그대로).
+                    .harmonyGlass(
+                        in: RoundedRectangle(cornerRadius: Theme.cardCornerRadius, style: .continuous),
+                        fallback: Theme.tint.opacity(0.08)
                     )
 
                 // 135절 — 숨쉬듯 깜빡이는 REC 점을 시간 앞에 붙여, 숫자를 읽기 전에 "지금
@@ -158,40 +160,43 @@ struct QuickRecordView: View {
                 }
                 .padding(.horizontal, Theme.Spacing.sm)
                 .padding(.vertical, 4)
-                .background(.ultraThinMaterial, in: Capsule())
+                .harmonyGlassCapsule()
                 .padding(Theme.Spacing.sm)
             }
 
             ProgressView(value: min(elapsed, maxDuration), total: maxDuration)
                 .tint(Theme.tint)
 
-            HStack(spacing: Theme.Spacing.xl) {
-                Button(action: onCancel) {
-                    ZStack {
-                        Theme.glassCircle(tint: Color(uiColor: .tertiarySystemFill), diameter: cancelButtonDiameter)
-                        Image(systemName: "xmark")
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundStyle(.secondary)
+            // 취소/정지 두 글래스 원이 나란히 있는 묶음.
+            Theme.glassGroup {
+                HStack(spacing: Theme.Spacing.xl) {
+                    Button(action: onCancel) {
+                        ZStack {
+                            Theme.glassCircle(tint: Color(uiColor: .tertiarySystemFill), diameter: cancelButtonDiameter)
+                            Image(systemName: "xmark")
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
                     }
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("녹음 취소")
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("녹음 취소")
 
-                Button(action: onStop) {
-                    ZStack {
-                        // 마이크가 지금 듣고 있는 음량에 맞춰 부드럽게 커지는 헤일로 — 값이 튈
-                        // 때마다 뚝뚝 끊기지 않도록 스프링으로 감싼다(WaveformView와 같은 곡선).
-                        // 조용한 구간에도 완전히 멈춰 있지 않도록 아주 약한 숨쉬기(breathing)를
-                        // 겹쳐서, 음량 반응이 없을 때도 "살아있다"는 느낌을 유지한다.
-                        RecordingHalo(currentLevel: currentLevel, baseDiameter: stopButtonDiameter)
-                        Theme.glassCircle(tint: .red, diameter: stopButtonDiameter)
-                        Image(systemName: "stop.fill")
-                            .font(.system(size: 28, weight: .semibold))
-                            .foregroundStyle(.white)
+                    Button(action: onStop) {
+                        ZStack {
+                            // 마이크가 지금 듣고 있는 음량에 맞춰 부드럽게 커지는 헤일로 — 값이 튈
+                            // 때마다 뚝뚝 끊기지 않도록 스프링으로 감싼다(WaveformView와 같은 곡선).
+                            // 조용한 구간에도 완전히 멈춰 있지 않도록 아주 약한 숨쉬기(breathing)를
+                            // 겹쳐서, 음량 반응이 없을 때도 "살아있다"는 느낌을 유지한다.
+                            RecordingHalo(currentLevel: currentLevel, baseDiameter: stopButtonDiameter)
+                            Theme.glassCircle(tint: .red, diameter: stopButtonDiameter)
+                            Image(systemName: "stop.fill")
+                                .font(.system(size: 28, weight: .semibold))
+                                .foregroundStyle(.white)
+                        }
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("녹음 그만")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("녹음 그만")
             }
         }
         .padding(.horizontal, Theme.Spacing.lg)
