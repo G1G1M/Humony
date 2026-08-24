@@ -289,9 +289,39 @@ extension PracticeView {
             scoringResult = scored
             scoringResultVoice = voice
             scoringPhase = .result
+            saveAttempt(result: scored, interval: voice)
             // 실시간 프레임 햅틱(3프레임 유지) 대신, 채점이 끝난 순간 결과에 맞춰 한 번 울린다.
             scoringSuccessHaptic.notificationOccurred(scored.onPitchRatio >= 0.7 ? .success : .warning)
         }
+    }
+
+    // MARK: - 기록 저장
+
+    /// 채점 결과를 기록으로 남긴다 — 같은 녹음에서 성부를 바꿔 여러 번 채점하면 **하나의
+    /// 세션 아래**에 시도가 쌓인다(`currentSession`을 재사용). 그래야 기록 탭에서
+    /// "이 녹음에서 3도 82%, 5도 71%"처럼 한 세션으로 묶여 보인다.
+    func saveAttempt(result: HarmonyPracticeScorer.Result, interval: ChordGenerator.Interval) {
+        let session = currentSession ?? makeSession()
+        guard let session else { return }
+
+        let attempt = PracticeAttempt(result: result, interval: interval, date: Date())
+        attempt.session = session
+        modelContext.insert(attempt)
+
+        // SwiftUI의 autosave는 저장 시점이 시스템 타이밍(백그라운드 전환 등)에 맡겨져 있다 —
+        // insert 직후 세션을 리셋하거나 앱이 예기치 않게 종료되면 그 사이 저장이 안 될 수 있다.
+        // 채점 시도 하나하나가 사용자에게 의미있는 기록이라 명시적으로 즉시 저장한다.
+        try? modelContext.save()
+    }
+
+    /// 이번 녹음에 대응하는 세션을 처음 만든다 — 그때 부른 멜로디와 화음까지 스냅샷으로 담아서,
+    /// 기록에서 그때의 악보를 다시 볼 수 있게 한다(오디오는 저장하지 않는다).
+    private func makeSession() -> PracticeSession? {
+        guard !melodySteps.isEmpty, let key = melodySession.detectedKey else { return nil }
+        let session = PracticeSession.snapshot(of: melodySteps, keyName: key.name, date: Date())
+        modelContext.insert(session)
+        currentSession = session
+        return session
     }
 
     /// 녹음 도중 "취소" — 분석을 돌리지 않고 지금까지 모은 소리를 버린다(빠른 녹음의

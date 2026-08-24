@@ -102,6 +102,10 @@ struct PracticeView: View {
     // 빠른 녹음 쪽 activeAnalysisToken과 같은 이유의 세대 토큰 — 뒤늦게 끝난 이전 채점 분석이
     // 새 시도의 결과를 덮어쓰지 않게 한다.
     @State var activeScoringToken: UUID?
+    // 이번 녹음에 대응하는 기록 세션 — 같은 녹음에서 성부를 바꿔 여러 번 채점하면 하나의 세션
+    // 아래에 시도가 쌓이게 하려고 들고 있는다. 첫 채점이 끝날 때 만들어지고(채점을 한 번도 안
+    // 하면 세션도 안 남는다 — 녹음만 하고 만 것을 기록으로 남길 이유가 없다), 새로 녹음하면 비운다.
+    @State var currentSession: PracticeSession?
     // 채점이 끝난 순간 한 번 울린다(실시간 프레임 햅틱은 이 흐름에선 의미가 없어졌다).
     let scoringSuccessHaptic = UINotificationFeedbackGenerator()
 

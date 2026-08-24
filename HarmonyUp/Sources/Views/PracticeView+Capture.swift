@@ -266,6 +266,14 @@ extension PracticeView {
         recentVoiceBuffer = analyzed.voiceSamples
         recentVoiceSampleRate = analyzed.sampleRate
 
+        // 새로 부른 노래는 새 기록 세션이다 — 이전 세션에 이 녹음의 채점을 덧붙이면 기록의
+        // 악보 스냅샷과 실제 채점 대상이 어긋난다("새로 부르기"는 좌측 맥락을 유지하는 흐름이라
+        // resetSession을 안 거치고 여기로 들어온다).
+        currentSession = nil
+        scoringPhase = .idle
+        scoringResult = nil
+        scoringResultVoice = nil
+
         hasCapturedNote = true
         quickRecordPhase = .result(noteCount: analyzed.notes.count)
         #if DEBUG
@@ -304,6 +312,7 @@ extension PracticeView {
         scoringResult = nil
         scoringResultVoice = nil
         activeScoringToken = nil
+        currentSession = nil
         melodySession.reset()
         hasCapturedNote = false
         melodySteps = []
