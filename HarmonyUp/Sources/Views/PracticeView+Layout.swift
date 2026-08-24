@@ -4,7 +4,9 @@ import UIKit
 /// `PracticeView`의 화면 레이아웃(컴팩트/레귤러 두 갈래)과, 두 레이아웃이 공유하는 캡처
 /// 영역·악보 카드 UI. 상태 선언과 `body`는 `PracticeView.swift`, 녹음 캡처 책임은
 /// `PracticeView+Capture.swift`에 있다. 채점(`PracticeView+Scoring.swift`, `scoringCard`)은
-/// 2026-08-20 화음 API 제거와 함께 화면에서 뺐다 — 코드는 남아있지만 이 파일에서 안 부른다.
+/// 116절에 화음 API를 걷어내며 화면에서 뺐다가, 화음이 다시 자리잡은 뒤 136절에 새 흐름
+/// (성부를 먼저 들어보고 → 소리를 끄고 → 한 소절을 통째로 불러 배치 채점)으로 되붙였다 —
+/// `captureHero` 안, 재생 조작부 바로 아래에 있다.
 extension PracticeView {
     var compactLayout: some View {
         NavigationStack {
@@ -279,6 +281,12 @@ extension PracticeView {
                 // 전부 여기(악보와 분리된 조작부)로 옮겼다.
                 if !recentVoiceBuffer.isEmpty {
                     playbackControls
+
+                    // 136절 — 채점을 다시 붙였다. 화음을 들어본 바로 아래에 이어서 두는 이유:
+                    // "먼저 들어보고 → 그 성부를 따라 부른다"는 흐름이 위아래로 자연스럽게 읽힌다.
+                    Divider()
+                        .padding(.vertical, Theme.Spacing.xs)
+                    scoringCard
                 }
             }
         }

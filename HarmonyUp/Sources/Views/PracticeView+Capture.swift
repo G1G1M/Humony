@@ -7,9 +7,9 @@ import AVFAudio
 /// (상태/body), `PracticeView+Layout.swift`(레이아웃)에 있다.
 extension PracticeView {
     /// 측정(마이크 캡처)이 꺼져 있으면 켠다. 이미 켜져 있으면 아무 것도 하지 않는다(중복 start 방지).
-    /// "녹음 시작"과 "채점하기" 둘 다 이걸 호출해서, 같은 audioCapture 하나를 상황에 맞게 공유한다 —
-    /// 실제로 무엇을 할지는 audioCapture의 콜백(startCaptureAfterPermissionGranted)이 그때그때의
-    /// quickRecordPhase/activeScoringInterval을 보고 판단한다.
+    /// "녹음 시작"(멜로디 캡처)과 "따라 부르기"(채점) 둘 다 이걸 호출해서, 같은 audioCapture 하나를
+    /// 상황에 맞게 공유한다 — 실제로 무엇을 할지는 audioCapture의 콜백
+    /// (startCaptureAfterPermissionGranted)이 그때그때의 quickRecordPhase/scoringPhase를 보고 판단한다.
     ///
     /// 마이크 권한을 먼저 확인한다 — 거부된 상태에서 그냥 start()를 호출하면 실패 이유가 눈에 잘
     /// 안 띄었다. 여기서 미리 걸러서 전용 UI(micPermissionDeniedContent)로 보여준다.
@@ -42,7 +42,10 @@ extension PracticeView {
 
     func startCaptureAfterPermissionGranted() {
         do {
-            try audioCapture.start { result, rawSamples, rawSampleRate in
+            // 이 콜백은 이제 피치 검출 결과(첫 파라미터)를 쓰지 않는다 — 멜로디 캡처든 채점이든
+            // 둘 다 "원본 샘플을 모아뒀다가 멈춘 뒤 한 번에 배치 분석"하는 방식이라, 프레임별
+            // 검출값이 필요한 소비자가 없어졌다(136절에 실시간 프레임 채점을 걷어낸 결과).
+            try audioCapture.start { _, rawSamples, rawSampleRate in
                 // 녹음/화음 재생 중엔 마이크를 무시한다 — 스피커로 낸 소리가 다시 마이크로
                 // 들어가는 피드백 루프를 막기 위한 기존 원칙(화음 재생 때부터 이어옴).
                 guard !isPlayingVoiceHarmony, playingSoloVoice == nil else { return }
@@ -66,20 +69,19 @@ extension PracticeView {
                     return
                 }
 
-                // 이 시점부터는 "따라 부르기 채점" 중에만 마이크가 켜져 있다 — 채점 대상이 없으면 할 게 없다.
-                guard let result, let interval = activeScoringInterval, let target = lockedScoringTargets[interval] else { return }
-
-                // 원본 프레임 주파수를 그대로 채점하면 비브라토/발성 흔들림 때문에 바늘이
-                // 지저분하게 튄다 — 스무딩을 거친 값으로 채점해서 "지금 대충 맞는지"가 잘 보이게 한다.
-                let smoothedFrequency = pitchSmoother.smooth(frequency: result.frequency)
-                let score = PitchScorer.score(sungFrequency: smoothedFrequency, targetFrequency: target.frequency)
-                latestScores[interval] = score
-                if let score {
-                    // 이번 시도가 끝나면 PracticeSummary로 압축해서 저장한다.
-                    scoreSampleBuffers[interval, default: []].append(score)
-                    updateOnPitchStreak(interval: interval, isOnPitch: score.isOnPitch)
-                } else {
-                    updateOnPitchStreak(interval: interval, isOnPitch: false)
+                // 이 시점부터는 "따라 부르기 채점" 녹음 중에만 마이크가 켜져 있다. 멜로디 캡처와
+                // 똑같이 원본을 모으기만 하고, 멈춘 뒤 stopScoringRecording()이 한 번에 분석한다 —
+                // 프레임마다 채점하지 않는 이유는 목표가 "한 음 유지"가 아니라 "한 소절 부르기"라서,
+                // 음정이 맞았는지는 부른 음을 다 잘라낸 뒤에야 목표 시퀀스와 맞춰볼 수 있기 때문이다.
+                guard scoringPhase == .recording else { return }
+                scoringBuffer.append(contentsOf: rawSamples)
+                scoringSampleRate = rawSampleRate
+                if !rawSamples.isEmpty {
+                    let meanSquare = rawSamples.reduce(Float(0)) { $0 + $1 * $1 } / Float(rawSamples.count)
+                    recordingLevel = min(1, sqrt(meanSquare) / recordingLevelNormalization)
+                }
+                if Double(scoringBuffer.count) / rawSampleRate >= quickRecordMaxDuration {
+                    stopScoringRecording()
                 }
             }
             isCapturing = true
@@ -286,9 +288,10 @@ extension PracticeView {
     }
 
     func resetSession() {
-        if let active = activeScoringInterval {
-            finalizeCurrentAttempt(interval: active) // 리셋 직전까지의 채점 시도도 버리지 않고 기록으로 남긴다
-        }
+        // 채점 녹음 중이었다면 그 소리는 버린다 — 예전엔 리셋 직전까지 쌓인 프레임 점수를 기록으로
+        // 남겼지만, 지금 채점은 "소절을 끝까지 부른 뒤 한 번에 채점"하는 단위라 중간에 끊긴 녹음은
+        // 애초에 채점 대상이 아니다(반쯤 부른 걸 점수로 남기면 기록이 오히려 왜곡된다).
+        cancelScoringRecording()
 
         voiceHarmonyPlayer.stop()
         isPlayingVoiceHarmony = false
@@ -296,15 +299,11 @@ extension PracticeView {
         soloVoicePlayer.stop()
         playingSoloVoice = nil
         recentVoiceBuffer = []
-        isScoringExpanded = false
-        lastSavedInterval = nil
-        activeScoringInterval = nil
-        lockedScoringTargets = [:]
-        latestScores = [:]
-        scoreSampleBuffers = [:]
-        onPitchStreak = [:]
-        onPitchHapticFired = [:]
-        pitchSmoother.reset()
+        scoringPhase = .idle
+        scoringBuffer = []
+        scoringResult = nil
+        scoringResultVoice = nil
+        activeScoringToken = nil
         melodySession.reset()
         hasCapturedNote = false
         melodySteps = []

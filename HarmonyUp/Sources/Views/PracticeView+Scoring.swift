@@ -1,203 +1,329 @@
 import SwiftUI
 import SwiftData
 
-/// `PracticeView`의 "따라 부르기 채점" 책임 — 채점 카드 UI, 성부별 채점 시작/중지, 시도
-/// 결과를 SwiftData로 저장. 나머지 책임은 `PracticeView.swift`(상태/body),
-/// `PracticeView+Layout.swift`(레이아웃), `PracticeView+VoiceHarmony.swift`(화음 재생),
+/// `PracticeView`의 "따라 부르기 채점" 책임 — 성부 선택, 먼저 들어보기, 소절 녹음, 배치 채점,
+/// 결과 표시. 나머지 책임은 `PracticeView.swift`(상태/body), `PracticeView+Layout.swift`(레이아웃),
 /// `PracticeView+Capture.swift`(녹음/분석)에 있다.
+///
+/// **136절, 채점 재설계**: 예전 채점은 "마지막 음 하나의 화음을 목표음으로 붙잡고 지속 발성"하는
+/// 실시간 프레임 채점이었다 — 이 앱의 목표는 한 음을 배우는 게 아니라 **멜로디에서 뽑아낸 화음
+/// 한 소절을 연습하는 것**이라 흐름째 바꿨다.
+///
+/// **듣기와 부르기를 시간상 분리한다**: 목표 성부를 재생하면서 동시에 채점하지 않는다. 그러면
+/// 스피커로 낸 화음이 마이크로 되돌아와 "사용자가 부른 음"으로 잘못 채점되는데, 그걸 막으려면
+/// 이어폰을 강제하거나 오디오 세션을 `.voiceChat`(하드웨어 에코 캔슬링)으로 바꿔야 한다 — 후자는
+/// 132절까지 튜닝해온 녹음 품질(YIN 정확도, WORLD 분석)에 영향이 갈 수 있다. 먼저 듣고, 소리를
+/// 끄고, 그다음 부르게 하면 그 위험을 아예 만들지 않는다(`startCaptureAfterPermissionGranted`의
+/// 기존 피드백 가드도 그대로 유효하다).
 extension PracticeView {
-    @ViewBuilder
+
+    /// 채점 카드 — 136절부터 여닫기 없이 항상 펼쳐져 있다("바로 불러서 채점할 수 있게" 요청).
     var scoringCard: some View {
-        if isScoringExpanded {
-            HarmonyCard("따라 부르기 채점", systemImage: "target") {
-                VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                    // "중지"로 채점 시도를 저장한 직후에만 잠깐 보인다 — 예전엔 저장이 조용히
-                    // 끝나서 정말 기록됐는지 알 방법이 없었다(크리틱 P3).
-                    if let lastSavedInterval {
-                        Label("\(lastSavedInterval.koreanLabel) 채점을 저장했어요 — 기록 탭에서 확인해보세요", systemImage: "checkmark.circle.fill")
-                            .font(Theme.Typography.caption)
-                            .foregroundStyle(Theme.pitchGood)
-                    }
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            Label("따라 부르기 채점", systemImage: "target")
+                .font(Theme.Typography.caption)
+                .foregroundStyle(.secondary)
+                .padding(.top, Theme.Spacing.xs)
 
-                    scoringPanel(for: .bass)
-                    Divider()
-                    scoringPanel(for: .third)
-                    Divider()
-                    scoringPanel(for: .fifth)
+            voicePicker
+            targetPreview
 
-                    Button {
-                        withAnimation(.easeOut(duration: 0.2)) { isScoringExpanded = false }
-                    } label: {
-                        Label("접기", systemImage: "chevron.up")
-                    }
-                    .harmonyButtonStyle()
-                    .frame(maxWidth: .infinity)
-                }
+            HStack(spacing: Theme.Spacing.sm) {
+                listenButton
+                singButton
             }
-        } else {
-            scoringDisclosureRow
+
+            scoringStatusContent
         }
     }
 
-    /// 채점 카드의 접힌 상태 — "내 목소리로 화음" 카드보다 눈에 띄게 가벼운 무게로 보이도록,
-    /// HarmonyCard(title3Bold 제목+큰 패딩)를 그대로 안 쓰고 작은 한 줄 디스클로저 행으로
-    /// 따로 만들었다. 탭하면 펼쳐지기만 할 뿐 채점을 자동 시작하진 않는다 — 성부별 "채점"
-    /// 버튼은 펼친 뒤에도 그대로 남아있다.
-    var scoringDisclosureRow: some View {
-        Button {
-            withAnimation(.easeOut(duration: 0.2)) { isScoringExpanded = true }
-        } label: {
-            HStack(spacing: Theme.Spacing.xs) {
-                Image(systemName: "target")
-                Text("따라 부르기 채점")
-                    .font(Theme.Typography.subheadline)
-                Spacer()
-                Image(systemName: "chevron.down")
-                    .font(Theme.Typography.caption2)
+    // MARK: - 조작부
+
+    /// 어느 성부를 연습할지 — 멜로디는 원곡 그대로라 연습 대상이 아니고, 화음 3성부만 고른다.
+    private var voicePicker: some View {
+        Picker("연습할 성부", selection: $scoringVoice) {
+            ForEach(ChordGenerator.Interval.allCases, id: \.self) { interval in
+                Text(interval.koreanLabel).tag(interval)
             }
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, Theme.Spacing.md)
-            .padding(.vertical, Theme.Spacing.sm)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .harmonyGlassCard()
         }
-        .buttonStyle(.plain)
+        .pickerStyle(.segmented)
+        // 녹음/채점 중에 목표가 바뀌면 방금 부른 소리를 엉뚱한 성부로 채점하게 된다.
+        .disabled(scoringPhase == .recording || scoringPhase == .analyzing)
     }
 
-    /// 성부(베이스/3도/5도) 하나에 대한 채점 패널 — 목표음, 바늘 미터, 시작/중지 버튼을 묶어서 보여준다.
-    /// 세 패널이 서로 독립적이라 latestScores[interval]만 각자 참조하고, 다른 쪽 상태에 영향받지 않는다.
+    /// 이 성부에서 불러야 할 음을 순서대로 보여준다 — "무엇을 불러야 하는지"를 소리로만
+    /// 알려주면 음이름을 눈으로 확인할 방법이 없다(악보에도 4성부가 다 나오지만, 지금 고른
+    /// 성부만 따로 뽑아 보여주는 게 연습 중에는 더 직접적이다).
     @ViewBuilder
-    func scoringPanel(for interval: ChordGenerator.Interval) -> some View {
-        let label = interval.koreanLabel
-        let isActive = activeScoringInterval == interval
-        let target = lockedScoringTargets[interval]
-        let score = latestScores[interval]
+    private var targetPreview: some View {
+        let targets = scoringTargetNoteNames
+        if targets.isEmpty {
+            Text("이 성부는 화음이 만들어지지 않았어요 — 다른 성부를 골라보세요")
+                .font(Theme.Typography.caption)
+                .foregroundStyle(Theme.warning)
+        } else {
+            Text("불러야 할 음: " + targets.joined(separator: " · "))
+                .font(Theme.Typography.caption)
+                .foregroundStyle(Theme.intervalColor(for: scoringVoice))
+        }
+    }
 
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                // 성부 이름을 HistoryView의 정확도 추이 차트와 같은 정체성 색으로 칠해서, 두
-                // 화면을 오갈 때도 "이건 3도 얘기구나"를 색으로 먼저 알아챌 수 있게 한다
-                // (Theme.intervalColor, 크리틱 "시각 정체성이 약하다" 지적 반영).
-                Text(label).font(Theme.Typography.subheadlineBold).foregroundStyle(Theme.intervalColor(for: interval))
-                if let target {
-                    Text(NoteNameConverter.convert(frequency: target.frequency)?.noteName ?? "?")
-                        .font(.system(.subheadline, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                }
+    private var listenButton: some View {
+        let voice = VoiceHarmonyTrackBuilder.Voice.harmony(scoringVoice)
+        let isPlaying = playingSoloVoice == voice
+        return Button {
+            toggleVoiceSolo(voice)
+        } label: {
+            Label(isPlaying ? "정지" : "먼저 들어보기", systemImage: isPlaying ? "stop.fill" : "ear")
+                .frame(maxWidth: .infinity)
+        }
+        .harmonyButtonStyle()
+        // 채점 녹음 중에 재생하면 그 소리가 그대로 마이크로 들어간다 — 이 흐름의 전제(듣기와
+        // 부르기를 시간상 분리)를 UI에서도 지킨다.
+        .disabled(scoringPhase == .recording || isPlayingVoiceHarmony || scoringTargetFrequencies.isEmpty)
+    }
+
+    @ViewBuilder
+    private var singButton: some View {
+        if scoringPhase == .recording {
+            Button {
+                stopScoringRecording()
+            } label: {
+                Label("그만 부르기", systemImage: "stop.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .harmonyButtonStyle(prominent: true)
+        } else {
+            Button {
+                startScoringRecording()
+            } label: {
+                Label(scoringPhase == .result ? "다시 부르기" : "따라 부르기", systemImage: "mic.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .harmonyButtonStyle(prominent: true)
+            .disabled(scoringPhase == .analyzing || playingSoloVoice != nil || isPlayingVoiceHarmony || scoringTargetFrequencies.isEmpty)
+        }
+    }
+
+    // MARK: - 상태별 내용
+
+    @ViewBuilder
+    private var scoringStatusContent: some View {
+        switch scoringPhase {
+        case .idle:
+            Text("먼저 들어본 다음, 소리를 끄고 그 성부를 처음부터 끝까지 불러보세요")
+                .font(Theme.Typography.caption)
+                .foregroundStyle(.secondary)
+
+        case .recording:
+            HStack(spacing: Theme.Spacing.sm) {
+                Circle()
+                    .fill(Theme.warning)
+                    .frame(width: 8, height: 8)
+                Text(String(format: "듣고 있어요 · %.1f초", Double(scoringBuffer.count) / scoringSampleRate))
+                    .font(.system(.caption, design: .monospaced))
                 Spacer()
-                Button {
-                    toggleScoring(interval: interval)
-                } label: {
-                    Label(isActive ? "중지" : "채점", systemImage: isActive ? "stop.fill" : "target")
-                }
-                .harmonyButtonStyle()
-                .disabled(!isActive && melodySession.suggestedHarmony == nil)
+                Button("취소") { cancelScoringRecording() }
+                    .font(Theme.Typography.caption)
             }
 
-            if score == nil && target == nil {
-                Text("아직 채점 안 함")
+        case .analyzing:
+            PulsingLoadingLabel(message: "채점하는 중이에요")
+
+        case .result:
+            if let result = scoringResult, let voice = scoringResultVoice {
+                scoringResultContent(result: result, voice: voice)
+            }
+
+        case .error(let message):
+            Label(message, systemImage: "exclamationmark.triangle.fill")
+                .font(Theme.Typography.caption)
+                .foregroundStyle(Theme.warning)
+        }
+    }
+
+    private func scoringResultContent(result: HarmonyPracticeScorer.Result, voice: ChordGenerator.Interval) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
+                Text(String(format: "%.0f%%", result.onPitchRatio * 100))
+                    .font(Theme.Typography.title3Bold)
+                    .foregroundStyle(result.onPitchRatio >= 0.7 ? Theme.pitchGood : Theme.warning)
+                Text("\(voice.koreanLabel) 정확도")
                     .font(Theme.Typography.caption)
                     .foregroundStyle(.secondary)
-            } else {
-                PitchMeterView(
-                    centsOffset: score?.centsOffset,
-                    isOnPitch: score?.isOnPitch ?? false,
-                    toleranceCents: PitchScorer.onPitchToleranceCents,
-                    intervalColor: Theme.intervalColor(for: interval)
-                )
-                if let score {
-                    Text(String(format: "%+.0f cent  %@", score.centsOffset, score.isOnPitch ? "✅ 정확" : "벗어남"))
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(score.isOnPitch ? Theme.pitchGood : .secondary)
-                }
+            }
+
+            Text(String(format: "평균 ±%.0f cent", result.averageAbsCentsOffset))
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.secondary)
+
+            // 절대값 평균만으론 "얼마나" 벗어났는지만 알 수 있다 — 부호 있는 평균을 같이 봐서
+            // "어느 쪽으로" 치우치는지 한 줄로 알려준다(연습에서 바로 고칠 수 있는 정보).
+            if let biasMessage = Self.biasMessage(signedCents: result.averageSignedCentsOffset) {
+                Text(biasMessage)
+                    .font(Theme.Typography.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if result.missedCount > 0 || result.extraCount > 0 {
+                Text(Self.missedExtraMessage(missed: result.missedCount, extra: result.extraCount))
+                    .font(Theme.Typography.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Divider()
+
+            ForEach(Array(result.steps.enumerated()), id: \.offset) { _, step in
+                scoringStepRow(step)
             }
         }
     }
 
-    /// 화음의 3도 또는 5도 음을 채점 목표로 고정한다. 같은 걸 다시 누르면 중지되고,
-    /// 채점 중에 다른 쪽을 누르면 멈추지 않고 그쪽 목표로 바로 전환된다 — 3도/5도를
-    /// 번갈아 연습할 때 매번 멈췄다 다시 시작할 필요가 없게. 각자의 최근 결과(latestScores)는
-    /// 전환하거나 중지해도 지워지지 않고 화면에 남아있는다 — 지워지는 건 "지금 채점 중"인지 여부뿐.
-    func toggleScoring(interval: ChordGenerator.Interval) {
-        if activeScoringInterval == interval {
-            // 예전엔 finalizeCurrentAttempt의 성공 여부와 무관하게 항상 "저장했어요"를
-            // 보여줬다 — 채점 샘플이 하나도 안 쌓인 채(예: 시작하자마자 바로 중지) "중지"를
-            // 누르면 finalizeCurrentAttempt가 guard let에서 조용히 아무것도 저장하지 않고
-            // 돌아오는데도 확인 메시지는 그대로 떴다. "채점후에 기록탭에 저장이 안 된다"는
-            // 제보의 실제 정체 — 저장이 실패한 게 아니라 애초에 저장할 샘플이 없었는데,
-            // 성공 메시지가 그걸 가려서 사용자가 알아챌 수 없었다. 이제 실제 저장 성공
-            // 여부로 메시지를 분기한다.
-            let saved = finalizeCurrentAttempt(interval: interval)
-            activeScoringInterval = nil
-            lastSavedInterval = saved ? interval : nil
-            if !saved {
-                statusText = "채점된 구간이 너무 짧아서 저장하지 못했어요 — 조금 더 길게 따라 불러주세요"
+    private func scoringStepRow(_ step: HarmonyPracticeScorer.StepResult) -> some View {
+        let targetName = Self.noteName(forMIDINote: step.targetMIDINote)
+        return HStack(spacing: Theme.Spacing.xs) {
+            Text(targetName)
+                .frame(minWidth: 34, alignment: .leading)
+            if let sung = step.sungMIDINote, let cents = step.centsOffset {
+                Text("→ \(Self.noteName(forMIDINote: sung))")
+                    .foregroundStyle(.secondary)
+                Text(String(format: "%+.0f¢", cents))
+                    .foregroundStyle(step.isOnPitch ? Theme.pitchGood : Theme.warning)
+                Spacer()
+                Image(systemName: step.isOnPitch ? "checkmark.circle.fill" : "xmark.circle")
+                    .foregroundStyle(step.isOnPitch ? Theme.pitchGood : .secondary)
+            } else {
+                Text("→ 안 부름")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Image(systemName: "minus.circle")
+                    .foregroundStyle(.secondary)
             }
-            return
         }
+        .font(.system(.caption, design: .monospaced))
+    }
 
-        // 다른 쪽을 채점하고 있었다면 그 시도부터 기록으로 남긴다.
-        if let previous = activeScoringInterval {
-            _ = finalizeCurrentAttempt(interval: previous)
-        }
+    // MARK: - 표시용 문구 (순수 함수 — 뷰 상태와 무관해서 테스트하기 쉽다)
 
-        guard let harmony = melodySession.suggestedHarmony,
-              let target = harmony.first(where: { $0.interval == interval }) else { return }
+    /// 부호 있는 평균 편차로 "높게/낮게 부르는 편"을 알려준다. 허용 오차(35cent)의 절반쯤부터
+    /// 말해주는데, 그보다 작으면 방향이라기보다 그냥 흔들림이라 조언이 되지 않는다.
+    static func biasMessage(signedCents: Double) -> String? {
+        let threshold = PitchScorer.onPitchToleranceCents / 2
+        guard abs(signedCents) >= threshold else { return nil }
+        return signedCents > 0 ? "전반적으로 살짝 높게 부르는 편이에요" : "전반적으로 살짝 낮게 부르는 편이에요"
+    }
 
-        lockedScoringTargets[interval] = target
-        activeScoringInterval = interval
-        lastSavedInterval = nil // 새 채점을 시작하면 직전 저장 확인 메시지는 지운다
-        pitchSmoother.reset() // 이전 채점(또는 다른 음)에서 쓰던 값이 새 채점에 섞여 들어가지 않도록
-        onPitchStreak[interval] = 0
-        onPitchHapticFired[interval] = false
-        scoringSuccessHaptic.prepare() // 실제 발화 전에 미리 준비해서 첫 확정 순간 지연 없이 울리게 한다.
+    static func missedExtraMessage(missed: Int, extra: Int) -> String {
+        var parts: [String] = []
+        if missed > 0 { parts.append("안 부른 음 \(missed)개") }
+        if extra > 0 { parts.append("목표에 없는 음 \(extra)개") }
+        return parts.joined(separator: " · ")
+    }
 
-        // "채점하기"를 눌렀는데 마이크가 꺼져 있으면 자동으로 켜준다.
+    static func noteName(forMIDINote midiNote: Int) -> String {
+        NoteNameConverter.convert(frequency: NoteNameConverter.frequency(forMIDINote: midiNote))?.noteName ?? "?"
+    }
+
+    // MARK: - 목표 시퀀스
+
+    var scoringTargetFrequencies: [Double] {
+        HarmonyPracticeScorer.targetFrequencies(from: melodySteps, interval: scoringVoice)
+    }
+
+    var scoringTargetNoteNames: [String] {
+        melodySteps.compactMap { $0.harmonyVoices?[scoringVoice] }
+    }
+
+    // MARK: - 녹음/채점 흐름
+
+    /// "따라 부르기" — 재생을 모두 끊고 마이크만 연다. 멜로디 캡처(`startQuickRecording`)와 같은
+    /// `audioCapture`를 공유하고, 콜백이 `scoringPhase`를 보고 이쪽 분기를 탄다.
+    func startScoringRecording() {
+        guard !scoringTargetFrequencies.isEmpty else { return }
+
+        // 듣기와 부르기는 절대 겹치지 않는다 — 재생 중이었다면 여기서 확실히 끊는다.
+        soloVoicePlayer.stop()
+        playingSoloVoice = nil
+        voiceHarmonyPlayer.stop()
+        isPlayingVoiceHarmony = false
+        startingNotePlayer.stop()
+        isPlayingStartingNote = false
+
+        scoringBuffer = []
+        scoringResult = nil
+        scoringResultVoice = nil
+        scoringPhase = .recording
         beginCapturingIfNeeded()
     }
 
-    /// 명세서(v1.0) "3프레임(약 140ms) 유지 확정 시 경쾌한 햅틱" 구현. 허용오차 진입 프레임이
-    /// 3번 연속(단음 캡처 확정과 같은 프레임 수 관례)이면 성공 햅틱을 한 번 울리고, 그 연속
-    /// 구간 동안은 다시 안 울린다 — 벗어났다가 다시 맞히면 새 연속 구간으로 보고 재발화한다.
-    func updateOnPitchStreak(interval: ChordGenerator.Interval, isOnPitch: Bool) {
-        guard isOnPitch else {
-            onPitchStreak[interval] = 0
-            onPitchHapticFired[interval] = false
-            return
+    /// "그만 부르기"(또는 60초 상한 도달) — 마이크를 멈추고 모은 녹음을 한 번에 채점한다.
+    func stopScoringRecording() {
+        guard scoringPhase == .recording else { return }
+        audioCapture.stop()
+        isCapturing = false
+        scoringPhase = .analyzing
+        recordingLevel = 0
+
+        let voice = scoringVoice
+        let targets = scoringTargetFrequencies
+        let samples = scoringBuffer
+        let rate = scoringSampleRate
+
+        // 빠른 녹음(activeAnalysisToken)과 같은 이유의 세대 토큰 — 타임아웃으로 이미 에러 처리한
+        // 뒤에도 백그라운드 세그멘테이션은 계속 돌 수 있고, 그 결과가 뒤늦게 도착해 사용자가
+        // 이미 시작한 다음 시도를 덮어쓰면 안 된다.
+        let token = UUID()
+        activeScoringToken = token
+        Task {
+            let scored = await Self.scoreWithTimeout(
+                samples: samples,
+                sampleRate: rate,
+                targets: targets,
+                timeout: analysisTimeout
+            )
+            guard activeScoringToken == token else { return }
+            guard let scored else {
+                scoringPhase = .error("채점이 너무 오래 걸리고 있어요 — 다시 시도해주세요")
+                return
+            }
+            scoringResult = scored
+            scoringResultVoice = voice
+            scoringPhase = .result
+            // 실시간 프레임 햅틱(3프레임 유지) 대신, 채점이 끝난 순간 결과에 맞춰 한 번 울린다.
+            scoringSuccessHaptic.notificationOccurred(scored.onPitchRatio >= 0.7 ? .success : .warning)
         }
-        let streak = (onPitchStreak[interval] ?? 0) + 1
-        onPitchStreak[interval] = streak
-        guard streak >= 3, onPitchHapticFired[interval] != true else { return }
-        onPitchHapticFired[interval] = true
-        scoringSuccessHaptic.notificationOccurred(.success)
     }
 
-    /// 지금까지 쌓인 채점 샘플들을 하나의 요약(PracticeSummary.Aggregate)으로 압축해서
-    /// SwiftData에 저장하고, 다음 시도를 위해 그 interval의 샘플 버퍼만 비운다.
-    /// - Returns: 실제로 저장했으면 true, 채점 샘플이 하나도 없어서(guard let 실패) 저장할
-    ///   게 없었으면 false — 호출부가 "저장했어요" 메시지를 실제 결과에 맞게 보여줄 수 있게.
-    @discardableResult
-    func finalizeCurrentAttempt(interval: ChordGenerator.Interval) -> Bool {
-        defer { scoreSampleBuffers[interval] = [] }
+    /// 녹음 도중 "취소" — 분석을 돌리지 않고 지금까지 모은 소리를 버린다(빠른 녹음의
+    /// `cancelQuickRecording`과 같은 역할). 세션 리셋에서도 이걸 쓴다.
+    func cancelScoringRecording() {
+        guard scoringPhase == .recording else { return }
+        audioCapture.stop()
+        isCapturing = false
+        scoringBuffer = []
+        scoringPhase = .idle
+        recordingLevel = 0
+    }
 
-        guard let target = lockedScoringTargets[interval],
-              let samples = scoreSampleBuffers[interval],
-              let aggregate = PracticeSummary.aggregate(scores: samples) else { return false }
-
-        let attempt = PracticeAttempt(
-            date: Date(),
-            intervalRawValue: interval.storageKey,
-            targetNoteName: NoteNameConverter.convert(frequency: target.frequency)?.noteName ?? "?",
-            sampleCount: aggregate.sampleCount,
-            onPitchRatio: aggregate.onPitchRatio,
-            averageAbsCentsOffset: aggregate.averageAbsCentsOffset
-        )
-        modelContext.insert(attempt)
-        // SwiftUI의 .modelContainer(for:) autosave는 저장 시점이 시스템 타이밍(백그라운드 전환
-        // 등)에 맡겨져 있다 — insert 직후 곧바로 세션을 리셋하거나 앱이 예기치 않게 종료되면
-        // 그 사이 저장이 안 될 수 있다. 채점 시도 하나하나가 사용자에게 의미있는 기록이라
-        // 명시적으로 즉시 저장한다.
-        try? modelContext.save()
-        return true
+    /// `MelodySegmenter`는 동기·취소 불가라 타임아웃과 경합시킨다 — 빠른 녹음의
+    /// `analyzeWithTimeout`과 같은 패턴이고, 이유도 같다(60초 녹음이면 YIN을 윈도우마다 도는
+    /// 비용이 커서 붙잡고 기다리는 대신 통제권을 사용자에게 돌려준다).
+    private static func scoreWithTimeout(
+        samples: [Float],
+        sampleRate: Double,
+        targets: [Double],
+        timeout: TimeInterval
+    ) async -> HarmonyPracticeScorer.Result? {
+        await withTaskGroup(of: HarmonyPracticeScorer.Result?.self) { group in
+            group.addTask {
+                HarmonyPracticeScorer.score(recordingSamples: samples, sampleRate: sampleRate, targetFrequencies: targets)
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                return nil
+            }
+            defer { group.cancelAll() }
+            return await group.next() ?? nil
+        }
     }
 }

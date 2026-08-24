@@ -85,37 +85,44 @@ struct PracticeView: View {
     // 녹음/재생 관련 짧은 피드백 메시지 — 가드 조건에 걸렸을 때 "왜 안 되는지"를 "내 목소리로 화음"
     // 카드에 알려주는 용도로만 쓴다. 결과/성공 메시지도 여기 담긴다.
     @State var statusText = ""
-    // 3도/5도를 각각 독립적으로 채점한다 — 하나 채점하다 다른 쪽으로 넘어가도
-    // 이전 것의 최근 결과(latestScores)는 화면에 그대로 남아있는다. 실제로 마이크가
-    // 매 순간 채점하는 대상은 하나(activeScoringInterval)뿐이지만, 그 결과와 사람이 부르는
-    // 동안 쌓인 샘플은 interval별로 따로 보관해서 서로 덮어쓰지 않게 한다.
-    @State var activeScoringInterval: ChordGenerator.Interval?
-    @State var lockedScoringTargets: [ChordGenerator.Interval: ChordGenerator.HarmonyNote] = [:]
-    @State var latestScores: [ChordGenerator.Interval: PitchScorer.Score] = [:]
-    @State var scoreSampleBuffers: [ChordGenerator.Interval: [PitchScorer.Score]] = [:]
-    // 명세서(v1.0) "3프레임(약 140ms) 유지 확정 시 경쾌한 햅틱" — 단음 캡처 모드의 "3프레임
-    // 연속 유지" 확정 관례(CLAUDE.md)와 같은 프레임 수 기준을 채점에도 적용한다. 허용오차
-    // 진입 프레임이 연속될 때만 세되, 한 번 울리면 그 연속 구간 안에서는 다시 안 울리게
-    // `onPitchHapticFired`로 막는다(계속 정확한 음을 유지하는 동안 매 프레임 울리면 시끄럽다) —
-    // 다시 벗어났다 맞히면 새 연속 구간으로 취급해 다시 한 번 울린다.
-    @State var onPitchStreak: [ChordGenerator.Interval: Int] = [:]
-    @State var onPitchHapticFired: [ChordGenerator.Interval: Bool] = [:]
+    // 136절, 채점 재설계 — "성부 하나를 골라 먼저 들어보고, 소리를 끄고, 그 성부 한 소절을
+    // 통째로 불러서 배치로 채점한다". 예전 채점은 목표음 하나를 붙잡고 지속 발성하는 실시간
+    // 프레임 채점이었는데(activeScoringInterval / latestScores / onPitchStreak 등), 이 앱의
+    // 목표는 한 음을 배우는 게 아니라 화음 한 소절을 부르는 것이라 흐름째 바꿨다. 재생과 녹음이
+    // 시간상 절대 겹치지 않으므로 마이크 피드백 가드(startCaptureAfterPermissionGranted)를
+    // 그대로 두고도 안전하다.
+    @State var scoringVoice: ChordGenerator.Interval = .third
+    @State var scoringPhase: ScoringPhase = .idle
+    @State var scoringBuffer: [Float] = []
+    @State var scoringSampleRate: Double = 44100
+    @State var scoringResult: HarmonyPracticeScorer.Result?
+    // 화면에 보이는 결과가 어느 성부의 것인지 — 결과를 본 뒤 다른 성부를 골라도 이전 결과가
+    // 그 성부의 것처럼 보이지 않게 같이 들고 있는다.
+    @State var scoringResultVoice: ChordGenerator.Interval?
+    // 빠른 녹음 쪽 activeAnalysisToken과 같은 이유의 세대 토큰 — 뒤늦게 끝난 이전 채점 분석이
+    // 새 시도의 결과를 덮어쓰지 않게 한다.
+    @State var activeScoringToken: UUID?
+    // 채점이 끝난 순간 한 번 울린다(실시간 프레임 햅틱은 이 흐름에선 의미가 없어졌다).
     let scoringSuccessHaptic = UINotificationFeedbackGenerator()
+
+    /// 채점 흐름의 단계 — 빠른 녹음(`QuickRecordView.Phase`)과 같은 방식으로, 지금 화면에
+    /// 무엇을 보여줄지를 이 하나로 결정한다.
+    enum ScoringPhase: Equatable {
+        case idle
+        case recording
+        case analyzing
+        case result
+        case error(String)
+    }
 
     // 첫 녹음 분석이 끝났는지 — 점진적 공개("내 목소리로 화음"/"따라 부르기 채점" 카드 등장
     // 여부) 판단에 쓴다. melodySteps 자체(음이름+옥타브+화음+시작시각/길이)는 지금은 화면에
     // 직접 표시하지 않지만(조성/화음 요약 카드는 제거했다 — 지금 단계에선 필요 없다는 판단),
     // 다음 단계인 악보 렌더링에 그대로 필요한 데이터라 계속 계산해서 들고 있는다.
     @State var hasCapturedNote = false
-    // 채점 카드는 접힌 상태로 시작한다 — PRODUCT.md 원칙3("채점은 화면 위계에서 영구히 중심일
-    // 필요 없다")이 실제 화면엔 반영 안 돼 있었다는 크리틱 지적(P1) 반영. "내 목소리로 화음"
-    // 카드와 똑같은 크기/제목 굵기로 자동으로 펼쳐지던 걸, 펼쳐야 보이는 가벼운 한 줄 디스클로저로
-    // 낮췄다 — 화음 체험을 먼저 끝낸 사람만 일부러 채점으로 넘어가는 흐름.
-    @State var isScoringExpanded = false
-    // "중지"를 눌러 채점 시도가 저장된 직후에만 잠깐 확인 메시지를 보여준다 — 예전엔 저장이
-    // 조용히 끝나서 정말 기록됐는지 알 방법이 없었다(크리틱 P3). 새 채점을 시작하거나 새로
-    // 녹음하면 지운다.
-    @State var lastSavedInterval: ChordGenerator.Interval?
+    // 136절 — 채점 카드의 여닫기(isScoringExpanded / scoringDisclosureRow)를 없앴다. "성부별로
+    // 듣기"를 항상 펼치기로 바꾼 것(135절)과 같은 이유이고, "바로 불러서 채점할 수 있게" 요청
+    // 그대로다 — 채점은 이제 화음을 들어본 다음 자연스럽게 이어지는 단계라 숨겨둘 이유가 없다.
     @State var melodySteps: [MelodyStep] = []
     // 방금 녹음한 목소리 원본 — "내 목소리로 화음 듣기"(123절, VoiceHarmonyTrackBuilder가 이
     // 버퍼에서 음마다 슬라이싱해 피치시프트하는 소스)에 쓰인다.
@@ -158,7 +165,10 @@ struct PracticeView: View {
 
     let audioCapture = AudioCapture()
     let melodySession = MelodySession()
-    let pitchSmoother = PitchSmoother()
+    // 136절 — `PitchSmoother`(프레임별 피치 흔들림 완화)는 실시간 프레임 채점 전용이었다.
+    // 채점이 "다 부른 뒤 배치로 세그멘테이션"하는 방식이 되면서 스무딩할 프레임 스트림 자체가
+    // 없어져 인스턴스를 걷어냈다 — 타입은 남겨둔다(`MelodySegmenter`가 같은 목적을 중앙값
+    // 필터로 이미 하고 있고, 실시간 미터를 다시 붙일 때를 위해 `PitchMeterView`와 함께 보존).
 
     var body: some View {
         Group {
