@@ -317,16 +317,23 @@ function renderScore(data) {
           note.setStyle({ fillStyle: BASE_NOTE_COLOR, strokeStyle: BASE_NOTE_COLOR });
         });
 
+        // 8분음표가 연달아 나오면 빔(beam)으로 이어 그려서 실제 악보처럼 묶어 보여준다 —
+        // 쉼표나 다른 길이의 음표를 만나면 자동으로 끊긴다(59절).
+        //
+        // **빔은 음표를 그리기 전에 만들어야 한다(151절).** VexFlow의 Beam 생성자는 묶는 음표
+        // 각각에 자기를 연결하는데(setBeam), 그 연결이 두 가지를 바꾼다 — (1) 그 음표는 깃발을
+        // 그리지 않는다(빔으로 묶였으니까), (2) 묶인 음표들의 stem 방향이 하나로 통일된다.
+        // 예전엔 vfVoice.draw() 뒤에 빔을 만들어서, 음표는 이미 깃발과 제각각인 stem을 그린
+        // 상태에 빔만 덧그려졌다 — 실기기 스크린샷에서 "빔과 깃발이 같이 있고 stem은 위인데
+        // 빔은 아래에 붙은" 실존하지 않는 음표로 나타났다.
+        var beams = VF.Beam.generateBeams(staveNotes, { beam_rests: false });
+
         var vfVoice = new VF.Voice({ num_beats: measureBeats(measureNotes), beat_value: 4 });
         vfVoice.setStrict(false);
         vfVoice.addTickables(staveNotes);
         var formatWidth = width - (isFirst ? firstMeasureExtraWidth + 20 : 20);
         new VF.Formatter().joinVoices([vfVoice]).format([vfVoice], formatWidth);
         vfVoice.draw(context, stave);
-
-        // 8분음표가 연달아 나오면 빔(beam)으로 이어 그려서 실제 악보처럼 묶어 보여준다 —
-        // 쉼표나 다른 길이의 음표를 만나면 자동으로 끊긴다(59절).
-        var beams = VF.Beam.generateBeams(staveNotes, { beam_rests: false });
         beams.forEach(function (beam) { beam.setContext(context).draw(); });
 
         // draw() 이후에만 각 노트의 실제 SVG 엘리먼트를 얻을 수 있다(getSVGElement가
