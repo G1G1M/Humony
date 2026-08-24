@@ -44,19 +44,41 @@ enum RhythmQuantizer {
         }
     }
 
-    /// 누적 박이 4박(4/4박자 한 마디)을 넘을 때마다 마디를 끊어서, "이 마디엔 음 몇 개"를
-    /// 순서대로 반환한다 — 모든 성부(멜로디/베이스/3도/5도)가 같은 타이밍 데이터(`MelodyStep`)를
-    /// 공유하므로, 이 하나의 마디 구성을 전 성부에 그대로 적용하면 화면에서 성부끼리 같은
-    /// 순간의 음이 세로로 정확히 맞춰진다(쉼표로 빈 자리를 채우는 것과 짝을 이룸).
+    /// 한 마디에 담을 수 있는 박 수 — 악보를 4/4로 표기하고 있으므로(`render.js`의
+    /// `addTimeSignature('4/4')`) 그 표기와 실제 내용이 어긋나지 않게 여기서도 4박을 쓴다.
+    static let beatsPerMeasure = 4.0
+
+    /// 마디를 4박(4/4박자 한 마디)씩 끊어서, "이 마디엔 음 몇 개"를 순서대로 반환한다 —
+    /// 모든 성부(멜로디/베이스/3도/5도)가 같은 타이밍 데이터(`MelodyStep`)를 공유하므로,
+    /// 이 하나의 마디 구성을 전 성부에 그대로 적용하면 화면에서 성부끼리 같은 순간의 음이
+    /// 세로로 정확히 맞춰진다(쉼표로 빈 자리를 채우는 것과 짝을 이룸).
+    ///
+    /// **136절, 마디가 4박을 넘던 버그 수정**: 예전엔 음을 먼저 넣고 나서 "누적이 4박 이상이면
+    /// 끊는다"였다 — 4분음표 3개(3박) 뒤에 2분음표(2박)가 오면 그 2분음표까지 같은 마디에
+    /// 들어가 5박짜리 마디가 만들어졌다. 악보에는 4/4라고 써놓고 실제로는 5박이 든 마디를
+    /// 그리고 있었던 것(`render.js`가 `setStrict(false)`로 VexFlow 검증을 꺼둬서 에러 없이
+    /// 그려졌을 뿐이다). 이제는 음을 넣기 **전에** 그 음까지 넣으면 4박을 넘는지 먼저 보고,
+    /// 넘으면 마디를 먼저 끊어서 그 음이 다음 마디의 첫 음이 되게 한다.
+    ///
+    /// 음 하나가 그 자체로 4박을 넘는 경우는 지금 `quantize`가 최대 2분음표(2박)까지만
+    /// 분류하므로 생기지 않는다 — 그래서 "빈 마디를 끊는" 무한 루프도 구조적으로 없다
+    /// (`currentCount > 0` 가드가 그 안전장치를 겸한다).
     static func measureBreaks(notes: [QuantizedNote]) -> [Int] {
         var breaks: [Int] = []
         var currentCount = 0
         var currentBeats = 0.0
 
         for note in notes {
+            if currentCount > 0, currentBeats + note.beats > beatsPerMeasure {
+                breaks.append(currentCount)
+                currentCount = 0
+                currentBeats = 0
+            }
+
             currentCount += 1
             currentBeats += note.beats
-            if currentBeats >= 4.0 {
+
+            if currentBeats >= beatsPerMeasure {
                 breaks.append(currentCount)
                 currentCount = 0
                 currentBeats = 0

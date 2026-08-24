@@ -11,11 +11,14 @@ import WebKit
 /// (Swift→JS). 탭하면 그 지점부터 재생하는 기능(74절)을 위해 반대 방향 브릿지도 있다 — JS가
 /// `WKScriptMessageHandler`("harmonyUpNoteTap")로 탭한 스텝 인덱스를 Swift에 돌려준다.
 ///
-/// **2026-08-20, 멜로디 전용으로 축소**: 화음 API(피치시프트/합성/베이스·3도·5도 재생) 전체를
-/// 걷어내면서, 이 뷰도 성부별 오선(멜로디/5도/3도/베이스)+뮤트 토글 구조에서 **멜로디 단일
-/// 오선**으로 줄였다. `onSeekToStep`은 예전엔 화음 재생 탐색용이었는데 지금은 재생 자체가
-/// 없어 호출부가 항상 무시하는(no-op) 콜백을 넘긴다 — 탭하면 JS 쪽 시각 피드백(살짝
-/// 눌렸다 돌아오는)만 남고 기능은 없다.
+/// **2026-08-24(136절), 다시 4성부로**: 116절에 화음 API를 전부 걷어내면서 이 뷰도 멜로디 단일
+/// 오선으로 줄였는데, 그 뒤 화음이 다시 자리잡았음에도(120~134절) 악보는 멜로디 하나만 그리고
+/// 있었다 — "3도/5도/베이스 악보도 표시해달라"는 요청으로 멜로디+5도+3도+베이스 4행으로
+/// 되돌렸다(`scoreVoices` 참고). `render.js`는 원래부터 다성부를 전제로 쓰여 있어서(voices
+/// 배열, 전 성부가 공유하는 measureBreaks, `key: null` 쉼표) JS 쪽은 손대지 않았다.
+///
+/// `onSeekToStep`은 예전엔 화음 재생 탐색용이었는데 지금은 호출부가 항상 무시하는(no-op)
+/// 콜백을 넘긴다 — 탭하면 JS 쪽 시각 피드백(살짝 눌렸다 돌아오는)만 남고 기능은 없다.
 struct VexFlowScoreView: UIViewRepresentable {
     let steps: [MelodyStep]
     /// 지금 소리 나는 스텝(`steps`의 인덱스, `nil`이면 표시 안 함) — 재생 기능이 없는
@@ -34,7 +37,10 @@ struct VexFlowScoreView: UIViewRepresentable {
     let contentVersion: Int
 
     /// 카드에 줄 고정 높이 — "너무 작다"는 실기기 피드백으로 키웠다(docs/CONCEPTS.md 58절).
-    static let preferredHeight: CGFloat = 460
+    /// 136절에 4성부(오선 4줄)로 늘어나면서 460으로는 컴팩트 레이아웃에서 아래 두 성부가
+    /// 잘려 보였다 — render.js의 성부 간 세로 간격(staveRowHeight=130) × 4행 × 확대배율(1.4)에
+    /// 위아래 여백을 더한 값에 맞춰 키웠다. 아이패드는 `fillAvailable: true`라 이 값과 무관하다.
+    static let preferredHeight: CGFloat = 620
 
     /// JS가 탭 이벤트를 돌려보내는 메시지 핸들러 이름 — `render.js`의 `addTapRegions()`가
     /// 같은 이름으로 `postMessage`를 호출한다.
@@ -68,9 +74,9 @@ struct VexFlowScoreView: UIViewRepresentable {
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
-        // 버전이 실제로 안 바뀌었으면 굳이 buildPayload()를 다시 돌리지 않는다.
+        // 버전이 실제로 안 바뀌었으면 굳이 페이로드를 다시 조립하지 않는다.
         if context.coordinator.lastRenderedVersion != contentVersion {
-            context.coordinator.pendingPayload = buildPayload()
+            context.coordinator.pendingPayload = VexFlowScorePayload.json(steps: steps)
         }
         context.coordinator.pendingVersion = contentVersion
         context.coordinator.pendingStepIndex = activeStepIndex
@@ -190,75 +196,5 @@ struct VexFlowScoreView: UIViewRepresentable {
             guard let index = message.body as? Int else { return }
             onNoteTapped?(index)
         }
-    }
-
-    // MARK: - JSON 페이로드 구성
-
-    private struct Payload: Encodable {
-        struct Voice: Encodable {
-            let clef: String
-            let notes: [Note]
-        }
-        struct Note: Encodable {
-            let key: String?
-            let sharp: Bool
-            let duration: String
-        }
-        let voices: [Voice]
-        let measureBreaks: [Int]
-    }
-
-    private func buildPayload() -> String {
-        let validSteps = steps.filter { $0.onsetTime != nil }
-        guard !validSteps.isEmpty else {
-            return "{\"voices\":[],\"measureBreaks\":[]}"
-        }
-
-        let quantized = RhythmQuantizer.quantize(durations: validSteps.map { $0.duration ?? 0.3 })
-        let measureBreaks = RhythmQuantizer.measureBreaks(notes: quantized)
-
-        let notes = zip(validSteps, quantized).map { step, quantizedNote -> Payload.Note in
-            let (key, sharp) = Self.vexFlowKey(forMIDINote: step.midiNote)
-            return Payload.Note(key: key, sharp: sharp, duration: quantizedNote.vexFlowDuration)
-        }
-        // 실제 부른 음역에 맞는 음자리표를 고른다 — 항상 높은음자리표로 고정하면 낮은 음역
-        // (예: C3 근처)에서 덧줄이 여러 개 필요해 오선 한참 아래로 내려가 보인다.
-        let clef = Self.clef(forMIDINotes: validSteps.map(\.midiNote))
-        let voiceRows = [Payload.Voice(clef: clef, notes: notes)]
-
-        let payload = Payload(voices: voiceRows, measureBreaks: measureBreaks)
-        guard let data = try? JSONEncoder().encode(payload), let json = String(data: data, encoding: .utf8) else {
-            return "{\"voices\":[],\"measureBreaks\":[]}"
-        }
-        return json
-    }
-
-    // MIDI 노트 -> VexFlow 키 문자열("c#/4" 형식) + 샵 필요 여부. 반음(피치클래스)이 아니라
-    // 다이어토닉 레터(흰건반, 옥타브당 7개) 단위로 표기하는 오선보 규칙을 그대로 따른다 —
-    // 흰건반 사이 음은 바로 아래 자연음과 같은 레터를 쓰고 샵만 붙인다. 이 v1은 플랫 없이
-    // 항상 샵으로만 표기한다(56절에서 이미 채택한 것과 같은 단순화).
-    private static let naturalLetters: [(pitchClass: Int, letter: String)] = [
-        (0, "c"), (2, "d"), (4, "e"), (5, "f"), (7, "g"), (9, "a"), (11, "b")
-    ]
-
-    private static func vexFlowKey(forMIDINote midiNote: Int) -> (key: String, sharp: Bool) {
-        let octave = midiNote / 12 - 1 // MIDI 60 = C4 관례(이 프로젝트 전반과 동일)
-        let pitchClass = midiNote.mod(12)
-        if let match = naturalLetters.first(where: { $0.pitchClass == pitchClass }) {
-            return ("\(match.letter)/\(octave)", false)
-        }
-        let below = naturalLetters.last(where: { $0.pitchClass < pitchClass })!
-        return ("\(below.letter)/\(octave)", true)
-    }
-
-    /// 멜로디의 실제 음역(이번 녹음에서 부른 MIDI 노트들)을 보고 어느 음자리표가 자연스러운지
-    /// 고른다. MIDI 60(미들 C)을 그대로 기준 삼지 않고 조금 낮춘 이유: 높은음자리표는 미들
-    /// C보다 아래에서도 어느 정도(첫째 줄=E4=MIDI64까지) 덧줄 없이 표현되니, 평균이 그보다
-    /// 살짝만 낮아도 굳이 낮은음자리표로 넘길 필요는 없다 — 대신 낮은음자리표 가운데줄
-    /// (D3=MIDI50)에 걸치는 지점을 기준으로 삼는다.
-    private static func clef(forMIDINotes midiNotes: [Int]) -> String {
-        guard !midiNotes.isEmpty else { return "treble" }
-        let average = midiNotes.reduce(0, +) / midiNotes.count
-        return average < 57 ? "bass" : "treble" // 57 = A3, 낮은음자리표 셋째줄 바로 위
     }
 }
