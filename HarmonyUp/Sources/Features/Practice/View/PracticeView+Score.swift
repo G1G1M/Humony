@@ -1,3 +1,6 @@
+import CoreGraphics
+import ImageIO
+import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -9,10 +12,10 @@ import UniformTypeIdentifiers
 /// 하면 된다.
 extension PracticeView {
 
-    /// 받아들이는 악보 형식. PDF는 아직이다 — 스캔본이면 딥러닝 OMR이 필요해 온디바이스
-    /// 원칙과 부딪힌다. MuseScore 같은 무료 툴로 PDF → MusicXML 변환이 가능하다.
+    /// 파일에서 받아들이는 악보 형식. 사진은 파일 앱에서 골라도 되고(여기 `.image`),
+    /// 앨범이나 카메라에서 바로 가져와도 된다(156절).
     static var scoreContentTypes: [UTType] {
-        [UTType(filenameExtension: "musicxml"), UTType.xml, UTType.midi]
+        [UTType(filenameExtension: "musicxml"), UTType.xml, UTType.midi, UTType.image]
             .compactMap { $0 }
     }
 
@@ -39,29 +42,27 @@ extension PracticeView {
                     }
 
                     HStack(spacing: Theme.Spacing.sm) {
-                        Button("다른 악보") { isImportingScore = true }
-                            .harmonyButtonStyle(prominent: false)
+                        attachScoreMenu(label: "다른 악보")
                         Button("떼기") { detachScore() }
                             .harmonyButtonStyle(prominent: false)
                     }
                     .disabled(quickRecordPhase.isRecordingOrAnalyzing)
                 } else {
-                    Text("악보를 붙이면 부른 음을 악보에 맞춰 다듬어요")
+                    Text("악보 사진을 찍어 붙이면 부른 음을 악보에 맞춰 다듬어요")
                         .font(Theme.Typography.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    Button {
-                        isImportingScore = true
-                    } label: {
-                        HStack(spacing: Theme.Spacing.xs) {
-                            Image(systemName: "paperclip")
-                            Text("악보 붙이기")
-                        }
-                        .frame(maxWidth: .infinity)
+                    attachScoreMenu
+                }
+
+                if isReadingScoreImage {
+                    HStack(spacing: Theme.Spacing.xs) {
+                        ProgressView().controlSize(.small)
+                        Text("악보를 읽는 중이에요")
+                            .font(Theme.Typography.caption)
+                            .foregroundStyle(.secondary)
                     }
-                    .harmonyButtonStyle(prominent: false)
-                    .disabled(quickRecordPhase.isRecordingOrAnalyzing)
                 }
 
                 if let message = scoreImportMessage {
@@ -109,11 +110,13 @@ extension PracticeView {
         }
         switch importError {
         case .unsupportedFileType:
-            return "MusicXML(.musicxml/.xml)이나 MIDI(.mid) 파일이 필요해요 — PDF는 MuseScore 같은 무료 툴로 MusicXML로 바꿔주세요"
+            return "악보 사진이나 MusicXML(.musicxml/.xml)·MIDI(.mid) 파일이 필요해요 — PDF는 캡처해서 사진으로 넣어주세요"
         case .malformed:
-            return "악보 파일이 깨진 것 같아요 — 다른 파일로 시도해주세요"
+            return "악보를 읽지 못했어요 — 다른 파일이나 사진으로 시도해주세요"
         case .noNotesFound:
-            return "악보에서 음을 찾지 못했어요 — 멜로디가 들어 있는 악보인지 확인해주세요"
+            return "악보에서 음표를 찾지 못했어요 — 오선과 음표가 또렷하게 나오도록 다시 찍어주세요"
+        case .noStaffFound:
+            return "사진에서 오선을 찾지 못했어요 — 악보가 화면을 가득 채우게, 너무 기울지 않게 찍어주세요"
         }
     }
 
@@ -147,6 +150,92 @@ extension PracticeView {
             }.value
             guard activeAnalysisToken == token else { return }
             applyQuickRecordResult(analyzed)
+        }
+    }
+
+    /// 악보를 가져오는 세 갈래 — 찍기 / 앨범 / 파일.
+    ///
+    /// **찍기를 맨 위에 둔다.** 사람들이 실제로 손에 쥐고 있는 건 종이 악보지 MusicXML
+    /// 파일이 아니다(그게 이 기능을 만든 이유다).
+    func attachScoreMenu(label: String = "악보 붙이기") -> some View {
+        Menu {
+            if CameraPicker.isAvailable {
+                Button {
+                    isCapturingScorePhoto = true
+                } label: {
+                    Label("사진 찍기", systemImage: "camera")
+                }
+            }
+            Button {
+                isPickingScorePhoto = true
+            } label: {
+                Label("앨범에서 고르기", systemImage: "photo.on.rectangle")
+            }
+            Button {
+                isImportingScore = true
+            } label: {
+                Label("파일에서 (MusicXML·MIDI)", systemImage: "folder")
+            }
+        } label: {
+            HStack(spacing: Theme.Spacing.xs) {
+                Image(systemName: "paperclip")
+                Text(label)
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .harmonyButtonStyle(prominent: false)
+        .disabled(quickRecordPhase.isRecordingOrAnalyzing || isReadingScoreImage)
+    }
+
+    /// 메뉴 없이 버튼 하나로 쓰는 자리(첫 첨부).
+    var attachScoreMenu: some View {
+        attachScoreMenu(label: "악보 붙이기")
+    }
+
+    // MARK: - 사진에서 읽기 (156절)
+
+    func handlePickedPhoto(_ item: PhotosPickerItem?) {
+        guard let item else { return }
+        Task {
+            guard let data = try? await item.loadTransferable(type: Data.self) else {
+                scoreImportMessage = "사진을 불러오지 못했어요 — 다시 골라주세요"
+                return
+            }
+            readScoreImage(data: data, name: "앨범 사진")
+        }
+    }
+
+    /// 사진 해독은 메인 스레드에서 하면 안 된다 — 1600픽셀 사진 한 장에 오선 검출·구멍
+    /// 메우기·창 훑기가 모두 돌아서 화면이 눈에 띄게 멈춘다(녹음 분석을 `Task.detached`로
+    /// 옮긴 것과 같은 이유다).
+    func readScoreImage(data: Data, name: String) {
+        isReadingScoreImage = true
+        scoreImportMessage = nil
+
+        Task {
+            let outcome = await Task.detached(priority: .userInitiated) { () -> Result<ScoreImporter.ImportedScore, Error> in
+                guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+                      let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+                    return .failure(ScoreImporter.ImportError.malformed)
+                }
+                do {
+                    return .success(try SheetMusicImageReader.read(cgImage))
+                } catch {
+                    return .failure(error)
+                }
+            }.value
+
+            isReadingScoreImage = false
+            switch outcome {
+            case let .success(score):
+                importedScore = score
+                importedScoreName = name
+                reanalyzeWithCurrentScore()
+            case let .failure(error):
+                importedScore = nil
+                importedScoreName = nil
+                scoreImportMessage = Self.importErrorMessage(error)
+            }
         }
     }
 }

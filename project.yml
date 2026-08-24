@@ -34,6 +34,8 @@ targets:
       properties:
         UILaunchScreen: {}
         NSMicrophoneUsageDescription: "멜로디를 녹음해서 화음을 분석하기 위해 마이크가 필요합니다."
+        # 156절 — 종이 악보를 그 자리에서 찍어 "정답지"로 쓰기 위해 카메라를 쓴다.
+        NSCameraUsageDescription: "악보를 찍어서 부른 음과 대조하기 위해 카메라가 필요합니다."
         # 이 키가 없으면 Xcode가 매 빌드마다 "All interface orientations must be supported
         # unless the app requires full screen" 경고를 낸다 — 아이패드 분할 레이아웃(61절)이
         # 가로/세로 회전에 반응하도록 만들어져 있으니, 네 방향 전부 명시적으로 지원한다.

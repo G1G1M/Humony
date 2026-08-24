@@ -1,3 +1,4 @@
+import PhotosUI
 import SwiftUI
 import SwiftData
 import AVFAudio
@@ -184,6 +185,14 @@ struct PracticeView: View {
     /// 마지막 분석에서 악보와 대조한 결과 — 요약 한 줄을 만드는 데 쓴다.
     @State var scoreComparison: ScoreGuidedCorrection.Comparison?
 
+    // 156절 — 악보 사진에서 읽어오기. 사람들이 손에 쥐고 있는 건 대개 종이 악보라
+    // 파일(MusicXML/MIDI)만 받아서는 "악보 붙이기"가 실제로 쓰이기 어렵다.
+    @State var isPickingScorePhoto = false
+    @State var isCapturingScorePhoto = false
+    @State var pickedScorePhoto: PhotosPickerItem?
+    /// 사진 해독 중 — 오선 검출부터 조표까지 도는 동안 화면에 알린다.
+    @State var isReadingScoreImage = false
+
     let audioCapture = AudioCapture()
     let melodySession = MelodySession()
     // 136절 — `PitchSmoother`(프레임별 피치 흔들림 완화)는 실시간 프레임 채점 전용이었다.
@@ -233,6 +242,20 @@ struct PracticeView: View {
             allowsMultipleSelection: false
         ) { result in
             handleScoreImport(result.map { $0.first ?? URL(fileURLWithPath: "") })
+        }
+        .photosPicker(isPresented: $isPickingScorePhoto, selection: $pickedScorePhoto, matching: .images)
+        .onChange(of: pickedScorePhoto) { _, item in
+            handlePickedPhoto(item)
+        }
+        .sheet(isPresented: $isCapturingScorePhoto) {
+            CameraPicker(
+                onCapture: { data in
+                    isCapturingScorePhoto = false
+                    readScoreImage(data: data, name: "찍은 악보")
+                },
+                onCancel: { isCapturingScorePhoto = false }
+            )
+            .ignoresSafeArea()
         }
     }
 }
