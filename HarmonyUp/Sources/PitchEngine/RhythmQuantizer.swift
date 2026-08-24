@@ -18,29 +18,63 @@ enum RhythmQuantizer {
         let beats: Double
     }
 
+    /// 추정한 템포를 실제로 쓰려면 이 정도 확신은 있어야 한다 — 무반주로 자유롭게 부르면 박이
+    /// 아예 없을 수 있고, 그때 억지로 격자에 맞추면 악보가 오히려 더 이상해진다. 그런 경우엔
+    /// 아래 중앙값 방식으로 폴백한다.
+    ///
+    /// 0.75인 근거: 사람이 부른 정도의 흔들림(간격이 ±6%씩 들쭉날쭉한 경우)에서도 확신이
+    /// 0.9를 넘는 반면, 박이 없는 자유 리듬은 0.7 언저리에 머문다 — 그 사이를 가른다.
+    static let minimumTempoConfidence = 0.75
+
     /// - Parameter durations: 각 음의 실제 길이(초). 순서(멜로디 스텝 순서)를 그대로 유지해서
     ///   같은 인덱스의 결과를 돌려준다.
     static func quantize(durations: [Double]) -> [QuantizedNote] {
+        quantize(durations: durations, onsetTimes: nil)
+    }
+
+    /// 음이 시작한 시각까지 같이 주면 **실제 박을 추정해서**(`TempoEstimator`) 그 그리드로
+    /// 분류한다(136절).
+    ///
+    /// **왜 중앙값만으로는 부족한가**: 중앙값은 "이 녹음에서 가장 흔한 길이"일 뿐 "1박"이 아니다.
+    /// 8분음표가 지배적인 노래에서는 그 8분음표가 중앙값이 돼서 전부 4분음표로 표기되고, 정작
+    /// 4분음표는 2분음표가 된다 — 상대적인 길고 짧음은 살지만 실제 리듬과는 어긋난다. 음이
+    /// 시작한 간격에서 박을 찾아내면 그 어긋남이 사라진다.
+    ///
+    /// 박을 못 찾거나 확신이 낮으면(자유 리듬) 기존 중앙값 방식을 그대로 쓴다 — 없는 박을
+    /// 지어내는 것보다 "상대적 길이"라도 정직하게 보여주는 편이 낫다.
+    ///
+    /// - Parameter onsetTimes: 각 음의 시작 시각(초). `MelodyStep.onsetTime`을 그대로 넘기면 된다.
+    ///   nil이면 예전처럼 중앙값 기준으로만 분류한다.
+    static func quantize(durations: [Double], onsetTimes: [Double]?) -> [QuantizedNote] {
         guard !durations.isEmpty else { return [] }
 
-        // 중앙값을 "1박"으로 삼는다 — 평균은 유난히 길게 끈 음 하나에 쉽게 휘둘리지만,
+        if let onsetTimes,
+           let estimate = TempoEstimator.estimate(onsetTimes: onsetTimes),
+           estimate.confidence >= minimumTempoConfidence {
+            return durations.map { classify(beats: estimate.beats(forDuration: $0)) }
+        }
+
+        // 폴백 — 중앙값을 "1박"으로 삼는다. 평균은 유난히 길게 끈 음 하나에 쉽게 휘둘리지만,
         // 중앙값은 "이 녹음에서 가장 흔한 길이"를 더 안정적으로 대표한다.
         let sorted = durations.sorted()
         let median = sorted[sorted.count / 2]
         let unit = max(median, 0.05) // 0으로 나누기 방지용 최소값
 
-        return durations.map { duration in
-            let ratio = duration / unit
-            switch ratio {
-            case ..<0.75:
-                return QuantizedNote(vexFlowDuration: "8", beats: 0.5)
-            case 0.75..<1.25:
-                return QuantizedNote(vexFlowDuration: "q", beats: 1.0)
-            case 1.25..<1.75:
-                return QuantizedNote(vexFlowDuration: "qd", beats: 1.5)
-            default:
-                return QuantizedNote(vexFlowDuration: "h", beats: 2.0)
-            }
+        return durations.map { classify(beats: $0 / unit) }
+    }
+
+    /// 박 수를 실제 음표 모양으로 스냅한다 — 두 경로(박 추정 / 중앙값 폴백)가 같은 경계를
+    /// 쓰도록 한곳에 모았다. 지금 표기할 수 있는 건 8분·4분·점4분·2분음표 네 가지다.
+    private static func classify(beats: Double) -> QuantizedNote {
+        switch beats {
+        case ..<0.75:
+            return QuantizedNote(vexFlowDuration: "8", beats: 0.5)
+        case 0.75..<1.25:
+            return QuantizedNote(vexFlowDuration: "q", beats: 1.0)
+        case 1.25..<1.75:
+            return QuantizedNote(vexFlowDuration: "qd", beats: 1.5)
+        default:
+            return QuantizedNote(vexFlowDuration: "h", beats: 2.0)
         }
     }
 

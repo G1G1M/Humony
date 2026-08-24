@@ -74,7 +74,13 @@ enum VexFlowScorePayload {
         // 화음은 멜로디와 같은 순간에 같은 길이로 울리므로(`VoiceHarmonyTrackBuilder`가
         // melodySteps의 onset/duration을 그대로 쓴다) 성부별로 따로 계산할 게 없고, 무엇보다
         // 모든 성부의 음 개수와 마디 구성이 같아야 render.js에서 마디선이 세로로 맞는다.
-        let quantized = RhythmQuantizer.quantize(durations: validSteps.map { $0.duration ?? 0.3 })
+        // 시작 시각까지 넘겨서 실제 박을 추정하게 한다(136절) — 중앙값만 보면 8분음표가
+        // 지배적인 노래에서 그 8분음표가 4분음표로 표기된다. 박을 못 찾으면 안에서 알아서
+        // 중앙값 방식으로 폴백한다.
+        let quantized = RhythmQuantizer.quantize(
+            durations: validSteps.map { $0.duration ?? 0.3 },
+            onsetTimes: validSteps.compactMap(\.onsetTime)
+        )
         let measureBreaks = RhythmQuantizer.measureBreaks(notes: quantized)
 
         let voices: [Payload.Voice] = voiceOrder.compactMap { voice in
