@@ -8,6 +8,10 @@ import AVFoundation
 /// 재생 경로가 2채널이어야 한다. 모노 `play(samples:)`는 그대로 남아 있다(성부 솔로 듣기처럼
 /// 한 성부만 정중앙에서 들려주는 쪽은 굳이 스테레오일 이유가 없다).
 ///
+/// 같은 절에 리버브(공간 울림)도 붙었다 — 아카펠라 녹음이 자연스럽게 들리는 큰 이유 하나가
+/// 여러 목소리가 **같은 공간의 울림을 공유**한다는 점이다. 완전히 마른(dry) 소리를 그냥
+/// 겹치면 성부들이 서로 섞이지 않고 각자 "머릿속에서" 따로 울리는 느낌이 난다.
+///
 /// 116절에서 화음 재생 인프라(`VoiceClipPlayer` — 다중 트랙/pan/리버브)를 통째로 지우면서
 /// 재생 버튼 자체가 없어졌던 걸, 녹음 원본을 다시 들어볼 수 있게 새로 만들었다. 이 타입
 /// 자체엔 "녹음"이라는 특정 의미가 없어서(그냥 버퍼 재생기) `PracticeView`가 용도별로 여러
@@ -15,13 +19,34 @@ import AVFoundation
 /// 빠지며 함께 정리됐고, 지금은 `voiceHarmonyPlayer`(내 목소리 화음)와 `soloVoicePlayer`
 /// (성부별 솔로 재생)가 이 타입을 쓴다.
 final class RecordingPlayer {
+
+    /// 재생에 걸 공간 울림의 세기(0=완전 건조, 100=울림만). 아카펠라 느낌을 내는 게 목적이라
+    /// 원음이 또렷하게 남는 범위에서 시작한다 — 이 값이 커질수록 화음은 서로 잘 섞이지만
+    /// 발음이 뭉개져서 "무슨 음을 부르는지"가 흐려진다(연습용 앱이라 이쪽이 더 치명적이다).
+    /// 실기기 청취로 조정할 첫 후보 값이다.
+    private static let defaultWetDryMix: Float = 22
+
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
+    /// 소규모 합창이 설 만한 공간 — 성부들이 한 공간에 함께 있는 것처럼 들리게 하는 게 목적이라
+    /// 꼬리가 아주 긴 `.cathedral`이나 방이 좁은 `.smallRoom`보다 중간 크기 홀이 맞다.
+    private let reverb = AVAudioUnitReverb()
+    private let reverbPreset: AVAudioUnitReverbPreset
+    private let wetDryMix: Float
     private var isAttached = false
     /// 샘플레이트뿐 아니라 채널 수가 바뀔 때도 그래프를 다시 맺어야 한다 — 모노로 연결해둔
     /// 상태에서 스테레오 버퍼를 스케줄하면 포맷 불일치로 즉시 크래시한다(28절에 실기기에서
     /// 실제로 겪은 그 크래시와 같은 원인).
     private var configuredFormat: (sampleRate: Double, channelCount: AVAudioChannelCount)?
+
+    /// - Parameters:
+    ///   - reverbPreset: 공간의 종류. 기본값은 소규모 합창용 중간 크기 홀.
+    ///   - wetDryMix: 울림 비율(0~100). 0을 주면 리버브를 아예 거치지 않는다 — 원음을 있는
+    ///     그대로 확인해야 하는 용도(녹음 되돌려 듣기 등)를 위해 남겨둔 통로다.
+    init(reverbPreset: AVAudioUnitReverbPreset = .mediumHall, wetDryMix: Float = RecordingPlayer.defaultWetDryMix) {
+        self.reverbPreset = reverbPreset
+        self.wetDryMix = wetDryMix
+    }
 
     func play(samples: [Float], sampleRate: Double, onFinished: (() -> Void)? = nil) throws {
         guard !samples.isEmpty else { return }
@@ -73,13 +98,23 @@ final class RecordingPlayer {
 
         if !isAttached {
             engine.attach(player)
+            if usesReverb {
+                engine.attach(reverb)
+                reverb.loadFactoryPreset(reverbPreset)
+                reverb.wetDryMix = wetDryMix
+            }
             isAttached = true
         }
         // "다시 녹음"처럼 마이크 세션이 재구성되면 실제 하드웨어 샘플레이트가 달라질 수 있다 —
         // 그럴 때(또는 채널 수가 바뀔 때)만 연결을 다시 맺는다(49절에서 겪은 것과 같은 패턴).
         if configuredFormat?.sampleRate != sampleRate || configuredFormat?.channelCount != channelCount {
             if engine.isRunning { engine.stop() }
-            engine.connect(player, to: engine.mainMixerNode, format: format)
+            if usesReverb {
+                engine.connect(player, to: reverb, format: format)
+                engine.connect(reverb, to: engine.mainMixerNode, format: format)
+            } else {
+                engine.connect(player, to: engine.mainMixerNode, format: format)
+            }
             configuredFormat = (sampleRate, channelCount)
         }
         if !engine.isRunning {
@@ -89,6 +124,11 @@ final class RecordingPlayer {
         return format
     }
 
+    private var usesReverb: Bool { wetDryMix > 0 }
+
+    /// 재생을 멈춘다. 엔진까지 멈추므로 리버브 꼬리도 함께 끊긴다 — 사용자가 명시적으로
+    /// 정지를 누른 경우라 꼬리를 남기는 게 오히려 어색하다. 버퍼가 끝까지 재생돼 자연히
+    /// 끝나는 경우엔 엔진이 계속 돌고 있어서 꼬리가 정상적으로 남는다.
     func stop() {
         player.stop()
         if engine.isRunning { engine.stop() }
