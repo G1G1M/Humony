@@ -263,14 +263,18 @@ extension PracticeView {
         // 로그로 남겨서, 조성 판별이 틀렸는지/화음 계산 자체는 맞는데 다른 이유로 애매하게
         // 들리는지 구분한다(117~119절과 같은 방식 — UI로 상태를 짐작하지 말고 로그로 확인).
         if let key = melodySession.detectedKey {
-            print("[PracticeView] 감지된 조성: \(key.name)")
+            // 147절 — 신뢰도를 같이 찍는다. "화음 음 자체가 이상하다"는 제보에서 조성 오판과
+            // 그 밖의 원인을 가르는 가장 빠른 단서다(조성이 틀리면 그 위에 쌓는 화음이 전부
+            // 어긋나므로, 낮은 신뢰도로 통과한 조성인지부터 봐야 한다).
+            print(String(format: "[PracticeView] 감지된 조성: %@ (신뢰도 %.2f)", key.name, key.confidence))
         }
         let stepLog = melodySteps.map { step -> String in
             guard let voices = step.harmonyVoices else { return "\(step.noteName)(화음없음-온음계밖)" }
+            // 성부 라벨은 146절부터 자리 이름이다(아랫소리/가운뎃소리/윗소리).
             let bass = voices[.bass] ?? "?"
             let third = voices[.third] ?? "?"
             let fifth = voices[.fifth] ?? "?"
-            return "\(step.noteName)[베이스\(bass)/3도\(third)/5도\(fifth)]"
+            return "\(step.noteName)[아래\(bass)/가운데\(third)/위\(fifth)]"
         }.joined(separator: ", ")
         print("[PracticeView] 스텝별 화음(\(melodySteps.count)개): \(stepLog)")
         #endif
