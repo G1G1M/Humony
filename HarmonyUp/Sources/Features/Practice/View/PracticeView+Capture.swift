@@ -303,6 +303,7 @@ extension PracticeView {
 
         voiceHarmonyPlayer.stop()
         isPlayingVoiceHarmony = false
+        isPreparingHarmony = false
         mutedVoices = []
         soloVoicePlayer.stop()
         playingSoloVoice = nil
@@ -331,6 +332,9 @@ extension PracticeView {
         if isPlayingVoiceHarmony {
             voiceHarmonyPlayer.stop()
             isPlayingVoiceHarmony = false
+            // 아직 트랙을 만드는 중이었다면 세대 토큰이 달라져 그 결과가 버려진다 — 표시도 같이 끈다.
+            voiceHarmonyPlaybackGeneration = UUID()
+            isPreparingHarmony = false
             return
         }
         startVoiceHarmonyPlayback()
@@ -371,31 +375,49 @@ extension PracticeView {
             return
         }
 
-        let bufferLength = recentVoiceBuffer.count
+        // 트랙 만들기(WORLD 분석+재합성)는 이 파이프라인에서 가장 비싼 단계다 — `PracticeView`는
+        // `View`라 @MainActor이므로, 예전처럼 여기서 동기로 돌리면 60초 녹음에서 소리가 나기
+        // 전까지 화면 전체가 멈춘다. 백그라운드로 떼어내고 그동안 준비 중임을 알린다.
+        let steps = melodySteps
+        let buffer = recentVoiceBuffer
+        let bufferLength = buffer.count
         let rate = recentVoiceSampleRate
-        // 128절 — 합성음 버전과 같은 이유로 화음 3성부를 backingGain만큼 낮춰 리드 멜로디가
-        // 앞으로 나오게 한다(멜로디 자체가 음소거됐으면 이 배율은 아무 트랙에도 안 걸림).
-        let backingGain: Float = 0.65
-        let tracks: [[Float]] = activeVoices.map { voice in
-            let track = VoiceHarmonyTrackBuilder.build(melodySteps: melodySteps, sourceBuffer: recentVoiceBuffer, bufferLength: bufferLength, voice: voice, rate: rate)
-            return voice == .melody ? track : track.map { $0 * backingGain }
-        }
-        // 합성음(122절)과 같은 이유로 화음 재생 전용 낮춘 목표 음량을 그대로 적용.
-        let mixed = AudioGain.applyFadeInOut(
-            AudioGain.normalizeLoudness(AudioGain.mix(tracks: tracks), targetRMS: 0.15, peakCeiling: 0.7),
-            fadeSampleCount: Int(rate * 0.01)
-        )
 
         let generation = UUID()
         voiceHarmonyPlaybackGeneration = generation
-        do {
-            isPlayingVoiceHarmony = true
-            try voiceHarmonyPlayer.play(samples: mixed, sampleRate: rate) {
-                if voiceHarmonyPlaybackGeneration == generation { isPlayingVoiceHarmony = false }
+        isPlayingVoiceHarmony = true
+        isPreparingHarmony = true
+
+        Task {
+            let mixed = await Task.detached(priority: .userInitiated) {
+                // 성부가 몇 개든 WORLD 분석은 한 번만 돈다(`mixedTrack`). 화음 3성부는
+                // backingGain으로 낮춰 리드 멜로디가 앞으로 나온다(128절).
+                let track = VoiceHarmonyTrackBuilder.mixedTrack(
+                    melodySteps: steps,
+                    sourceBuffer: buffer,
+                    bufferLength: bufferLength,
+                    voices: activeVoices,
+                    rate: rate
+                )
+                // 합성음(122절)과 같은 이유로 화음 재생 전용 낮춘 목표 음량을 그대로 적용.
+                return AudioGain.applyFadeInOut(
+                    AudioGain.normalizeLoudness(track, targetRMS: 0.15, peakCeiling: 0.7),
+                    fadeSampleCount: Int(rate * 0.01)
+                )
+            }.value
+
+            // 준비하는 사이 사용자가 정지했거나 뮤트를 바꿔 새 재생이 시작됐으면 이 결과는 버린다.
+            guard voiceHarmonyPlaybackGeneration == generation else { return }
+            isPreparingHarmony = false
+
+            do {
+                try voiceHarmonyPlayer.play(samples: mixed, sampleRate: rate) {
+                    if voiceHarmonyPlaybackGeneration == generation { isPlayingVoiceHarmony = false }
+                }
+            } catch {
+                isPlayingVoiceHarmony = false
+                statusText = "목소리 화음 재생 실패: \(error.localizedDescription)"
             }
-        } catch {
-            isPlayingVoiceHarmony = false
-            statusText = "목소리 화음 재생 실패: \(error.localizedDescription)"
         }
     }
 
@@ -405,27 +427,50 @@ extension PracticeView {
         if playingSoloVoice == voice {
             soloVoicePlayer.stop()
             playingSoloVoice = nil
+            isPreparingHarmony = false
             return
         }
         guard !recentVoiceBuffer.isEmpty, !melodySteps.isEmpty else { return }
 
-        let bufferLength = recentVoiceBuffer.count
+        // 성부 하나여도 WORLD 분석 한 번이 통째로 돈다 — 위와 같은 이유로 백그라운드에서 만든다.
+        let steps = melodySteps
+        let buffer = recentVoiceBuffer
+        let bufferLength = buffer.count
         let rate = recentVoiceSampleRate
-        let track = VoiceHarmonyTrackBuilder.build(melodySteps: melodySteps, sourceBuffer: recentVoiceBuffer, bufferLength: bufferLength, voice: voice, rate: rate)
-        let processed = AudioGain.applyFadeInOut(
-            AudioGain.normalizeLoudness(track, targetRMS: 0.15, peakCeiling: 0.7),
-            fadeSampleCount: Int(rate * 0.01)
-        )
 
-        do {
-            soloVoicePlayer.stop() // 다른 성부를 재생 중이었다면 먼저 끊고 새로 시작
-            playingSoloVoice = voice
-            try soloVoicePlayer.play(samples: processed, sampleRate: rate) {
-                if playingSoloVoice == voice { playingSoloVoice = nil }
+        soloVoicePlayer.stop() // 다른 성부를 재생 중이었다면 먼저 끊고 새로 시작
+        playingSoloVoice = voice
+        isPreparingHarmony = true
+
+        Task {
+            let processed = await Task.detached(priority: .userInitiated) {
+                let track = VoiceHarmonyTrackBuilder.mixedTrack(
+                    melodySteps: steps,
+                    sourceBuffer: buffer,
+                    bufferLength: bufferLength,
+                    voices: [voice],
+                    rate: rate,
+                    // 솔로로 들을 때는 그 성부만 들리므로 리드 강조 배율을 걸지 않는다.
+                    backingGain: 1.0
+                )
+                return AudioGain.applyFadeInOut(
+                    AudioGain.normalizeLoudness(track, targetRMS: 0.15, peakCeiling: 0.7),
+                    fadeSampleCount: Int(rate * 0.01)
+                )
+            }.value
+
+            // 준비하는 사이 사용자가 정지했거나 다른 성부를 골랐으면 이 결과는 버린다.
+            guard playingSoloVoice == voice else { return }
+            isPreparingHarmony = false
+
+            do {
+                try soloVoicePlayer.play(samples: processed, sampleRate: rate) {
+                    if playingSoloVoice == voice { playingSoloVoice = nil }
+                }
+            } catch {
+                playingSoloVoice = nil
+                statusText = "성부 재생 실패: \(error.localizedDescription)"
             }
-        } catch {
-            playingSoloVoice = nil
-            statusText = "성부 재생 실패: \(error.localizedDescription)"
         }
     }
 }

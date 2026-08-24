@@ -59,13 +59,53 @@ enum VoiceHarmonyTrackBuilder {
             return fitLength(sourceBuffer, to: bufferLength)
         }
 
+        guard case .harmony = voice else { return [] }
+        var silence: [Float] { [Float](repeating: 0, count: bufferLength) }
+
+        // 성부 하나만 만들 때 쓰는 편의 경로 — 분석을 여기서 만들어 아래 오버로드에 넘긴다.
+        // 여러 성부를 만들 거라면 `mixedTrack`을 쓸 것(분석을 한 번만 돌린다).
+        guard let analysis = PitchShifterWorldAnalysis(samples: sourceBuffer, sampleRate: rate, d4cThreshold: harmonyD4CThreshold) else { return silence }
+        return build(
+            melodySteps: melodySteps,
+            sourceBuffer: sourceBuffer,
+            bufferLength: bufferLength,
+            voice: voice,
+            rate: rate,
+            analysis: analysis,
+            fadeDuration: fadeDuration,
+            crossfadeDuration: crossfadeDuration
+        )
+    }
+
+    /// WORLD 분석을 **밖에서 만들어 넘기는** 버전 — 여러 성부를 만들 때 같은 분석을 나눠 쓰기
+    /// 위한 것이다.
+    ///
+    /// **왜 필요한가**: 분석(Dio+StoneMask+CheapTrick+D4C)은 이 파이프라인에서 가장 비싼
+    /// 단계이고, 같은 녹음에 대해서는 성부가 몇 개든 결과가 같다. 그런데 성부마다 `build`를
+    /// 부르면 그때마다 새로 분석해서, 3성부면 같은 계산이 3번 돌았다 —
+    /// `PitchShifterWorldAnalysis` 자신의 설계 주석("분석은 한 번만, 재합성만 반복")이
+    /// 호출부에서 무효화돼 있던 셈이다. 60초 녹음에서 UI가 눈에 띄게 멈추는 원인이었다.
+    static func build(
+        melodySteps: [MelodyStep],
+        sourceBuffer: [Float],
+        bufferLength: Int,
+        voice: Voice,
+        rate: Double,
+        analysis: PitchShifterWorldAnalysis,
+        fadeDuration: Double = 0.01,
+        crossfadeDuration: Double = 0.04
+    ) -> [Float] {
+        guard bufferLength > 0, rate > 0 else { return [] }
+        var silence: [Float] { [Float](repeating: 0, count: bufferLength) }
+
+        if case .melody = voice {
+            return fitLength(sourceBuffer, to: bufferLength)
+        }
         guard case .harmony(let interval) = voice else { return [] }
+
         let formantRatio = interval.formantRatio
         let segments = voicedSegments(melodySteps: melodySteps, bufferLength: bufferLength, interval: interval, rate: rate)
-        var silence: [Float] { [Float](repeating: 0, count: bufferLength) }
         guard !segments.isEmpty else { return silence }
-
-        guard let analysis = PitchShifterWorldAnalysis(samples: sourceBuffer, sampleRate: rate, d4cThreshold: harmonyD4CThreshold) else { return silence }
 
         let fadeCount = max(0, Int(rate * fadeDuration))
         let crossfadeCount = max(2, Int(rate * crossfadeDuration) / 2 * 2)
@@ -82,6 +122,53 @@ enum VoiceHarmonyTrackBuilder {
             output[i] = fitted[i] * envelope[i]
         }
         return output
+    }
+
+    /// 여러 성부를 **한 번의 분석**으로 만들어 하나의 트랙으로 섞는다.
+    ///
+    /// 성부마다 `build`를 부르면 녹음 전체 WORLD 분석이 성부 수만큼 반복된다 — 이 함수는
+    /// 분석을 한 번만 만들어 전부가 공유하게 한다. 화음 성부가 하나도 없으면(멜로디만) 분석
+    /// 자체를 만들지 않는다.
+    ///
+    /// - Parameter backingGain: 화음 3성부에 걸 음량 배율 — 리드 멜로디가 앞으로 나오게 한다
+    ///   (128절). 멜로디에는 걸지 않는다.
+    static func mixedTrack(
+        melodySteps: [MelodyStep],
+        sourceBuffer: [Float],
+        bufferLength: Int,
+        voices: [Voice],
+        rate: Double,
+        backingGain: Float = 0.65,
+        fadeDuration: Double = 0.01,
+        crossfadeDuration: Double = 0.04
+    ) -> [Float] {
+        guard bufferLength > 0, rate > 0, !voices.isEmpty else { return [] }
+
+        let needsAnalysis = voices.contains { if case .harmony = $0 { return true } else { return false } }
+        let analysis = needsAnalysis
+            ? PitchShifterWorldAnalysis(samples: sourceBuffer, sampleRate: rate, d4cThreshold: harmonyD4CThreshold)
+            : nil
+
+        let tracks: [[Float]] = voices.map { voice in
+            if case .melody = voice {
+                return fitLength(sourceBuffer, to: bufferLength)
+            }
+            // 분석에 실패하면(빈 입력 등) 그 성부는 무음으로 둔다 — 나머지 성부는 그대로 들린다.
+            guard let analysis else { return [Float](repeating: 0, count: bufferLength) }
+            let track = build(
+                melodySteps: melodySteps,
+                sourceBuffer: sourceBuffer,
+                bufferLength: bufferLength,
+                voice: voice,
+                rate: rate,
+                analysis: analysis,
+                fadeDuration: fadeDuration,
+                crossfadeDuration: crossfadeDuration
+            )
+            return track.map { $0 * backingGain }
+        }
+
+        return AudioGain.mix(tracks: tracks)
     }
 
     private struct Segment {

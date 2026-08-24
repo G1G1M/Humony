@@ -320,11 +320,23 @@ extension PracticeView {
                 Button {
                     toggleVoiceHarmonyPlayback()
                 } label: {
-                    Label(isPlayingVoiceHarmony ? "정지" : "내 목소리로 화음 듣기", systemImage: isPlayingVoiceHarmony ? "stop.fill" : "play.fill")
-                        .frame(maxWidth: .infinity)
+                    // 화음 트랙을 만드는 동안(WORLD 분석+재합성) 무슨 일이 일어나는지 알린다 —
+                    // 예전엔 이 계산이 메인 스레드에서 동기로 돌아 화면이 통째로 멈췄고, 지금은
+                    // 백그라운드로 옮겼지만 소리가 나기까지 시간이 걸리는 건 그대로다. 아무 표시가
+                    // 없으면 "눌렸나?" 싶어 다시 누르게 된다.
+                    HStack(spacing: Theme.Spacing.xs) {
+                        if isPreparingHarmony {
+                            ProgressView().controlSize(.small)
+                            Text("화음 만드는 중이에요")
+                        } else {
+                            Image(systemName: isPlayingVoiceHarmony ? "stop.fill" : "play.fill")
+                            Text(isPlayingVoiceHarmony ? "정지" : "내 목소리로 화음 듣기")
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
                 }
                 .harmonyButtonStyle(prominent: true)
-                .disabled(anyPlaybackActive && !isPlayingVoiceHarmony)
+                .disabled(isPreparingHarmony || (anyPlaybackActive && !isPlayingVoiceHarmony))
 
                 Label("성부별로 듣기", systemImage: "waveform")
                     .font(Theme.Typography.caption)
@@ -334,7 +346,7 @@ extension PracticeView {
                 // 128절 — 멜로디/베이스/3도/5도를 각각 따로 들어보는 성부별 솔로+뮤트.
                 VStack(spacing: 0) {
                     ForEach(Array(soloVoiceOptions.enumerated()), id: \.element.label) { index, option in
-                        voiceRow(option: option, anyPlaybackActive: anyPlaybackActive)
+                        voiceRow(option: option, anyPlaybackActive: anyPlaybackActive || isPreparingHarmony)
                         if index < soloVoiceOptions.count - 1 {
                             Divider()
                         }

@@ -146,4 +146,71 @@ final class VoiceHarmonyTrackBuilderTests: XCTestCase {
         let gapEnd = Int(0.8 * rate)
         XCTAssertTrue(track[gapStart..<gapEnd].allSatisfy { abs($0) < 0.01 })
     }
+
+    // MARK: - 여러 성부를 한 번의 분석으로 (mixedTrack)
+
+    private var mixFixture: (steps: [MelodyStep], source: [Float], bufferLength: Int) {
+        let steps = [
+            step(midiNote: 60, onset: 0.1, duration: 0.3, harmony: harmonyNotes(bass: 48, third: 64, fifth: 67)),
+            step(midiNote: 62, onset: 0.5, duration: 0.3, harmony: harmonyNotes(bass: 50, third: 65, fifth: 69)),
+        ]
+        let bufferLength = Int(1.0 * rate)
+        return (steps, sineWave(frequency: 261.63, sampleCount: bufferLength), bufferLength)
+    }
+
+    /// **분석을 공유해도 소리가 달라지면 안 된다.** 성부마다 따로 분석하던 걸 한 번으로 줄인
+    /// 최적화(2026-08-24)라, 결과가 예전과 같은지가 이 변경의 안전 조건이다.
+    func testMixedTrackMatchesIndividuallyBuiltVoices() {
+        let (steps, source, bufferLength) = mixFixture
+        let voices: [VoiceHarmonyTrackBuilder.Voice] = [.melody, .harmony(.bass), .harmony(.third), .harmony(.fifth)]
+        let backingGain: Float = 0.65
+
+        let mixed = VoiceHarmonyTrackBuilder.mixedTrack(
+            melodySteps: steps, sourceBuffer: source, bufferLength: bufferLength,
+            voices: voices, rate: rate, backingGain: backingGain
+        )
+
+        // 예전 호출부가 하던 것 그대로 — 성부마다 build하고 화음에만 backingGain을 건 뒤 섞는다.
+        let individually = AudioGain.mix(tracks: voices.map { voice in
+            let track = VoiceHarmonyTrackBuilder.build(
+                melodySteps: steps, sourceBuffer: source, bufferLength: bufferLength, voice: voice, rate: rate
+            )
+            if case .melody = voice { return track }
+            return track.map { $0 * backingGain }
+        })
+
+        XCTAssertEqual(mixed.count, individually.count)
+        for (index, (a, b)) in zip(mixed, individually).enumerated() {
+            XCTAssertEqual(a, b, accuracy: 1e-5, "\(index)번째 샘플이 달라졌다")
+        }
+    }
+
+    func testMixedTrackMatchesBufferLength() {
+        let (steps, source, bufferLength) = mixFixture
+        let mixed = VoiceHarmonyTrackBuilder.mixedTrack(
+            melodySteps: steps, sourceBuffer: source, bufferLength: bufferLength,
+            voices: [.melody, .harmony(.third)], rate: rate
+        )
+        XCTAssertEqual(mixed.count, bufferLength)
+    }
+
+    /// 멜로디만 고르면 WORLD 분석 자체가 필요 없다 — 원본이 그대로 나와야 한다(배율도 안 걸린다).
+    func testMixedTrackWithMelodyOnlyReturnsSourceUnscaled() {
+        let (steps, source, bufferLength) = mixFixture
+        let mixed = VoiceHarmonyTrackBuilder.mixedTrack(
+            melodySteps: steps, sourceBuffer: source, bufferLength: bufferLength,
+            voices: [.melody], rate: rate
+        )
+        XCTAssertEqual(mixed.count, bufferLength)
+        for (index, (a, b)) in zip(mixed, source).enumerated() {
+            XCTAssertEqual(a, b, accuracy: 1e-6, "\(index)번째 샘플이 원본과 다르다")
+        }
+    }
+
+    func testMixedTrackWithNoVoicesIsEmpty() {
+        let (steps, source, bufferLength) = mixFixture
+        XCTAssertTrue(VoiceHarmonyTrackBuilder.mixedTrack(
+            melodySteps: steps, sourceBuffer: source, bufferLength: bufferLength, voices: [], rate: rate
+        ).isEmpty)
+    }
 }

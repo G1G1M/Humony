@@ -145,6 +145,10 @@ struct PracticeView: View {
     // 콜백이 새 재생 상태를 덮어쓰지 않게 막는 세대 토큰(startVoiceHarmonyPlayback 참고).
     @State var mutedVoices: Set<VoiceHarmonyTrackBuilder.Voice> = []
     @State var voiceHarmonyPlaybackGeneration = UUID()
+    // 화음 트랙을 만드는 동안(WORLD 분석+재합성) 켜진다 — 예전엔 이 작업이 버튼 액션 안에서
+    // 동기로 돌아 60초 녹음이면 소리가 나기 전까지 화면이 통째로 멈춰 있었다(스피너조차 없이).
+    // 이제 백그라운드로 옮겼고, 그동안 무슨 일이 일어나는지 이 값으로 알린다.
+    @State var isPreparingHarmony = false
     // 128절 — 멜로디/베이스/3도/5도를 각각 따로 들어볼 수 있는 개별 재생 버튼(성부별 디버깅/비교
     // 용도로 예전에도 있었던 기능, WORLD 버전 위에 다시 만듦). 동시에 하나만 재생되므로 "지금
     // 재생 중인 성부가 뭔지"만 옵셔널 하나로 추적한다.
@@ -201,6 +205,7 @@ struct PracticeView: View {
             isCapturing = false
             voiceHarmonyPlayer.stop()
             isPlayingVoiceHarmony = false
+            isPreparingHarmony = false
             soloVoicePlayer.stop()
             playingSoloVoice = nil
             startingNotePlayer.stop()
