@@ -319,20 +319,58 @@ final class ChordGeneratorTests: XCTestCase {
         XCTAssertEqual(ChordGenerator.Interval.fifth.storageKey, "fifth")
     }
 
-    /// 보이스 리딩만 두면 "제자리에 머물기"가 항상 최소 비용이라, 멜로디가 한 옥타브를 올라가도
-    /// 화음이 안 따라 올라간다 — 실제로 덤프해보니 간격이 17반음까지 벌어졌다. 백킹 성부는
-    /// 리드 바로 아래 한 옥타브 안쪽에 붙어 있어야 받쳐주는 소리가 된다.
-    func testHarmonyStaysWithinAnOctaveBelowTheMelody() {
+    /// 화음은 언제나 멜로디 아래에서 부딪히지 않을 만큼 떨어져 있어야 하고, **코드가 바뀌는
+    /// 순간에는** 리드 한 옥타브 안쪽으로 다시 붙어야 한다.
+    ///
+    /// 코드가 유지되는 동안에는 간격이 그보다 벌어질 수 있다 — 147절에 자리를 고정했기 때문이다.
+    /// 따라 올라가려면 전위를 바꿔야 하는데, 그게 "아무 일도 없는데 화음이 움직인다"의 원인이었다.
+    func testHarmonyRealignsUnderTheMelodyWheneverTheChordChanges() {
         let melody = [60, 62, 64, 65, 67, 69, 71, 72, 74, 76, 77, 76, 74, 72, 69, 65, 60]
         let notes = melody.map { (midiNote: $0, duration: 0.6) }
         let harmonies = ChordGenerator.harmonizeSequence(melodyNotes: notes, key: key(tonic: 0, mode: .major))
 
+        var previousChord: Set<Int>?
         for (index, harmony) in harmonies.enumerated() {
             guard let harmony else { continue }
             let top = harmony.map(\.midiNote).max()!
             let gap = melody[index] - top
-            XCTAssertLessThanOrEqual(gap, 12, "\(index)번째: 화음이 멜로디에서 \(gap)반음이나 떨어져 있다")
             XCTAssertGreaterThanOrEqual(gap, 2, "\(index)번째: 화음이 멜로디에 너무 붙어 부딪힌다(\(gap)반음)")
+
+            let chord = Set(harmony.map { $0.midiNote.mod(12) })
+            if chord != previousChord {
+                XCTAssertLessThanOrEqual(gap, 12, "\(index)번째: 코드가 바뀌었는데도 화음이 \(gap)반음 떨어져 있다")
+            }
+            previousChord = chord
+        }
+    }
+
+    /// 147절의 핵심 — 코드가 유지되는 동안에는 자리(전위)가 바뀌면 안 된다. 화성적으로 아무
+    /// 일도 없는데 화음이 발밑에서 움직이면 "부자연스럽게 화음이 들어간다"로 들린다.
+    /// 멜로디가 화음 쪽으로 내려와 부딪히게 되는 경우만 예외로 허용한다.
+    func testVoicingDoesNotShiftWhileTheChordIsHeld() {
+        let melody = [60, 62, 64, 65, 67, 69, 71, 72, 74, 76, 77, 76, 74, 72, 71, 69, 67, 65, 64, 62, 60]
+        let notes = melody.map { (midiNote: $0, duration: 0.6) }
+        let harmonies = ChordGenerator.harmonizeSequence(melodyNotes: notes, key: key(tonic: 0, mode: .major))
+
+        var previousChord: Set<Int>?
+        var previousVoicing: [Int]?
+        for (index, harmony) in harmonies.enumerated() {
+            guard let harmony else { continue }
+            let voicing = harmony.map(\.midiNote).sorted()
+            let chord = Set(voicing.map { $0.mod(12) })
+
+            if let previousChord, let previousVoicing, chord == previousChord {
+                // 직전 자리를 그대로 써도 멜로디와 안 부딪히는 상황이라면 바뀌면 안 된다.
+                let fits = previousVoicing.max()! <= melody[index] - 2
+                if fits {
+                    XCTAssertEqual(
+                        voicing, previousVoicing,
+                        "\(index)번째: 코드가 그대로인데 자리가 옮겨졌다 \(previousVoicing) → \(voicing)"
+                    )
+                }
+            }
+            previousChord = chord
+            previousVoicing = voicing
         }
     }
 

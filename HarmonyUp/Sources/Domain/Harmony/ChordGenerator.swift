@@ -209,6 +209,9 @@ enum ChordGenerator {
         let degrees = viterbiChordDegrees(melodyNotes: melodyNotes, scale: scale, candidates: candidates)
 
         var lastValidHarmony: [HarmonyNote]?
+        // 온음계 밖 음(degree == nil)에서는 갱신하지 않는다 — 직전 화음을 그대로 이어받으므로
+        // 코드가 바뀐 게 아니다.
+        var previousDegree: Int?
         var results: [[HarmonyNote]?] = []
         results.reserveCapacity(melodyNotes.count)
         for (index, note) in melodyNotes.enumerated() {
@@ -217,13 +220,21 @@ enum ChordGenerator {
                 continue
             }
             // 첫 화음은 기준이 될 직전 보이싱이 없으므로 근음 위치로 배치하고(레지스터를 여기서
-            // 정한다), 이후로는 그 자리에서 가장 적게 움직이는 배치를 고른다(146절).
+            // 정한다), 코드가 바뀔 때만 가장 적게 움직이는 배치를 새로 고른다(146절).
+            //
+            // **코드가 그대로면 자리도 그대로 둔다(147절)**: 자리를 바꾸는 건 화성적으로 뭔가
+            // 일어났다는 신호인데, 코드가 유지되는 동안 전위가 바뀌면 아무 일도 없는데 화음이
+            // 발밑에서 움직이는 것처럼 들린다 — 실기기 청취에서 "부자연스럽게 화음이 들어간다"로
+            // 나온 증상이고, 21음 프레이즈를 덤프해보니 실제로 4번 일어나고 있었다.
             let notes: [HarmonyNote]
-            if let previous = lastValidHarmony {
+            if let previous = lastValidHarmony, previousDegree == degree, heldVoicingFits(previous: previous, melodyMIDINote: note.midiNote) {
+                notes = previous
+            } else if let previous = lastValidHarmony {
                 notes = voiceLedHarmonyNotes(candidate: candidates[degree], melodyMIDINote: note.midiNote, previous: previous)
             } else {
                 notes = buildHarmonyNotes(candidate: candidates[degree], melodyMIDINote: note.midiNote)
             }
+            previousDegree = degree
             lastValidHarmony = notes
             results.append(notes)
         }
@@ -363,6 +374,21 @@ enum ChordGenerator {
     /// 세 성부가 벌어질 수 있는 최대 폭(반음) — 화음을 닫힌 자리(close position)로 유지한다.
     /// 옥타브를 자유롭게 고르게 두면 베이스만 저 아래로 떨어져 화음이 텅 빈 것처럼 들린다.
     private static let maximumVoicingSpread = 12
+
+    /// 코드가 유지되는 동안 직전 자리를 그대로 써도 되는지 — 멜로디를 침범하지 않으면 그대로 둔다.
+    ///
+    /// 자리를 바꾸는 건 화성적으로 뭔가 일어났다는 신호다. 코드가 유지되는 동안 전위가 바뀌면
+    /// 아무 일도 없는데 화음이 발밑에서 움직이는 것처럼 들린다 — 실기기 청취에서 "부자연스럽게
+    /// 화음이 들어간다"로 나온 증상이고, 21음 프레이즈를 덤프해보니 실제로 4번 일어나고 있었다.
+    ///
+    /// 멜로디가 위로 멀어지는 건 그냥 둔다(간격은 다음 코드 변화에서 정리된다). 반대로 멜로디가
+    /// 화음 쪽으로 내려와 부딪히게 되면 그때는 어쩔 수 없이 옮겨야 하는데, 그때도 화음 전체를
+    /// 한 옥타브 떨어뜨리는 것(세 성부 × 12반음)보다 최소 이동으로 다시 고르는 편이 훨씬 덜 튄다
+    /// — 실측으로 총 이동량 36반음 대 12반음이었다.
+    private static func heldVoicingFits(previous: [HarmonyNote], melodyMIDINote: Int) -> Bool {
+        guard let top = previous.map(\.midiNote).max() else { return false }
+        return top <= melodyMIDINote - minimumMelodyClearance
+    }
 
     /// **보이스 리딩(146절)** — 직전 보이싱에서 성부가 가장 적게 움직이는 배치를 고른다.
     ///
