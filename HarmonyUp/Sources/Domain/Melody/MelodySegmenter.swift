@@ -303,12 +303,24 @@ enum MelodySegmenter {
         abs(a.midiNote - b.midiNote) <= maxPortamentoSemitones
     }
 
+    /// **149절: 합쳐진 구간의 대표 음높이는 "가장 오래 유지된 음"이다.**
+    ///
+    /// 예전엔 흡수한 쪽(이웃)의 음높이를 무조건 유지했다. 반음 경계에서 흔들린 구간은 같은 음의
+    /// 조각이 여러 번 나뉘어 들어오는데, 조각 하나하나로 보면 매번 이웃이 더 길어서 실제로는
+    /// 소수인 음높이가 최종 대표가 될 수 있었다 — 실기기 로그에서 G장조 녹음에 `A#3`가 남은
+    /// 원인이다(후보가 `A3(0.09) A#3(0.12) A3(0.15)`로 A3 합계 0.24초 대 A#3 0.12초였는데도
+    /// A#가 이겼다). 흡수는 "이 구간을 한 음으로 본다"는 판단이므로, 그 구간에서 실제로 가장
+    /// 오래 유지된 음높이가 대표가 되는 게 맞다.
+    ///
+    /// 이걸 위해 음높이별 누적 길이를 흡수 과정 내내 들고 다닌다(`pitchDurations`).
     static func absorbShortRuns(_ candidates: [SegmentedNote], minimumDuration: Double) -> [SegmentedNote] {
         var notes = candidates
         // 무음으로 갈라져 있어 "짧아도 진짜 음"으로 판단해 보존하기로 확정한 인덱스는 더 이상
         // 흡수 후보로 재검토하지 않는다 — 안 그러면 매번 다시 "가장 짧은 것"으로 뽑혀 무한
         // 루프에 빠진다. notes와 같은 길이를 유지하며 제거/삽입마다 같이 맞춰준다.
         var isProtected = [Bool](repeating: false, count: notes.count)
+        // 각 음표가 "어떤 음높이를 얼마나 오래 담고 있는지". 흡수할 때마다 두 딕셔너리를 더한다.
+        var pitchDurations: [[Int: Double]] = notes.map { [$0.midiNote: $0.duration] }
 
         while true {
             guard let shortestIndex = notes.indices
@@ -346,26 +358,48 @@ enum MelodySegmenter {
 
             if mergeIntoPrevious, let previous {
                 let mergedEnd = shortNote.onsetTime + shortNote.duration
+                let merged = combining(pitchDurations[shortestIndex - 1], pitchDurations[shortestIndex])
                 notes[shortestIndex - 1] = SegmentedNote(
-                    midiNote: previous.midiNote,
+                    midiNote: dominantPitch(merged, fallback: previous.midiNote),
                     onsetTime: previous.onsetTime,
                     duration: mergedEnd - previous.onsetTime,
                     averageConfidence: previous.averageConfidence
                 )
+                pitchDurations[shortestIndex - 1] = merged
             } else if let next {
                 let mergedEnd = next.onsetTime + next.duration
+                let merged = combining(pitchDurations[shortestIndex + 1], pitchDurations[shortestIndex])
                 notes[shortestIndex + 1] = SegmentedNote(
-                    midiNote: next.midiNote,
+                    midiNote: dominantPitch(merged, fallback: next.midiNote),
                     onsetTime: shortNote.onsetTime,
                     duration: mergedEnd - shortNote.onsetTime,
                     averageConfidence: next.averageConfidence
                 )
+                pitchDurations[shortestIndex + 1] = merged
             }
             notes.remove(at: shortestIndex)
             isProtected.remove(at: shortestIndex)
+            pitchDurations.remove(at: shortestIndex)
         }
 
         return notes
+    }
+
+    private static func combining(_ a: [Int: Double], _ b: [Int: Double]) -> [Int: Double] {
+        a.merging(b) { $0 + $1 }
+    }
+
+    /// 누적 길이가 가장 긴 음높이. **동점이면 `fallback`(흡수한 쪽, 즉 기존 동작)을 유지한다** —
+    /// 다수결이 뒤집을 근거가 없는데 결과가 바뀌면 118·119절에 실측으로 확정해둔 동작이
+    /// 이유 없이 흔들린다. 동점 후보가 여럿이고 그중에 fallback이 없으면 낮은 음을 골라
+    /// 결과가 항상 결정적이게 한다.
+    private static func dominantPitch(_ durations: [Int: Double], fallback: Int) -> Int {
+        guard let longest = durations.values.max() else { return fallback }
+        let tolerance = 1e-9
+        if let fallbackDuration = durations[fallback], fallbackDuration >= longest - tolerance {
+            return fallback
+        }
+        return durations.filter { $0.value >= longest - tolerance }.keys.min() ?? fallback
     }
 
     // MARK: - 6단계: 흡수 이후 붙어버린 동일 음높이 병합
