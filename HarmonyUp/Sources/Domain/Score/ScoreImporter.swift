@@ -1,4 +1,5 @@
 import AudioToolbox
+import ImageIO
 import Foundation
 
 /// 악보 파일을 읽어 "정답지"로 쓸 음 목록과 조표를 뽑는다 (155절).
@@ -47,6 +48,8 @@ enum ScoreImporter {
         case unsupportedFileType
         case malformed
         case noNotesFound
+        /// 사진에서 오선을 찾지 못했다(156절) — 악보가 아닌 사진이거나 너무 기울거나 흐린 경우.
+        case noStaffFound
     }
 
     /// 지금 지원하는 확장자. `.mxl`(zip으로 압축된 MusicXML)과 PDF는 아직이다 —
@@ -54,8 +57,20 @@ enum ScoreImporter {
     private static let musicXMLExtensions: Set<String> = ["musicxml", "xml"]
     private static let midiExtensions: Set<String> = ["mid", "midi"]
 
+    /// 사진으로 찍은 악보(156절). 확장자로만 갈라내고, 실제 해독은 `SheetMusicImageReader`가 한다.
+    private static let imageExtensions: Set<String> = ["jpg", "jpeg", "png", "heic", "heif", "tif", "tiff"]
+
     static func load(from url: URL) throws -> ImportedScore {
         let fileExtension = url.pathExtension.lowercased()
+
+        if imageExtensions.contains(fileExtension) {
+            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+                  let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+                throw ImportError.malformed
+            }
+            return try SheetMusicImageReader.read(cgImage)
+        }
+
         let isMIDI = midiExtensions.contains(fileExtension)
         guard isMIDI || musicXMLExtensions.contains(fileExtension) else {
             throw ImportError.unsupportedFileType
