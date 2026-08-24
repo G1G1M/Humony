@@ -16,18 +16,28 @@ enum RecordingAnalyzer {
         let harmonies: [Int: [ChordGenerator.HarmonyNote]]
         let voiceSamples: [Float]
         let sampleRate: Double
+        /// 악보를 붙여 분석했을 때의 대조 결과. 악보 없이 부르면 nil이다(155절).
+        let scoreComparison: ScoreGuidedCorrection.Comparison?
     }
 
+    /// - Parameter reference: 사용자가 붙인 악보(155절). **기본값 nil이면 기존 동작 그대로다** —
+    ///   악보 없이 부르는 흐름이 이 변경으로 달라지면 안 된다.
     static func analyze(
         recordingSamples: [Float],
         sampleRate: Double,
+        reference: ScoreImporter.ImportedScore? = nil,
         segmenterConfiguration: MelodySegmenter.Configuration = .default
     ) -> AnalyzedRecording {
-        let notes = MelodySegmenter.segment(samples: recordingSamples, sampleRate: sampleRate, configuration: segmenterConfiguration)
+        let segmented = MelodySegmenter.segment(samples: recordingSamples, sampleRate: sampleRate, configuration: segmenterConfiguration)
+
+        // 악보가 있으면 음높이를 악보에 맞춰 교정하고 조성도 조표에서 가져온다. 맞지 않는
+        // 악보면 교정을 포기하고(comparison.isApplied == false) 부른 그대로 내려간다.
+        let correction = reference.map { ScoreGuidedCorrection.apply(sung: segmented, reference: $0) }
+        let notes = correction?.notes ?? segmented
 
         // KeyDetector는 이미 "음 목록(pitch class + 길이)"을 배치로 받는 순수 함수라 그대로 재사용한다.
         let weightedNotes = notes.map { KeyDetector.WeightedNote(pitchClass: $0.midiNote.mod(12), duration: $0.duration) }
-        let key = KeyDetector.detectKey(notes: weightedNotes)
+        let key = correction?.key ?? KeyDetector.detectKey(notes: weightedNotes)
 
         var harmonies: [Int: [ChordGenerator.HarmonyNote]] = [:]
         if let key {
@@ -41,7 +51,9 @@ enum RecordingAnalyzer {
             }
         }
 
-        return AnalyzedRecording(notes: notes, key: key, harmonies: harmonies, voiceSamples: recordingSamples, sampleRate: sampleRate)
+        return AnalyzedRecording(notes: notes, key: key, harmonies: harmonies,
+                                 voiceSamples: recordingSamples, sampleRate: sampleRate,
+                                 scoreComparison: correction?.comparison)
     }
 
     /// 기존 멜로디 모드 UI(조성+화음 카드, `MelodyStepRow`, 스텝별 채점)가 그대로 소비할 수 있는

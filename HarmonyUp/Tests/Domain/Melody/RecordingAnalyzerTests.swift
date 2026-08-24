@@ -38,6 +38,40 @@ final class RecordingAnalyzerTests: XCTestCase {
         XCTAssertEqual(firstHarmony.first { $0.interval == .fifth }?.pitchClass, 7) // G
     }
 
+    // MARK: - 악보를 붙였을 때 (155절)
+
+    /// **회귀 방지의 핵심**: 악보를 안 주면 예전과 완전히 같아야 한다. 악보 없이 부르는 흐름이
+    /// 이 기능 때문에 달라지면 안 된다.
+    func testAnalyzeWithoutAScoreLeavesTheOldPathUntouched() {
+        let analyzed = RecordingAnalyzer.analyze(recordingSamples: cMajorArpeggio(), sampleRate: sampleRate)
+
+        XCTAssertNil(analyzed.scoreComparison)
+    }
+
+    /// 반음 흔들려 잘못 적힌 음이 악보 값으로 돌아온다 — 조성·화음이 그 위에서 다시 계산된다.
+    func testAnalyzeWithAScoreSnapsStrayPitches() throws {
+        // 도-미b-솔-도로 부른 셈(E4 자리를 반음 낮게) — 악보는 도-미-솔-도다.
+        let samples = sineWave(midiNote: 60, sampleCount: 8192)
+            + sineWave(midiNote: 63, sampleCount: 8192)
+            + sineWave(midiNote: 67, sampleCount: 8192)
+            + sineWave(midiNote: 72, sampleCount: 8192)
+        let score = ScoreImporter.ImportedScore(
+            notes: [60, 64, 67, 72].map { PitchedNote(midiNote: $0, duration: 1.0) },
+            keyFifths: 0,
+            keyMode: .major
+        )
+
+        let analyzed = RecordingAnalyzer.analyze(recordingSamples: samples, sampleRate: sampleRate, reference: score)
+        let comparison = try XCTUnwrap(analyzed.scoreComparison)
+
+        XCTAssertTrue(comparison.isApplied)
+        XCTAssertEqual(analyzed.notes.map(\.midiNote), [60, 64, 67, 72])
+        XCTAssertEqual(comparison.snappedCount, 1)
+        // 조성은 악보 조표에서 온다 — 오디오 추정을 건너뛴다.
+        XCTAssertEqual(analyzed.key?.tonicPitchClass, 0)
+        XCTAssertEqual(analyzed.key?.confidence, 1.0)
+    }
+
     func testMelodyStepsBridgesToExistingUIModel() throws {
         let analyzed = RecordingAnalyzer.analyze(recordingSamples: cMajorArpeggio(), sampleRate: sampleRate)
         let steps = RecordingAnalyzer.melodySteps(from: analyzed)
