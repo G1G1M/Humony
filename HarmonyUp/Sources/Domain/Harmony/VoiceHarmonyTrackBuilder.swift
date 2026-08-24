@@ -254,14 +254,58 @@ enum VoiceHarmonyTrackBuilder {
         }
     }
 
-    private struct Segment {
+    struct Segment: Equatable {
         let start: Int
         let end: Int
         let pitchRatio: Double
     }
 
+    /// 이보다 짧은 화음 구간은 독립 구간으로 두지 않고 앞 구간에 붙인다(153절).
+    ///
+    /// **왜 필요한가**: 화음 구간의 피치 비율은 `목표음 / 그 음표의 음높이`로 계산된다 —
+    /// 분모가 **채보가 그렇게 적어둔 음**이다. 반음 경계에서 목소리가 흔들려 D3가 D#3로 잘못
+    /// 적히면, 실제 오디오는 D3인데 비율만 D#3 기준이라 그 구간의 화음이 **반음 어긋나게**
+    /// 나간다. 짧은 떨림이 여럿이면 화음이 순간순간 딴 음으로 튀어 "화음이 새로 생겨서
+    /// 이상하다"로 들린다(실기기 제보).
+    ///
+    /// 실측(2026-08-24 로그, 44초 녹음): 최종 음표 70개 중 **30개가 0.35초 이하**였다.
+    /// 흡수 임계값(`MelodySegmenter.minimumNoteDuration` 0.18초)을 넘긴 떨림이 그대로
+    /// 독립 음표로 남은 것이다.
+    ///
+    /// **채보나 악보는 건드리지 않는다** — 악보에 보이는 음표는 그대로 두고, 소리를 만들 때만
+    /// 그 구간을 앞 구간의 비율로 이어서 화음이 흔들리지 않게 한다.
+    static let minimumHarmonySegmentDuration: Double = 0.28
+
+    /// 짧은 구간을 이웃에 붙인다. **무음으로 갈라진 구간은 붙이지 않는다** — 붙이면 숨 쉬는
+    /// 구간까지 화음이 이어져 울린다(`amplitudeEnvelope`가 마스킹하던 자리를 침범한다).
+    static func mergeBriefSegments(_ segments: [Segment], rate: Double) -> [Segment] {
+        guard rate > 0, !segments.isEmpty else { return segments }
+        let minimumSamples = Int(minimumHarmonySegmentDuration * rate)
+        let contiguousTolerance = Int(0.02 * rate)
+
+        var result: [Segment] = []
+        for segment in segments {
+            let isBrief = (segment.end - segment.start) < minimumSamples
+            if isBrief, let previous = result.last, segment.start - previous.end <= contiguousTolerance {
+                // 앞 구간의 비율을 그대로 유지한 채 길이만 늘린다.
+                result[result.count - 1] = Segment(start: previous.start, end: segment.end, pitchRatio: previous.pitchRatio)
+                continue
+            }
+            result.append(segment)
+        }
+
+        // 맨 앞 구간이 짧으면 붙일 앞이 없다 — 뒤 구간으로 흡수한다(뒤 구간의 비율을 쓴다).
+        if result.count > 1,
+           (result[0].end - result[0].start) < minimumSamples,
+           result[1].start - result[0].end <= contiguousTolerance {
+            result[1] = Segment(start: result[0].start, end: result[1].end, pitchRatio: result[1].pitchRatio)
+            result.removeFirst()
+        }
+        return result
+    }
+
     private static func voicedSegments(melodySteps: [MelodyStep], bufferLength: Int, interval: ChordGenerator.Interval, rate: Double) -> [Segment] {
-        melodySteps.compactMap { step -> Segment? in
+        let raw: [Segment] = melodySteps.compactMap { step -> Segment? in
             guard let onset = step.onsetTime, let duration = step.duration, duration > 0 else { return nil }
             let sourceFrequency = NoteNameConverter.frequency(forMIDINote: step.midiNote)
 
@@ -275,6 +319,8 @@ enum VoiceHarmonyTrackBuilder {
             guard start < end else { return nil }
             return Segment(start: start, end: end, pitchRatio: pitchRatio)
         }
+        // 떨림이 만든 짧은 구간은 앞 구간에 붙여서 화음 비율이 튀지 않게 한다(153절).
+        return mergeBriefSegments(raw, rate: rate)
     }
 
     /// `analysis.f0`(원본 곡선)를 바탕으로, 각 세그먼트 구간의 프레임은 그 세그먼트의

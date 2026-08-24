@@ -302,4 +302,59 @@ final class VoiceHarmonyTrackBuilderTests: XCTestCase {
         XCTAssertTrue(left.isEmpty)
         XCTAssertTrue(right.isEmpty)
     }
+    // MARK: - 떨림이 만든 짧은 구간 병합 (153절)
+
+    private func seg(_ start: Int, _ end: Int, _ ratio: Double) -> VoiceHarmonyTrackBuilder.Segment {
+        VoiceHarmonyTrackBuilder.Segment(start: start, end: end, pitchRatio: ratio)
+    }
+
+    /// 이 기능의 존재 이유 — 반음 떨림이 잘못 채보되면 그 짧은 구간만 화음 비율이 달라져
+    /// 화음이 반음 튄다. 짧은 구간은 앞 구간의 비율을 그대로 이어받아야 한다.
+    func testBriefSegmentInheritsThePreviousRatioInsteadOfItsOwn() {
+        let rate = 44100.0
+        let long = seg(0, Int(0.60 * rate), 1.25)
+        let wobble = seg(Int(0.60 * rate), Int(0.70 * rate), 1.18)   // 0.10초짜리 떨림
+        let next = seg(Int(0.70 * rate), Int(1.30 * rate), 1.25)
+
+        let merged = VoiceHarmonyTrackBuilder.mergeBriefSegments([long, wobble, next], rate: rate)
+
+        XCTAssertEqual(merged.count, 2, "떨림 구간이 앞 구간에 흡수돼야 한다")
+        XCTAssertEqual(merged[0].pitchRatio, 1.25, "앞 구간의 비율이 유지돼야 한다")
+        XCTAssertEqual(merged[0].end, wobble.end, "앞 구간이 떨림 구간 끝까지 늘어나야 한다")
+    }
+
+    /// **무음으로 갈라진 짧은 구간은 붙이지 않는다** — 붙이면 숨 쉬는 구간까지 화음이 울린다.
+    func testBriefSegmentSeparatedBySilenceIsNotMerged() {
+        let rate = 44100.0
+        let long = seg(0, Int(0.60 * rate), 1.25)
+        let afterBreath = seg(Int(1.50 * rate), Int(1.65 * rate), 1.18)  // 0.9초 무음 뒤 짧은 음
+
+        let merged = VoiceHarmonyTrackBuilder.mergeBriefSegments([long, afterBreath], rate: rate)
+
+        XCTAssertEqual(merged, [long, afterBreath], "무음을 사이에 둔 구간은 그대로 남아야 한다")
+    }
+
+    /// 맨 앞 구간이 짧으면 붙일 앞이 없다 — 뒤 구간이 흡수하고 뒤 구간의 비율을 쓴다.
+    func testLeadingBriefSegmentIsAbsorbedByTheFollowingOne() {
+        let rate = 44100.0
+        let leading = seg(0, Int(0.10 * rate), 1.18)
+        let main = seg(Int(0.10 * rate), Int(0.90 * rate), 1.25)
+
+        let merged = VoiceHarmonyTrackBuilder.mergeBriefSegments([leading, main], rate: rate)
+
+        XCTAssertEqual(merged.count, 1)
+        XCTAssertEqual(merged[0].start, 0)
+        XCTAssertEqual(merged[0].end, main.end)
+        XCTAssertEqual(merged[0].pitchRatio, 1.25)
+    }
+
+    /// 충분히 긴 구간들은 하나도 안 건드린다.
+    func testLongSegmentsAreLeftUntouched() {
+        let rate = 44100.0
+        let a = seg(0, Int(0.50 * rate), 1.20)
+        let b = seg(Int(0.50 * rate), Int(1.00 * rate), 1.30)
+
+        XCTAssertEqual(VoiceHarmonyTrackBuilder.mergeBriefSegments([a, b], rate: rate), [a, b])
+    }
+
 }
