@@ -115,7 +115,21 @@ final class ScoreTimelineTests: XCTestCase {
         let events = ScoreTimeline.events(from: steps)
 
         XCTAssertEqual(ScoreTimeline.highlightIndex(at: 0.50, events: events), 0, "쉼표 구간이어도 직전 음표를 유지")
-        XCTAssertEqual(ScoreTimeline.highlightIndex(at: 3.00, events: events), 2, "마지막 음 이후에도 마지막 음을 유지")
+    }
+
+    /// **마지막 음이 끝나면 nil** — 재생이 자연히 끝났을 때 악보를 처음으로 되감는 신호다(154절).
+    /// 예전엔 마지막 음을 계속 붙잡고 있어서, 재생이 끝나도 하이라이트가 남고 악보가 끝에
+    /// 머물렀다(정지를 눌러야 앞으로 돌아왔다).
+    func testHighlightIndexClearsOnceTheLastNoteHasFinished() {
+        let steps = [
+            step(60, onset: 0.0, duration: 0.20),
+            step(62, onset: 1.0, duration: 0.50)   // 1.0 ~ 1.5초
+        ]
+        let events = ScoreTimeline.events(from: steps)
+
+        XCTAssertEqual(ScoreTimeline.highlightIndex(at: 1.40, events: events), 2, "아직 울리는 중")
+        XCTAssertNil(ScoreTimeline.highlightIndex(at: 1.60, events: events), "마지막 음이 끝났다")
+        XCTAssertNil(ScoreTimeline.highlightIndex(at: 3.00, events: events), "한참 뒤")
     }
 
     func testHighlightIndexIsNilOnlyBeforeTheFirstNote() {

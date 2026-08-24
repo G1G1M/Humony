@@ -81,11 +81,19 @@ enum ScoreTimeline {
     /// 실용적인 이유가 있다 — 재생이 끝나면 악보를 처음으로 되감는데(149절, `setActiveStep(null)`),
     /// 쉼표마다 nil이 되면 노래 중간에 악보가 맨 앞으로 튕겨 돌아간다.
     ///
-    /// 그래서 nil은 첫 음이 시작되기 전(또는 이벤트가 없을 때)만이다.
+    /// nil인 경우는 두 가지다 — **첫 음이 시작되기 전**과 **마지막 음이 끝난 뒤**.
+    ///
+    /// 끝을 nil로 돌려주는 게 중요하다(154절): 재생이 자연히 끝났을 때 악보를 처음으로
+    /// 되감는 신호가 이 nil이다. 예전엔 마지막 음을 계속 붙잡고 있어서, 재생이 끝나도
+    /// 하이라이트가 마지막 음에 남고 악보도 끝에 머물렀다 — 정지를 눌러야 앞으로 돌아왔다.
+    /// 재생 완료 콜백에만 기대면 콜백이 늦거나 안 올 때 그대로 멈춰 있게 되므로, **재생 위치
+    /// 자체로 끝을 판정**한다.
     ///
     /// 뷰가 아니라 여기 두는 이유: 이건 순수 계산이고 유닛테스트로 고정할 수 있다 —
     /// `CLAUDE.md` 코딩 컨벤션("View의 `@State`에 묶인 메서드 안에 조합 로직을 두지 말 것").
     static func highlightIndex(at time: Double, events: [Event]) -> Int? {
+        guard let last = events.last, time < last.start + last.duration else { return nil }
+
         var latest: Int?
         for (index, event) in events.enumerated() {
             guard case .note = event else { continue }
