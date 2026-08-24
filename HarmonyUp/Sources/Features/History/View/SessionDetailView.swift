@@ -48,8 +48,8 @@ struct SessionDetailView: View {
                             .foregroundStyle(.secondary)
                     }
                 } else {
-                    ForEach(sortedAttempts, id: \.persistentModelID) { attempt in
-                        attemptCard(attempt)
+                    ForEach(Array(sortedAttempts.enumerated()), id: \.element.persistentModelID) { _, attempt in
+                        attemptCard(attempt, round: roundNumber(of: attempt))
                     }
                 }
 
@@ -87,11 +87,27 @@ struct SessionDetailView: View {
         }
     }
 
-    private func attemptCard(_ attempt: PracticeAttempt) -> some View {
+    /// 같은 성부를 여러 번 불렀을 때 이게 몇 번째 시도인지(1부터). 한 번뿐이면 nil —
+    /// 굳이 "1회차"라고 붙이면 오히려 시끄럽다.
+    private func roundNumber(of attempt: PracticeAttempt) -> Int? {
+        let sameVoice = session.attempts
+            .filter { $0.intervalRawValue == attempt.intervalRawValue }
+            .sorted { $0.date < $1.date }
+        guard sameVoice.count > 1,
+              let index = sameVoice.firstIndex(where: { $0.persistentModelID == attempt.persistentModelID })
+        else { return nil }
+        return index + 1
+    }
+
+    private func attemptCard(_ attempt: PracticeAttempt, round: Int?) -> some View {
         let interval = attempt.interval
         let color = interval.map { Theme.intervalColor(for: $0) } ?? .secondary
+        // 같은 성부를 다시 불렀으면 카드 제목이 똑같이 여러 개 뜬다 — 몇 번째 시도인지 붙여서
+        // 구분한다("3도 따라 부르기 · 2회차").
+        let title = round.map { "\(interval?.koreanLabel ?? "?") 따라 부르기 · \($0)회차" }
+            ?? "\(interval?.koreanLabel ?? "?") 따라 부르기"
 
-        return HarmonyCard("\(interval?.koreanLabel ?? "?") 따라 부르기", systemImage: "target") {
+        return HarmonyCard(title, systemImage: "target") {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                 HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.md) {
                     Text(String(format: "%.0f%%", attempt.onPitchRatio * 100))

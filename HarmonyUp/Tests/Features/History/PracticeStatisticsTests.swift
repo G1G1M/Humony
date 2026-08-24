@@ -120,4 +120,54 @@ final class PracticeStatisticsTests: XCTestCase {
     func testBiasOnEmptyInputIsBalanced() {
         XCTAssertEqual(PracticeStatistics.bias(signedOffsets: []), .balanced)
     }
+
+    // MARK: - 성부별 대표 시도
+
+    private struct FakeAttempt: Equatable {
+        let interval: ChordGenerator.Interval
+        let date: Date
+        let ratio: Double
+    }
+
+    private func summaries(_ items: [FakeAttempt]) -> [(interval: ChordGenerator.Interval, item: FakeAttempt, count: Int)] {
+        PracticeStatistics.latestPerVoice(items, interval: { $0.interval }, date: { $0.date })
+    }
+
+    /// "다시 부르기"로 같은 성부를 여러 번 채점하면, 대표는 **가장 최근 것**이고 횟수는 전부
+    /// 세어야 한다 — 이 규칙이 깨지면 사용자 눈에는 "다시 부른 게 기록이 안 됐다"로 보인다
+    /// (2026-08-24 제보의 표시 쪽 절반).
+    func testLatestPerVoicePicksMostRecentAndCountsRepeats() {
+        let items = [
+            FakeAttempt(interval: .third, date: daysAgo(0, hour: 9), ratio: 0.52),
+            FakeAttempt(interval: .third, date: daysAgo(0, hour: 10), ratio: 0.71),
+            FakeAttempt(interval: .third, date: daysAgo(0, hour: 11), ratio: 0.88),
+        ]
+        let result = summaries(items)
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result[0].item.ratio, 0.88, "가장 최근 시도가 대표가 아니다")
+        XCTAssertEqual(result[0].count, 3, "반복 횟수가 안 세어졌다")
+    }
+
+    /// 성부가 섞여 있으면 각각 대표를 하나씩, 순서는 악보와 같은 음높이 내림차순.
+    func testLatestPerVoiceFollowsDisplayOrder() {
+        let items = [
+            FakeAttempt(interval: .bass, date: daysAgo(0, hour: 9), ratio: 0.6),
+            FakeAttempt(interval: .fifth, date: daysAgo(0, hour: 10), ratio: 0.7),
+            FakeAttempt(interval: .third, date: daysAgo(0, hour: 11), ratio: 0.8),
+        ]
+        XCTAssertEqual(summaries(items).map(\.interval), ChordGenerator.Interval.displayOrder)
+        XCTAssertTrue(summaries(items).allSatisfy { $0.count == 1 })
+    }
+
+    /// 한 번도 안 부른 성부는 아예 빠진다 — 0%로 채워 넣으면 "못 불렀다"로 오해된다.
+    func testUnpracticedVoicesAreOmitted() {
+        let items = [FakeAttempt(interval: .third, date: daysAgo(0), ratio: 0.8)]
+        let result = summaries(items)
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result[0].interval, .third)
+    }
+
+    func testLatestPerVoiceOnEmptyInput() {
+        XCTAssertTrue(summaries([]).isEmpty)
+    }
 }

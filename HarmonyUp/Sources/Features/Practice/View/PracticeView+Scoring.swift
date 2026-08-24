@@ -174,6 +174,13 @@ extension PracticeView {
                     .foregroundStyle(.secondary)
             }
 
+            // 저장이 조용히 끝나면 정말 기록됐는지 알 방법이 없다 — "다시 부르기로 채점해도
+            // 기록에 안 남는다"는 제보의 절반은 이 확인이 없어서였다(나머지 절반은 기록 탭이
+            // 새 시도를 못 알아채던 것, HistoryView 참고).
+            Label("기록 탭에 저장했어요", systemImage: "checkmark.circle.fill")
+                .font(Theme.Typography.caption)
+                .foregroundStyle(Theme.pitchGood)
+
             Divider()
 
             ForEach(Array(result.steps.enumerated()), id: \.offset) { _, step in

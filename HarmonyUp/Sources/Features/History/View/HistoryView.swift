@@ -14,6 +14,10 @@ import Charts
 struct HistoryView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \PracticeSession.date, order: .reverse) private var sessions: [PracticeSession]
+    /// 시도를 **직접** 쿼리한다 — 세션만 관찰하면 "같은 세션에 시도가 하나 더 붙는" 변화
+    /// (다시 부르기, 다른 성부 채점)를 SwiftUI가 알아채지 못해 화면이 갱신되지 않는다. 저장은
+    /// 되는데 기록 탭에는 첫 번째만 보이던 문제의 원인이 이것이었다(2026-08-24 제보).
+    @Query(sort: \PracticeAttempt.date, order: .reverse) private var allAttempts: [PracticeAttempt]
     @State private var showingClearConfirmation = false
 
     var body: some View {
@@ -146,21 +150,26 @@ struct HistoryView: View {
 
             Spacer()
 
-            if session.attempts.isEmpty {
+            let summaries = voiceSummaries(of: session)
+            if summaries.isEmpty {
                 Text("채점 없음")
                     .font(Theme.Typography.caption)
                     .foregroundStyle(.secondary)
             } else {
                 // 성부별 정확도를 정체성 색으로 나란히 — 색만으로 구분하지 않게 성부 이름도 같이.
                 HStack(spacing: Theme.Spacing.sm) {
-                    ForEach(sortedAttempts(of: session), id: \.persistentModelID) { attempt in
+                    ForEach(summaries, id: \.attempt.persistentModelID) { summary in
                         VStack(spacing: 1) {
-                            Text(attempt.interval?.koreanLabel ?? "?")
+                            // 같은 성부를 여러 번 불렀으면 몇 번인지도 같이 — 안 그러면 마지막
+                            // 시도만 보여서 "다시 부른 게 기록이 안 됐다"고 오해하기 쉽다.
+                            Text(summary.count > 1
+                                 ? "\(summary.attempt.interval?.koreanLabel ?? "?") ×\(summary.count)"
+                                 : (summary.attempt.interval?.koreanLabel ?? "?"))
                                 .font(Theme.Typography.caption2)
-                            Text(String(format: "%.0f%%", attempt.onPitchRatio * 100))
+                            Text(String(format: "%.0f%%", summary.attempt.onPitchRatio * 100))
                                 .font(.system(.caption, design: .monospaced))
                         }
-                        .foregroundStyle(attempt.interval.map { Theme.intervalColor(for: $0) } ?? .secondary)
+                        .foregroundStyle(summary.attempt.interval.map { Theme.intervalColor(for: $0) } ?? .secondary)
                     }
                 }
             }
@@ -195,19 +204,17 @@ struct HistoryView: View {
 
     // MARK: - 통계 (PracticeStatistics에 위임)
 
-    private var allAttempts: [PracticeAttempt] {
-        sessions.flatMap(\.attempts)
+    /// 이 세션에 속한 시도들. `session.attempts`(관계)가 아니라 쿼리 결과에서 골라내는 이유는
+    /// 위 `allAttempts` 주석과 같다 — 관계만 읽으면 새 시도가 붙어도 화면이 안 바뀐다.
+    private func attempts(of session: PracticeSession) -> [PracticeAttempt] {
+        allAttempts.filter { $0.session?.persistentModelID == session.persistentModelID }
     }
 
-    /// 성부 순서를 화면마다 뒤바뀌지 않게 고정한다 — 악보와 같은 음높이 내림차순
-    /// (`ChordGenerator.Interval.displayOrder`).
-    private func sortedAttempts(of session: PracticeSession) -> [PracticeAttempt] {
-        session.attempts.sorted { lhs, rhs in
-            let lhsIndex = lhs.interval?.displayIndex ?? ChordGenerator.Interval.displayOrder.count
-            let rhsIndex = rhs.interval?.displayIndex ?? ChordGenerator.Interval.displayOrder.count
-            if lhsIndex != rhsIndex { return lhsIndex < rhsIndex }
-            return lhs.date < rhs.date
-        }
+    /// 세션 행에 보여줄 성부별 대표 시도 — 고르는 규칙과 근거는 `PracticeStatistics.latestPerVoice`에 있다.
+    private func voiceSummaries(of session: PracticeSession) -> [(attempt: PracticeAttempt, count: Int)] {
+        PracticeStatistics
+            .latestPerVoice(attempts(of: session), interval: { $0.interval }, date: { $0.date })
+            .map { (attempt: $0.item, count: $0.count) }
     }
 
     private var streakDays: Int {

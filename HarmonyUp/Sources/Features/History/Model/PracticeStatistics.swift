@@ -41,6 +41,28 @@ enum PracticeStatistics {
         return streak
     }
 
+    // MARK: - 성부별 대표 시도
+
+    /// 성부별로 **가장 최근 시도**와 그 성부를 몇 번 불렀는지를 화면 순서
+    /// (`ChordGenerator.Interval.displayOrder`)대로 돌려준다.
+    ///
+    /// 세션 행에 시도를 전부 나열하면 "3도 52% · 3도 71% · 3도 88%"처럼 한 행이 길어져
+    /// 세션끼리 비교가 안 된다 — 대표 하나만 보여주되, 반복 횟수를 함께 줘서 "다시 부른 게
+    /// 기록이 안 됐다"는 오해가 생기지 않게 한다(전체 목록은 세션 상세에 있다).
+    ///
+    /// `@Model` 타입을 직접 받지 않으려고 접근자를 받는다 — 저장소 없이 테스트하기 위해서다.
+    static func latestPerVoice<T>(
+        _ items: [T],
+        interval: (T) -> ChordGenerator.Interval?,
+        date: (T) -> Date
+    ) -> [(interval: ChordGenerator.Interval, item: T, count: Int)] {
+        ChordGenerator.Interval.displayOrder.compactMap { voice in
+            let forVoice = items.filter { interval($0) == voice }
+            guard let latest = forVoice.max(by: { date($0) < date($1) }) else { return nil }
+            return (interval: voice, item: latest, count: forVoice.count)
+        }
+    }
+
     // MARK: - 자주 틀리는 음
 
     struct OffTargetNote: Equatable {
