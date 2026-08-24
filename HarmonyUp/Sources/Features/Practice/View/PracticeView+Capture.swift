@@ -422,6 +422,33 @@ extension PracticeView {
         }
     }
 
+    /// 재생 위치를 읽어 악보에서 강조할 자리를 갱신한다(149절).
+    ///
+    /// 시간 -> 자리 변환 자체는 `ScoreTimeline.activeEventIndex`(순수 함수, 유닛테스트로 고정)가
+    /// 하고, 여기서는 "어느 플레이어의 시계를 읽을지"와 "값이 바뀔 때만 상태를 쓴다"만 담당한다 —
+    /// 매 틱마다 같은 값을 다시 대입하면 초당 20번씩 불필요하게 body가 재평가된다.
+    func updatePlaybackHighlight() {
+        let playbackTime: TimeInterval?
+        if isPlayingVoiceHarmony {
+            playbackTime = voiceHarmonyPlayer.currentTime
+        } else if playingSoloVoice != nil {
+            playbackTime = soloVoicePlayer.currentTime
+        } else {
+            playbackTime = nil
+        }
+
+        guard let playbackTime else {
+            if activePlaybackStepIndex != nil { activePlaybackStepIndex = nil }
+            return
+        }
+
+        let index = ScoreTimeline.activeEventIndex(
+            at: playbackTime,
+            events: ScoreTimeline.events(from: melodySteps)
+        )
+        if activePlaybackStepIndex != index { activePlaybackStepIndex = index }
+    }
+
     /// 128절 — 멜로디/베이스/3도/5도를 각각 따로 들어본다(WORLD 버전). 포먼트/음량 조정이
     /// 실제로 어느 성부에 어떻게 들리는지 하나씩 떼어서 비교하기 위한 디버깅/비교용 버튼.
     func toggleVoiceSolo(_ voice: VoiceHarmonyTrackBuilder.Voice) {

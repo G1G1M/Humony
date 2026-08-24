@@ -527,7 +527,7 @@ extension PracticeView {
         ZStack {
             VexFlowScoreView(
                 steps: melodySteps,
-                activeStepIndex: nil,
+                activeStepIndex: activePlaybackStepIndex,
                 onSeekToStep: { _ in },
                 isRendering: $isScoreRendering,
                 contentVersion: scoreContentVersion

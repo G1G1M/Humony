@@ -152,6 +152,13 @@ struct PracticeView: View {
     // 재생 중인 성부가 뭔지"만 옵셔널 하나로 추적한다.
     let soloVoicePlayer = RecordingPlayer()
     @State var playingSoloVoice: VoiceHarmonyTrackBuilder.Voice?
+    // 149절 — 재생 중 악보에서 지금 울리는 자리를 강조한다(애플 뮤직 가사처럼). 값은 스텝
+    // 인덱스가 아니라 **ScoreTimeline 이벤트 인덱스**다: render.js의 setActiveStep이 그려진
+    // 음표 배열을 그대로 인덱싱하는데, 쉼표도 거기서 한 자리를 차지하기 때문이다.
+    @State var activePlaybackStepIndex: Int?
+    // 재생 위치를 따라가는 틱. 항상 돌지만 재생 중이 아니면 updatePlaybackHighlight가 바로
+    // 빠져나오고 상태를 안 건드리므로 body 재평가도 일어나지 않는다.
+    let playbackHighlightTicker = Timer.publish(every: 0.05, on: .main, in: .common).autoconnect()
     // 악보 카드가 뜬 시점엔 항상 true로 시작 — WKWebView 프로세스가 늦게 뜰 수 있어서(76절),
     // 첫 렌더가 끝날 때까지는 화면이 비어 보이는 대신 "만드는 중" 표시를 겹쳐 보여준다.
     // VexFlowScoreView.Coordinator가 renderScore 자바스크립트 호출이 끝나면 false로 되돌린다.
@@ -191,6 +198,9 @@ struct PracticeView: View {
             #endif
             micPermissionDenied = AVAudioApplication.shared.recordPermission == .denied
         }
+        .onReceive(playbackHighlightTicker) { _ in
+            updatePlaybackHighlight()
+        }
         .onDisappear {
             #if DEBUG
             print("[PracticeView] onDisappear — hasCapturedNote=\(hasCapturedNote), isCapturing=\(isCapturing), quickRecordPhase=\(quickRecordPhase)")
@@ -208,6 +218,7 @@ struct PracticeView: View {
             playingSoloVoice = nil
             startingNotePlayer.stop()
             isPlayingStartingNote = false
+            activePlaybackStepIndex = nil
         }
         .fullScreenCover(isPresented: $showingFullScreenScore) {
             SheetMusicFullScreenView(steps: melodySteps, detectedKeyName: melodySession.detectedKey?.name)

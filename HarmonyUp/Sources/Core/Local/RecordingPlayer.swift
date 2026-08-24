@@ -126,6 +126,20 @@ final class RecordingPlayer {
 
     private var usesReverb: Bool { wetDryMix > 0 }
 
+    /// 지금 재생 중인 위치(버퍼 시작 기준 초). 재생 중이 아니면 nil.
+    ///
+    /// 벽시계 타이머 대신 노드의 샘플 시계를 읽는다(149절) — 재생 시작 시각을 따로 들고 있다가
+    /// `Date()`로 빼면 엔진 시작 지연·버퍼 스케줄 지연만큼 어긋나고, 그 오차가 악보 하이라이트를
+    /// 음표 하나씩 밀리게 만든다. `playerTime`은 실제로 스피커로 나간 샘플 수라 어긋날 여지가 없다.
+    var currentTime: TimeInterval? {
+        guard player.isPlaying,
+              let nodeTime = player.lastRenderTime,
+              let playerTime = player.playerTime(forNodeTime: nodeTime),
+              playerTime.sampleRate > 0
+        else { return nil }
+        return Double(playerTime.sampleTime) / playerTime.sampleRate
+    }
+
     /// 재생을 멈춘다. 엔진까지 멈추므로 리버브 꼬리도 함께 끊긴다 — 사용자가 명시적으로
     /// 정지를 누른 경우라 꼬리를 남기는 게 오히려 어색하다. 버퍼가 끝까지 재생돼 자연히
     /// 끝나는 경우엔 엔진이 계속 돌고 있어서 꼬리가 정상적으로 남는다.
