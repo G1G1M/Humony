@@ -173,6 +173,17 @@ struct PracticeView: View {
     // true면 조작부가 왼쪽(기존 기본 배치), false면 오른쪽.
     @State var isControlPanelLeading = true
 
+    // 155절 — 부른 뒤 붙이는 "정답지" 악보. 녹음 전이 아니라 녹음 뒤에 고르는 이유는
+    // `PracticeView+Score.swift` 주석 참고(원본 목소리를 들고 있어서 다시 부르지 않고
+    // 재분석만 하면 된다).
+    @State var importedScore: ScoreImporter.ImportedScore?
+    @State var importedScoreName: String?
+    @State var isImportingScore = false
+    /// 악보를 못 읽었을 때 사용자에게 보여줄 안내(원인 코드가 아니라 다음에 뭘 하면 되는지).
+    @State var scoreImportMessage: String?
+    /// 마지막 분석에서 악보와 대조한 결과 — 요약 한 줄을 만드는 데 쓴다.
+    @State var scoreComparison: ScoreGuidedCorrection.Comparison?
+
     let audioCapture = AudioCapture()
     let melodySession = MelodySession()
     // 136절 — `PitchSmoother`(프레임별 피치 흔들림 완화)는 실시간 프레임 채점 전용이었다.
@@ -215,6 +226,13 @@ struct PracticeView: View {
         }
         .fullScreenCover(isPresented: $showingFullScreenScore) {
             SheetMusicFullScreenView(steps: melodySteps, detectedKeyName: melodySession.detectedKey?.name)
+        }
+        .fileImporter(
+            isPresented: $isImportingScore,
+            allowedContentTypes: Self.scoreContentTypes,
+            allowsMultipleSelection: false
+        ) { result in
+            handleScoreImport(result.map { $0.first ?? URL(fileURLWithPath: "") })
         }
     }
 }

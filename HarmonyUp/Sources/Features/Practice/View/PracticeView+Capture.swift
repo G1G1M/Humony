@@ -148,12 +148,14 @@ extension PracticeView {
         // 않는다). 결과적으로 사용자는 끝까지 기다린 뒤에 "너무 오래 걸린다"는 에러를 봤고 —
         // **정상 결과를 손에 쥔 채 버렸다.** 지금은 분석이 메인 스레드를 막지 않고(아래
         // `Task.detached`) 진행 표시도 있으므로, 유효한 결과를 버릴 이유가 없다.
+        // 155절 — 악보가 붙어 있으면 채보를 그 악보에 맞춰 교정한다(없으면 nil로 기존 경로).
+        let score = importedScore
         let token = UUID()
         activeAnalysisToken = token
         Task {
             // 분석(YIN을 윈도우마다 도는 무거운 동기 계산)을 메인 스레드에서 떼어낸다.
             let analyzed = await Task.detached(priority: .userInitiated) {
-                RecordingAnalyzer.analyze(recordingSamples: samples, sampleRate: rate)
+                RecordingAnalyzer.analyze(recordingSamples: samples, sampleRate: rate, reference: score)
             }.value
             guard activeAnalysisToken == token else { return }
             quickRecordPhase = .analyzing(.harmonyGeneration)
@@ -243,6 +245,9 @@ extension PracticeView {
         isScoreRendering = true
         scoreContentVersion += 1
 
+        // 155절 — 악보와 대조한 결과(요약 한 줄에 쓴다). 악보 없이 부르면 nil이다.
+        scoreComparison = analyzed.scoreComparison
+
         // 녹음 원본은 재생/채점을 다시 붙일 때를 위해 계속 들고 있는다.
         recentVoiceBuffer = analyzed.voiceSamples
         recentVoiceSampleRate = analyzed.sampleRate
@@ -312,6 +317,11 @@ extension PracticeView {
         hasCapturedNote = false
         melodySteps = []
         statusText = ""
+        // 155절 — 대조 결과는 이번 녹음의 것이라 비우지만, **붙여둔 악보는 남긴다.**
+        // 다시 녹음하는 건 대개 같은 곡을 다시 부르는 것이라, 매번 악보를 다시 고르게 하면
+        // 번거롭기만 하다(떼고 싶으면 카드의 "떼기"가 있다).
+        scoreComparison = nil
+        scoreImportMessage = nil
         quickRecordPhase = .idle
         quickRecordBuffer = []
         recordingLevel = 0
