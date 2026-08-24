@@ -76,8 +76,8 @@ enum KeyDetector {
 
         let candidates = (0..<12).flatMap { tonic -> [(tonic: Int, mode: Mode, correlation: Double)] in
             [
-                (tonic, .major, score(pearsonCorrelation(pitchClassProfile, rotate(majorProfile, toTonic: tonic)), tonic: tonic)),
-                (tonic, .minor, score(pearsonCorrelation(pitchClassProfile, rotate(minorProfile, toTonic: tonic)), tonic: tonic))
+                (tonic, .major, score(PitchClassProfile.pearsonCorrelation(pitchClassProfile, PitchClassProfile.rotate(majorProfile, by: tonic)), tonic: tonic)),
+                (tonic, .minor, score(PitchClassProfile.pearsonCorrelation(pitchClassProfile, PitchClassProfile.rotate(minorProfile, by: tonic)), tonic: tonic))
             ]
         }.sorted { $0.correlation > $1.correlation }
 
@@ -110,41 +110,13 @@ enum KeyDetector {
             let bonus = tonic == finalPitchClass ? finalNoteTonicBonus : 0
             return [
                 (DetectedKey(tonicPitchClass: tonic, mode: .major, confidence: 0).name,
-                 pearsonCorrelation(pitchClassProfile, rotate(majorProfile, toTonic: tonic)) + bonus),
+                 PitchClassProfile.pearsonCorrelation(pitchClassProfile, PitchClassProfile.rotate(majorProfile, by: tonic)) + bonus),
                 (DetectedKey(tonicPitchClass: tonic, mode: .minor, confidence: 0).name,
-                 pearsonCorrelation(pitchClassProfile, rotate(minorProfile, toTonic: tonic)) + bonus)
+                 PitchClassProfile.pearsonCorrelation(pitchClassProfile, PitchClassProfile.rotate(minorProfile, by: tonic)) + bonus)
             ]
         }.sorted { $0.score > $1.score }
 
         return Array(scored.prefix(count))
     }
 
-    /// key profile은 "C를 으뜸음으로 하는 조성" 기준으로 정의돼 있으므로,
-    /// 다른 으뜸음의 조성을 만들려면 배열을 그만큼 회전시킨다.
-    private static func rotate(_ profile: [Double], toTonic tonic: Int) -> [Double] {
-        (0..<12).map { pitchClass in profile[((pitchClass - tonic) % 12 + 12) % 12] }
-    }
-
-    /// 두 12차원 벡터(입력 pitch-class 분포 vs key profile)가 얼마나 비슷한 모양인지를
-    /// -1(반대)~0(무관)~1(똑같은 모양)로 나타내는 피어슨 상관계수.
-    private static func pearsonCorrelation(_ a: [Double], _ b: [Double]) -> Double {
-        let n = Double(a.count)
-        let meanA = a.reduce(0, +) / n
-        let meanB = b.reduce(0, +) / n
-
-        var numerator = 0.0
-        var sumSquaredA = 0.0
-        var sumSquaredB = 0.0
-        for i in 0..<a.count {
-            let deviationA = a[i] - meanA
-            let deviationB = b[i] - meanB
-            numerator += deviationA * deviationB
-            sumSquaredA += deviationA * deviationA
-            sumSquaredB += deviationB * deviationB
-        }
-
-        let denominator = (sumSquaredA * sumSquaredB).squareRoot()
-        guard denominator != 0 else { return 0 }
-        return numerator / denominator
-    }
 }
