@@ -26,20 +26,38 @@ enum NoteheadDetector {
     /// 창 바깥 좌우 띠가 차 있으면 그만큼 점수를 깎아 빔을 걸러낸다.
     private static let sideBandPenalty = 0.7
 
+    /// 위아래로도 계속 굵게 이어지는 잉크는 **음자리표**다(실측에서 걸렸다 — VexFlow가 그린
+    /// 진짜 악보를 읽히자 높은음자리표의 굵은 곡선이 머리 다섯 개로 잡혔고, 그 헛것이 첫 음표
+    /// 자리를 차지하는 바람에 조표 검색 범위까지 잘려 샤프를 놓쳤다).
+    ///
+    /// **위아래 중 작은 쪽을 본다.** 진짜 머리는 줄기가 한쪽으로만 뻗고 그 줄기도 창 너비에
+    /// 비해 얇아서 양쪽 중 하나는 거의 비어 있다. 음자리표는 양쪽 다 차 있다.
+    private static let verticalBandPenalty = 0.7
+
     static func detect(in image: BinaryImage, staff: StaffDetector.Staff) -> [Notehead] {
-        let cleaned = fillingHoles(in: removingStaffLines(from: image, staff: staff), staff: staff)
+        // **순서가 중요하다: 구멍부터 메우고 그다음에 오선을 지운다.**
+        //
+        // 실측에서 뒤집혀 있던 걸 잡았다 — VexFlow가 그린 2분음표(빈 머리)를 하나도 못 찾았다.
+        // 오선을 먼저 지우면, 머리 테두리에서 가장 얇은 좌우 끝이 오선과 겹칠 때 함께 지워져
+        // 구멍이 바깥으로 새고, 그러면 메울 대상이 아니게 된다. 원본에서는 테두리가 온전해서
+        // 오선이 머리를 관통해도 구멍은 조각날 뿐 여전히 닫혀 있다.
+        let cleaned = removingStaffLines(from: fillingHoles(in: image, staff: staff), staff: staff)
         let integral = IntegralImage(cleaned)
 
         let windowWidth = max(3, Int((staff.spacing * 1.25).rounded()))
         let windowHeight = max(3, Int((staff.spacing * 0.95).rounded()))
         let bandWidth = max(2, Int((staff.spacing * 0.55).rounded()))
+        let bandHeight = max(2, Int((staff.spacing * 0.5).rounded()))
         let windowArea = Double(windowWidth * windowHeight)
 
         let yRange = staff.searchRange().clamped(to: 0...(image.height - 1))
+        let startX = noteSearchStartX(in: cleaned, staff: staff)
+        guard startX <= staff.maxX else { return [] }
+
         var candidates: [(score: Double, head: Notehead)] = []
 
         for y in yRange {
-            for x in staff.minX...staff.maxX {
+            for x in startX...staff.maxX {
                 let left = x - windowWidth / 2
                 let top = y - windowHeight / 2
                 let fill = Double(integral.sum(x: left, y: top, width: windowWidth, height: windowHeight)) / windowArea
@@ -50,7 +68,14 @@ enum NoteheadDetector {
                 let leftBand = Double(integral.sum(x: left - bandWidth, y: top, width: bandWidth, height: windowHeight)) / bandArea
                 let rightBand = Double(integral.sum(x: left + windowWidth, y: top, width: bandWidth, height: windowHeight)) / bandArea
 
-                let score = fill - sideBandPenalty * min(leftBand, rightBand)
+                // 창 위아래 띠 — 음자리표처럼 세로로 계속 굵은 것이면 여기도 차 있다.
+                let verticalBandArea = Double(windowWidth * bandHeight)
+                let topBand = Double(integral.sum(x: left, y: top - bandHeight, width: windowWidth, height: bandHeight)) / verticalBandArea
+                let bottomBand = Double(integral.sum(x: left, y: top + windowHeight, width: windowWidth, height: bandHeight)) / verticalBandArea
+
+                let score = fill
+                    - sideBandPenalty * min(leftBand, rightBand)
+                    - verticalBandPenalty * min(topBand, bottomBand)
                 guard score >= minimumFillRatio else { continue }
 
                 candidates.append((score, Notehead(x: Double(x), y: Double(y))))
@@ -59,6 +84,27 @@ enum NoteheadDetector {
 
         return suppressNeighbors(candidates, minimumDistance: staff.spacing * 0.9)
             .sorted { $0.x < $1.x }
+    }
+
+    /// 오선 앞머리의 **음자리표를 통째로 건너뛴다.**
+    ///
+    /// 실측에서 나온 수정이다 — VexFlow가 그린 진짜 악보를 읽히자 높은음자리표의 굵은 곡선이
+    /// 음표 머리로 잡혔고, 그 헛것이 "첫 음표" 자리를 차지하는 바람에 조표 검색 범위까지
+    /// 잘려 샤프를 놓쳤다. 창 위아래 띠 감점으로 대부분 사라졌지만 곡선의 일부는 국소적으로
+    /// 머리와 구분되지 않는다 — 애초에 그 자리를 안 보는 편이 확실하다.
+    ///
+    /// 음자리표는 **오선 위아래로 넘치게 크다**는 게 음표와 다른 점이다(줄기까지 합친 음표가
+    /// 오선 3~4칸이라면 음자리표는 6칸을 넘는다).
+    private static func noteSearchStartX(in image: BinaryImage, staff: StaffDetector.Staff) -> Int {
+        let probeEnd = min(staff.maxX, staff.minX + Int(staff.spacing * 5))
+        guard staff.minX < probeEnd else { return staff.minX }
+
+        let yRange = staff.searchRange(extraSteps: 8).clamped(to: 0...(image.height - 1))
+        let tall = image.inkComponents(xRange: staff.minX...probeEnd, yRange: yRange)
+            .filter { Double($0.height) >= staff.spacing * 4.5 }
+
+        guard let clefEnd = tall.map(\.maxX).max() else { return staff.minX }
+        return clefEnd + max(1, Int(staff.spacing * 0.3))
     }
 
     // MARK: - 1. 오선 지우기
