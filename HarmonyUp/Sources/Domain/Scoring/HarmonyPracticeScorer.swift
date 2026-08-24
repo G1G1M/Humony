@@ -58,7 +58,13 @@ enum HarmonyPracticeScorer {
         guard !targets.isEmpty else { return nil }
         let sung = sungFrequencies.filter { $0 > 0 }
 
-        let pairs = align(targets: targets, sung: sung)
+        // 정렬은 "선형 거리 공간"에서 해야 한다 — 주파수 그대로면 높은 음의 Hz 간격이 커서
+        // 비용이 왜곡된다. cent 좌표로 옮기면 두 좌표의 차이가 곧 cent 편차가 된다.
+        let pairs = MelodyAligner.align(
+            targets: targets.map(centsCoordinate),
+            sung: sung.map(centsCoordinate),
+            gapPenalty: gapPenaltyCents
+        )
 
         var steps: [StepResult] = []
         var extraCount = 0
@@ -66,7 +72,7 @@ enum HarmonyPracticeScorer {
         var signedOffsets: [Double] = []
 
         for pair in pairs {
-            switch (pair.target, pair.sung) {
+            switch (pair.targetIndex, pair.sungIndex) {
             case let (targetIndex?, sungIndex?):
                 let cents = centsBetween(target: targets[targetIndex], sung: sung[sungIndex])
                 absOffsets.append(abs(cents))
@@ -102,66 +108,15 @@ enum HarmonyPracticeScorer {
         )
     }
 
-    // MARK: - 정렬
-
-    /// 목표 시퀀스와 부른 시퀀스를 순서를 지키면서 짝지운다 — 전역 정렬(Needleman-Wunsch와
-    /// 같은 편집거리 DP)이다.
-    ///
-    /// **왜 DTW가 아니라 편집거리 정렬인가**: DTW는 한 목표음에 여러 부른 음이(또는 그 반대로)
-    /// 붙는 many-to-many 대응을 허용해서, "이 음을 빠뜨렸다 / 군더더기로 하나 더 불렀다"를
-    /// 셀 수가 없다. 편집거리 정렬은 목표음 하나가 정확히 부른 음 하나 또는 공백에만 대응하므로
-    /// 누락/추가가 결과에 그대로 드러난다 — 사용자에게 보여줄 것이 바로 그것이다.
-    ///
-    /// 순서대로 1:1 비교(zip)로는 안 되는 이유: 중간에서 음 하나를 빠뜨리면 그 뒤가 전부 한 칸씩
-    /// 밀려서, 잘 부른 나머지가 모두 오답이 된다.
-    private static func align(targets: [Double], sung: [Double]) -> [(target: Int?, sung: Int?)] {
-        let n = targets.count
-        let m = sung.count
-
-        // cost[i][j] = 목표 앞 i개와 부른 음 앞 j개를 처리하는 최소 비용
-        var cost = [[Double]](repeating: [Double](repeating: 0, count: m + 1), count: n + 1)
-        for i in 1...n { cost[i][0] = Double(i) * gapPenaltyCents }
-        if m > 0 {
-            for j in 1...m { cost[0][j] = Double(j) * gapPenaltyCents }
-        }
-
-        if m > 0 {
-            for i in 1...n {
-                for j in 1...m {
-                    let match = cost[i - 1][j - 1] + abs(centsBetween(target: targets[i - 1], sung: sung[j - 1]))
-                    let skipTarget = cost[i - 1][j] + gapPenaltyCents // 이 목표음을 안 불렀다
-                    let skipSung = cost[i][j - 1] + gapPenaltyCents   // 목표에 없는 음을 불렀다
-                    cost[i][j] = min(match, min(skipTarget, skipSung))
-                }
-            }
-        }
-
-        // 되짚어가며 실제 짝을 복원한다. 비용이 같을 때는 짝짓기(match)를 먼저 택한다 —
-        // 같은 비용이면 "부른 음이 있었다"는 정보를 살리는 쪽이 사용자에게 더 유용하다.
-        var pairs: [(target: Int?, sung: Int?)] = []
-        var i = n
-        var j = m
-        while i > 0 || j > 0 {
-            if i > 0, j > 0,
-               cost[i][j] == cost[i - 1][j - 1] + abs(centsBetween(target: targets[i - 1], sung: sung[j - 1])) {
-                pairs.append((target: i - 1, sung: j - 1))
-                i -= 1
-                j -= 1
-            } else if i > 0, cost[i][j] == cost[i - 1][j] + gapPenaltyCents {
-                pairs.append((target: i - 1, sung: nil))
-                i -= 1
-            } else {
-                pairs.append((target: nil, sung: j - 1))
-                j -= 1
-            }
-        }
-        return pairs.reversed()
-    }
-
     // MARK: - 보조
 
+    /// 주파수를 cent 좌표로. 두 좌표의 차이가 그대로 cent 편차가 되므로 정렬 비용에 바로 쓸 수 있다.
+    private static func centsCoordinate(_ frequency: Double) -> Double {
+        1200.0 * log2(frequency)
+    }
+
     /// 목표 대비 편차(cent). `PitchScorer.score`와 같은 공식이지만, 이쪽은 허용 오차 판정 전의
-    /// 원시 편차만 필요하고 옵셔널을 만들지 않아서 정렬 DP 안에서 쓰기 편하다.
+    /// 원시 편차만 필요하고 옵셔널을 만들지 않아서 결과 조립에 쓰기 편하다.
     private static func centsBetween(target: Double, sung: Double) -> Double {
         1200.0 * log2(sung / target)
     }
