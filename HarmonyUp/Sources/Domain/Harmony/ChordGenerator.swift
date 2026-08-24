@@ -216,6 +216,23 @@ enum ChordGenerator {
         results.reserveCapacity(melodyNotes.count)
         for (index, note) in melodyNotes.enumerated() {
             guard let degree = degrees[index] else {
+                // 온음계 밖 음은 새 화음을 만들지 않고 직전 화음을 이어받는다. 다만 **그 자리가
+                // 지금 멜로디에 대해 여전히 유효한지는 확인해야 한다**(147절) — 예전엔 그냥
+                // 이어받기만 해서, 경과음에서 멜로디가 뚝 떨어지면 화음이 멜로디 위로 올라가
+                // 성부가 뒤집혔다(덤프에서 멜로디 F3 위로 화음 윗소리가 6반음 올라간 사례).
+                if let previous = lastValidHarmony,
+                   let previousDegree,
+                   !heldVoicingFits(previous: previous, melodyMIDINote: note.midiNote) {
+                    // 화음(코드)은 그대로 두고 자리만 다시 잡는다.
+                    let repositioned = voiceLedHarmonyNotes(
+                        candidate: candidates[previousDegree],
+                        melodyMIDINote: note.midiNote,
+                        previousPitches: previous.map(\.midiNote).sorted()
+                    )
+                    lastValidHarmony = repositioned
+                    results.append(repositioned)
+                    continue
+                }
                 results.append(lastValidHarmony)
                 continue
             }
@@ -229,10 +246,12 @@ enum ChordGenerator {
             let notes: [HarmonyNote]
             if let previous = lastValidHarmony, previousDegree == degree, heldVoicingFits(previous: previous, melodyMIDINote: note.midiNote) {
                 notes = previous
-            } else if let previous = lastValidHarmony {
-                notes = voiceLedHarmonyNotes(candidate: candidates[degree], melodyMIDINote: note.midiNote, previous: previous)
             } else {
-                notes = buildHarmonyNotes(candidate: candidates[degree], melodyMIDINote: note.midiNote)
+                // 첫 화음은 기준이 될 직전 보이싱이 없으므로, 멜로디 바로 아래 닫힌 자리를
+                // 가짜 기준으로 삼는다 — 그래야 첫 배치도 다운시프트 상한을 함께 지킨다.
+                // (예전엔 근음 위치로 쌓았는데, 첫 음이 낮으면 아랫소리가 A1까지 내려갔다.)
+                let reference = lastValidHarmony?.map(\.midiNote).sorted() ?? referenceVoicing(melodyMIDINote: note.midiNote)
+                notes = voiceLedHarmonyNotes(candidate: candidates[degree], melodyMIDINote: note.midiNote, previousPitches: reference)
             }
             previousDegree = degree
             lastValidHarmony = notes
@@ -375,6 +394,25 @@ enum ChordGenerator {
     /// 옥타브를 자유롭게 고르게 두면 베이스만 저 아래로 떨어져 화음이 텅 빈 것처럼 들린다.
     private static let maximumVoicingSpread = 12
 
+    /// **어떤 성부도 멜로디보다 이 이상 아래로 내려가지 못한다(반음).**
+    ///
+    /// 음악적 이유가 아니라 **소리를 만드는 방식** 때문에 필요한 상한이다. 화음 성부는
+    /// 사용자가 부른 바로 그 음을 피치 시프트해서 만든다(`VoiceHarmonyTrackBuilder`) —
+    /// 한 옥타브를 크게 넘겨 내리면 WORLD 재합성이 뭉개져 웅웅거리는 소리가 된다.
+    ///
+    /// 실기기 로그(147절)에서 멜로디 E4(330Hz)에 아랫소리가 A1(55Hz)으로 배치된 사례가 나왔다
+    /// — 2.6옥타브 다운시프트다. 원인은 두 가지가 겹친 것이었다: 첫 음이 낮아(D3) 근음 위치
+    /// 배치가 A1을 골랐고, 그 뒤 같은 코드가 열 음 동안 유지되는 사이 멜로디만 한 옥타브 넘게
+    /// 올라갔는데 자리는 고정돼 있었다.
+    private static let maximumMelodyToVoiceDownshift = 16
+
+    /// 첫 화음(기준이 될 직전 보이싱이 없을 때)이 놓이길 바라는 자리 — 멜로디 바로 아래
+    /// 닫힌 자리. 이걸 가짜 "직전 보이싱"으로 삼아 같은 탐색을 돌리면, 첫 배치도 다른 배치와
+    /// 똑같은 제약(다운시프트 상한·닫힌 자리)을 자동으로 지킨다.
+    private static func referenceVoicing(melodyMIDINote: Int) -> [Int] {
+        [melodyMIDINote - 13, melodyMIDINote - 9, melodyMIDINote - 5]
+    }
+
     /// 코드가 유지되는 동안 직전 자리를 그대로 써도 되는지 — 멜로디를 침범하지 않으면 그대로 둔다.
     ///
     /// 자리를 바꾸는 건 화성적으로 뭔가 일어났다는 신호다. 코드가 유지되는 동안 전위가 바뀌면
@@ -386,8 +424,13 @@ enum ChordGenerator {
     /// 한 옥타브 떨어뜨리는 것(세 성부 × 12반음)보다 최소 이동으로 다시 고르는 편이 훨씬 덜 튄다
     /// — 실측으로 총 이동량 36반음 대 12반음이었다.
     private static func heldVoicingFits(previous: [HarmonyNote], melodyMIDINote: Int) -> Bool {
-        guard let top = previous.map(\.midiNote).max() else { return false }
+        let pitches = previous.map(\.midiNote)
+        guard let top = pitches.max(), let bottom = pitches.min() else { return false }
+        // 멜로디와 부딪히지 않아야 하고(위), 시프트로 만들 수 없을 만큼 멀어져도 안 된다(아래).
+        // 아래쪽 조건이 없으면 코드가 유지되는 동안 멜로디만 올라가 화음이 저 밑에 남는다 —
+        // 실기기 로그에서 31반음까지 벌어졌다.
         return top <= melodyMIDINote - minimumMelodyClearance
+            && bottom >= melodyMIDINote - maximumMelodyToVoiceDownshift
     }
 
     /// **보이스 리딩(146절)** — 직전 보이싱에서 성부가 가장 적게 움직이는 배치를 고른다.
@@ -409,15 +452,14 @@ enum ChordGenerator {
     private static func voiceLedHarmonyNotes(
         candidate: ChordCandidate,
         melodyMIDINote: Int,
-        previous: [HarmonyNote]
+        previousPitches: [Int]
     ) -> [HarmonyNote] {
-        let previousPitches = previous.map(\.midiNote).sorted()
         guard previousPitches.count == 3 else {
             return buildHarmonyNotes(candidate: candidate, melodyMIDINote: melodyMIDINote)
         }
 
         let ceiling = melodyMIDINote - minimumMelodyClearance
-        let floor = melodyMIDINote - maximumMelodyToTopVoiceGap - maximumVoicingSpread
+        let floor = melodyMIDINote - maximumMelodyToVoiceDownshift
         let chordTones = [candidate.rootPitchClass, candidate.thirdPitchClass, candidate.fifthPitchClass]
 
         // 각 구성음이 놓일 수 있는 자리들(멜로디 아래, 상한 안쪽의 모든 옥타브).

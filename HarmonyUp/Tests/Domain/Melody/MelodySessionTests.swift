@@ -54,12 +54,13 @@ final class MelodySessionTests: XCTestCase {
         session.record(result(midiNote: 67, duration: 0.3)) // G4 — 마지막 음
 
         let harmony = try XCTUnwrap(session.suggestedHarmony)
-        let byInterval = Dictionary(uniqueKeysWithValues: harmony.map { ($0.interval, $0) })
-        XCTAssertEqual(byInterval[.bass]?.pitchClass, 0)  // C — 세 음이 모두 속하는 I 코드가 처음부터 끝까지 유지됨
-        XCTAssertEqual(byInterval[.third]?.pitchClass, 4) // E
-        XCTAssertEqual(byInterval[.fifth]?.pitchClass, 7) // G
-        // 배치 위치는 항상 마지막 노트(G4=67) 기준이어야 한다.
-        XCTAssertLessThan(byInterval[.fifth]!.midiNote, 67)
+
+        // 검증 대상은 **어떤 코드가 뽑혔는가**다 — 세 음이 모두 속하는 I 코드(도미솔)가 처음부터
+        // 끝까지 유지돼야 한다. 그 세 음을 어느 자리(아랫/가운뎃/윗소리)에 놓을지는 146절
+        // 보이스 리딩이 전위로 결정하므로, 자리별 음이름을 고정하면 전위를 금지하는 셈이 된다.
+        XCTAssertEqual(Set(harmony.map(\.pitchClass)), [0, 4, 7])
+        // 배치 위치는 항상 마지막 노트(G4=67) 아래여야 한다.
+        XCTAssertLessThan(harmony.map(\.midiNote).max()!, 67)
     }
 
     func testEmptySessionHasNoKeyOrHarmony() {

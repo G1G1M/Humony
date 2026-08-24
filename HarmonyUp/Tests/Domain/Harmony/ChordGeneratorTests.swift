@@ -360,8 +360,11 @@ final class ChordGeneratorTests: XCTestCase {
             let chord = Set(voicing.map { $0.mod(12) })
 
             if let previousChord, let previousVoicing, chord == previousChord {
-                // 직전 자리를 그대로 써도 멜로디와 안 부딪히는 상황이라면 바뀌면 안 된다.
+                // 직전 자리를 그대로 써도 **되는** 상황이라면 바뀌면 안 된다. 쓸 수 있는 조건은
+                // 두 가지다 — 멜로디와 안 부딪히고(위), 시프트로 만들 수 있을 만큼 가깝고(아래).
+                // 아래쪽 조건이 깨지면 코드가 유지돼도 자리를 다시 잡아야 한다(147절).
                 let fits = previousVoicing.max()! <= melody[index] - 2
+                    && previousVoicing.min()! >= melody[index] - 16
                 if fits {
                     XCTAssertEqual(
                         voicing, previousVoicing,
@@ -385,6 +388,63 @@ final class ChordGeneratorTests: XCTestCase {
             guard let harmony else { continue }
             let pitches = harmony.map(\.midiNote).sorted()
             XCTAssertLessThanOrEqual(pitches[2] - pitches[0], 12, "\(index)번째 화음이 한 옥타브보다 넓게 벌어졌다: \(pitches)")
+        }
+    }
+
+    /// **소리를 만드는 방식에서 오는 제약** — 화음 성부는 사용자가 부른 그 음을 피치 시프트해서
+    /// 만들기 때문에, 너무 많이 내리면 WORLD 재합성이 뭉개져 웅웅거린다. 실기기 로그(147절)에서
+    /// 멜로디 E4(330Hz)에 아랫소리가 A1(55Hz)으로 배치된 사례가 나왔다 — 2.6옥타브 다운시프트다.
+    ///
+    /// 재현 조건이 중요하다: **낮은 음으로 시작해 한 옥타브 넘게 올라가는** 멜로디여야 한다.
+    /// 코드가 자주 바뀌는 짧은 테스트 멜로디로는 안 잡혔다.
+    func testNoVoiceIsShiftedTooFarBelowTheMelody() {
+        let melody = [50, 51, 55, 60, 62, 60, 59, 56, 57, 64, 54, 64, 66, 64, 62, 61, 62, 67, 67, 69, 67, 66, 64, 62, 60, 59, 56, 62, 64, 53, 54, 55]
+        let notes = melody.map { (midiNote: $0, duration: 0.4) }
+        let harmonies = ChordGenerator.harmonizeSequence(melodyNotes: notes, key: key(tonic: 7, mode: .major))
+
+        for (index, harmony) in harmonies.enumerated() {
+            guard let harmony else { continue }
+            let lowest = harmony.map(\.midiNote).min()!
+            let downshift = melody[index] - lowest
+            XCTAssertLessThanOrEqual(
+                downshift, 16,
+                "\(index)번째: 멜로디 \(melody[index])에 화음 최저음 \(lowest) — \(downshift)반음이나 내려 시프트해야 한다"
+            )
+        }
+    }
+
+    /// 온음계 밖 음은 직전 화음을 이어받는데, **그 자리가 지금 멜로디에 대해 유효한지 확인해야 한다.**
+    /// 예전엔 그냥 이어받기만 해서 경과음에서 멜로디가 뚝 떨어지면 화음이 멜로디 위로 올라갔다.
+    func testCarriedForwardHarmonyNeverEndsUpAboveTheMelody() {
+        // G장조에서 F내추럴(53)·C#(61) 같은 온음계 밖 음이 멜로디가 낮아지는 자리에 오도록 배치.
+        let melody = [67, 69, 67, 66, 64, 53, 54, 55, 62, 61, 55, 53]
+        let notes = melody.map { (midiNote: $0, duration: 0.4) }
+        let harmonies = ChordGenerator.harmonizeSequence(melodyNotes: notes, key: key(tonic: 7, mode: .major))
+
+        for (index, harmony) in harmonies.enumerated() {
+            guard let harmony else { continue }
+            let top = harmony.map(\.midiNote).max()!
+            XCTAssertLessThan(
+                top, melody[index],
+                "\(index)번째: 화음 윗소리 \(top)가 멜로디 \(melody[index])를 넘었다 — 성부가 뒤집혔다"
+            )
+        }
+    }
+
+    /// 첫 화음도 다른 화음과 똑같은 제약을 지켜야 한다 — 예전엔 첫 화음만 근음 위치로 쌓아서,
+    /// 첫 음이 낮으면(D3) 아랫소리가 A1까지 내려갔다.
+    func testFirstChordRespectsTheDownshiftLimitEvenForLowMelodies() {
+        for melodyMIDINote in 45...72 {
+            let result = ChordGenerator.harmonizeSequence(
+                melodyNotes: [(midiNote: melodyMIDINote, duration: 0.5)],
+                key: key(tonic: 0, mode: .major)
+            )
+            guard let harmony = result.first ?? nil else { continue }
+            let lowest = harmony.map(\.midiNote).min()!
+            XCTAssertLessThanOrEqual(
+                melodyMIDINote - lowest, 16,
+                "멜로디 \(melodyMIDINote)의 첫 화음 최저음이 \(lowest)까지 내려갔다"
+            )
         }
     }
 
