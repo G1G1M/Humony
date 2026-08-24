@@ -133,4 +133,53 @@ final class RhythmQuantizerTests: XCTestCase {
         let result = RhythmQuantizer.quantize(durations: durations, onsetTimes: [0, 0.3])
         XCTAssertEqual(result.map(\.vexFlowDuration), RhythmQuantizer.quantize(durations: durations).map(\.vexFlowDuration))
     }
+    // MARK: - 점2분음표 / 온음표 (150절)
+
+    /// 실기기 로그에서 1.34초짜리 무음(약 2.5박)이 나왔다 — 지금 어휘로는 2분쉼표(2박)가
+    /// 상한이라 0.5박이 사라진다. 3박·4박을 표기할 수 있어야 그 시간이 악보에 남는다.
+    func testThreeBeatValueBecomesDottedHalf() {
+        // 중앙값 0.3초 = 1박, 마지막 음 0.9초 = 3박
+        let result = RhythmQuantizer.quantize(durations: [0.3, 0.3, 0.3, 0.9])
+        XCTAssertEqual(result.last?.vexFlowDuration, "hd")
+        XCTAssertEqual(result.last?.beats, 3.0)
+    }
+
+    func testFourBeatValueBecomesWholeNote() {
+        let result = RhythmQuantizer.quantize(durations: [0.3, 0.3, 0.3, 1.2])
+        XCTAssertEqual(result.last?.vexFlowDuration, "w")
+        XCTAssertEqual(result.last?.beats, 4.0)
+    }
+
+    /// 4박을 넘겨도 온음표가 상한이다 — 한 마디(4/4)보다 긴 음표는 표기할 수 없고,
+    /// 넘겼다간 `measureBreaks`가 "이 음 하나가 마디를 넘는다"는 처리 못 하는 상태에 빠진다.
+    func testValuesLongerThanAMeasureAreCappedAtWholeNote() {
+        let result = RhythmQuantizer.quantize(durations: [0.3, 0.3, 0.3, 3.0])
+        XCTAssertEqual(result.last?.vexFlowDuration, "w")
+        XCTAssertEqual(result.last?.beats, 4.0)
+    }
+
+    /// 경계는 중간값 — 2.5박 미만은 2분음표, 그 이상은 점2분음표.
+    func testBoundariesBetweenHalfDottedHalfAndWhole() {
+        let unit = 0.3
+        func duration(_ beats: Double) -> String {
+            // 중앙값이 unit이 되도록 같은 길이 3개를 앞에 깔고 마지막에 원하는 박을 넣는다.
+            RhythmQuantizer.quantize(durations: [unit, unit, unit, unit * beats]).last!.vexFlowDuration
+        }
+        XCTAssertEqual(duration(2.4), "h")
+        XCTAssertEqual(duration(2.6), "hd")
+        XCTAssertEqual(duration(3.4), "hd")
+        XCTAssertEqual(duration(3.6), "w")
+    }
+
+    /// 온음표는 그 자체로 한 마디를 꽉 채운다 — 마디 중간에서 시작하면 다음 마디로 밀린다.
+    func testWholeNoteOccupiesItsOwnMeasure() {
+        let notes = [
+            RhythmQuantizer.QuantizedNote(vexFlowDuration: "q", beats: 1.0),
+            RhythmQuantizer.QuantizedNote(vexFlowDuration: "w", beats: 4.0),
+            RhythmQuantizer.QuantizedNote(vexFlowDuration: "q", beats: 1.0)
+        ]
+        // 4분음표 하나로 마디가 끊기고, 온음표가 자기 마디를 통째로, 나머지가 마지막 마디.
+        XCTAssertEqual(RhythmQuantizer.measureBreaks(notes: notes), [1, 1, 1])
+    }
+
 }

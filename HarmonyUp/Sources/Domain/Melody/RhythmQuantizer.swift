@@ -64,7 +64,17 @@ enum RhythmQuantizer {
     }
 
     /// 박 수를 실제 음표 모양으로 스냅한다 — 두 경로(박 추정 / 중앙값 폴백)가 같은 경계를
-    /// 쓰도록 한곳에 모았다. 지금 표기할 수 있는 건 8분·4분·점4분·2분음표 네 가지다.
+    /// 쓰도록 한곳에 모았다. 표기할 수 있는 건 8분·4분·점4분·2분·점2분·온음표 여섯 가지다.
+    ///
+    /// **150절에 점2분·온음표가 추가됐다.** 그전엔 2분음표(2박)가 상한이라, 길게 끈 음이나 긴
+    /// 쉼표가 전부 2박으로 잘려 그만큼의 시간이 악보에서 사라졌다 — 실기기 로그에서 1.34초
+    /// (약 2.5박)짜리 무음이 실제로 나왔다. 149절에 `ScoreTimeline`이 "음표+쉼표 = 간격"으로
+    /// 시간을 보존해도, 여기서 잘리면 그 보존이 무의미해진다.
+    ///
+    /// 경계는 전부 이웃한 두 값의 중간이다(0.75 / 1.25 / 1.75 / 2.5 / 3.5).
+    /// **온음표(4박)가 상한인 이유**: 4/4 한 마디가 4박이라 그보다 긴 음표는 표기할 수 없고,
+    /// 그런 값이 나오면 `measureBreaks`가 "한 음이 마디를 넘는다"는 처리할 수 없는 상태에 빠진다
+    /// (그 함수의 무한 루프 안전장치가 "음 하나는 절대 4박을 안 넘는다"에 기대고 있다).
     private static func classify(beats: Double) -> QuantizedNote {
         switch beats {
         case ..<0.75:
@@ -73,8 +83,12 @@ enum RhythmQuantizer {
             return QuantizedNote(vexFlowDuration: "q", beats: 1.0)
         case 1.25..<1.75:
             return QuantizedNote(vexFlowDuration: "qd", beats: 1.5)
-        default:
+        case 1.75..<2.5:
             return QuantizedNote(vexFlowDuration: "h", beats: 2.0)
+        case 2.5..<3.5:
+            return QuantizedNote(vexFlowDuration: "hd", beats: 3.0)
+        default:
+            return QuantizedNote(vexFlowDuration: "w", beats: 4.0)
         }
     }
 
@@ -94,9 +108,10 @@ enum RhythmQuantizer {
     /// 그려졌을 뿐이다). 이제는 음을 넣기 **전에** 그 음까지 넣으면 4박을 넘는지 먼저 보고,
     /// 넘으면 마디를 먼저 끊어서 그 음이 다음 마디의 첫 음이 되게 한다.
     ///
-    /// 음 하나가 그 자체로 4박을 넘는 경우는 지금 `quantize`가 최대 2분음표(2박)까지만
-    /// 분류하므로 생기지 않는다 — 그래서 "빈 마디를 끊는" 무한 루프도 구조적으로 없다
-    /// (`currentCount > 0` 가드가 그 안전장치를 겸한다).
+    /// 음 하나가 그 자체로 4박을 **넘는** 경우는 `classify`가 온음표(4박)를 상한으로 두므로
+    /// 생기지 않는다 — 그래서 "빈 마디를 끊는" 무한 루프도 구조적으로 없다
+    /// (`currentCount > 0` 가드가 그 안전장치를 겸한다). 정확히 4박인 온음표는 자기 마디를
+    /// 통째로 차지하고 바로 끊긴다(150절에 온음표를 추가하며 이 전제를 다시 확인했다).
     static func measureBreaks(notes: [QuantizedNote]) -> [Int] {
         var breaks: [Int] = []
         var currentCount = 0

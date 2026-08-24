@@ -213,7 +213,9 @@ function renderScore(data) {
 
   // VexFlow 음표 코드 -> 박(4분음표=1박) 환산. 마디의 VF.Voice num_beats를 실제 박 합으로
   // 줘야(음표 개수가 아니라) 포매터가 8분음표/점4분음표를 제대로 배치한다.
-  var DURATION_BEATS = { '8': 0.5, 'q': 1, 'qd': 1.5, 'h': 2 };
+  // RhythmQuantizer.classify가 내놓는 여섯 가지와 정확히 일치해야 한다 — 여기 빠진 값이
+  // 들어오면 `|| 1`로 떨어져서 마디 박 계산이 조용히 틀어진다(150절에 hd/w 추가).
+  var DURATION_BEATS = { '8': 0.5, 'q': 1, 'qd': 1.5, 'h': 2, 'hd': 3, 'w': 4 };
   // 쉼표는 음높이가 없지만 VexFlow는 그려질 위치(keys)가 필요하다 — 오선 가운데줄 관례.
   var REST_KEY = { treble: 'b/4', bass: 'd/3' };
 
