@@ -55,6 +55,10 @@ enum ScoreImporter {
     /// 지금 지원하는 확장자. `.mxl`(zip으로 압축된 MusicXML)과 PDF는 아직이다 —
     /// PDF는 스캔본이면 딥러닝 OMR이 필요해 온디바이스 원칙과 부딪힌다.
     private static let musicXMLExtensions: Set<String> = ["musicxml", "xml"]
+
+    /// 압축 MusicXML(157절). **MuseScore의 MusicXML 내보내기 기본값이 이쪽이라** 실제로
+    /// 사람들이 손에 넣는 파일은 `.xml`보다 `.mxl`인 경우가 많다.
+    private static let compressedMusicXMLExtensions: Set<String> = ["mxl"]
     private static let midiExtensions: Set<String> = ["mid", "midi"]
 
     /// 사진으로 찍은 악보(156절). 확장자로만 갈라내고, 실제 해독은 `SheetMusicImageReader`가 한다.
@@ -72,12 +76,33 @@ enum ScoreImporter {
         }
 
         let isMIDI = midiExtensions.contains(fileExtension)
-        guard isMIDI || musicXMLExtensions.contains(fileExtension) else {
+        let isCompressed = compressedMusicXMLExtensions.contains(fileExtension)
+        guard isMIDI || isCompressed || musicXMLExtensions.contains(fileExtension) else {
             throw ImportError.unsupportedFileType
         }
 
         guard let data = try? Data(contentsOf: url) else { throw ImportError.malformed }
-        return isMIDI ? try parseMIDI(data) : try parseMusicXML(data)
+        if isMIDI { return try parseMIDI(data) }
+        return isCompressed ? try parseCompressedMusicXML(data) : try parseMusicXML(data)
+    }
+
+    /// `.mxl`은 MusicXML을 zip으로 묶은 것이다 (157절).
+    ///
+    /// 규격은 `META-INF/container.xml`이 실제 악보 파일을 가리키게 돼 있지만, **목차에서
+    /// `META-INF`가 아닌 첫 `.xml`/`.musicxml`을 집으면** 실제 파일들에서 같은 답이 나온다 —
+    /// 한 단계를 덜 거치면서 container.xml이 빠져 있는 파일도 읽힌다.
+    static func parseCompressedMusicXML(_ data: Data) throws -> ImportedScore {
+        let entry: ZipReader.Entry
+        do {
+            entry = try ZipReader.firstEntry(in: data) { name in
+                guard !name.hasPrefix("META-INF/"), !name.hasPrefix(".") else { return false }
+                let lowercased = name.lowercased()
+                return lowercased.hasSuffix(".xml") || lowercased.hasSuffix(".musicxml")
+            }
+        } catch {
+            throw ImportError.malformed
+        }
+        return try parseMusicXML(entry.data)
     }
 
     static func parseMusicXML(_ data: Data) throws -> ImportedScore {
