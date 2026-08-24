@@ -60,32 +60,43 @@ enum VexFlowScorePayload {
     }
 
     static func build(steps: [MelodyStep]) -> Payload {
-        // onsetTime이 없는 스텝은 빠른 녹음 경로를 안 거친 것 — 리듬을 알 수 없어 악보에 못 그린다.
-        let validSteps = steps.filter { $0.onsetTime != nil }
-        guard !validSteps.isEmpty else { return empty }
+        // 149절 — 음표 길이를 "부른 시간"이 아니라 **다음 음까지의 간격**으로 잡고, 남는 무음은
+        // 쉼표로 뗀다(`ScoreTimeline`). 박을 간격에서 찾으면서(139절) 길이는 발성 시간을 쓰던
+        // 어긋남을 없앤다. onsetTime이 없는 스텝을 건너뛰는 규칙도 그 안에 들어 있다.
+        let events = ScoreTimeline.events(from: steps)
+        guard !events.isEmpty else { return empty }
 
-        // 리듬(음표 길이)과 마디 구성은 멜로디 타이밍 하나에서만 계산해서 전 성부가 공유한다 —
+        // 리듬(음표 길이)과 마디 구성은 타임라인 하나에서만 계산해서 전 성부가 공유한다 —
         // 화음은 멜로디와 같은 순간에 같은 길이로 울리므로(`VoiceHarmonyTrackBuilder`가
         // melodySteps의 onset/duration을 그대로 쓴다) 성부별로 따로 계산할 게 없고, 무엇보다
         // 모든 성부의 음 개수와 마디 구성이 같아야 render.js에서 마디선이 세로로 맞는다.
-        // 시작 시각까지 넘겨서 실제 박을 추정하게 한다(136절) — 중앙값만 보면 8분음표가
-        // 지배적인 노래에서 그 8분음표가 4분음표로 표기된다. 박을 못 찾으면 안에서 알아서
-        // 중앙값 방식으로 폴백한다.
+        //
+        // 박 추정에 넘기는 건 **음표의 시작 시각만**이다(136절) — 쉼표는 onset이 아니라서
+        // 넣으면 간격 통계가 오염된다. `RhythmQuantizer`는 onsetTimes를 박 추정에만 쓰고
+        // 길이 분류는 durations로 따로 하므로 두 배열의 길이가 달라도 된다.
+        let noteStarts: [Double] = events.compactMap { event in
+            guard case .note(_, let start, _) = event else { return nil }
+            return start
+        }
         let quantized = RhythmQuantizer.quantize(
-            durations: validSteps.map { $0.duration ?? 0.3 },
-            onsetTimes: validSteps.compactMap(\.onsetTime)
+            durations: events.map(\.duration),
+            onsetTimes: noteStarts
         )
         let measureBreaks = RhythmQuantizer.measureBreaks(notes: quantized)
 
         let voices: [Payload.Voice] = voiceOrder.compactMap { voice in
-            let midiNotes = validSteps.map { midiNote(in: $0, interval: voice.interval) }
+            let midiNotes: [Int?] = events.map { event in
+                guard case .note(let stepIndex, _, _) = event else { return nil }  // 쉼표
+                return midiNote(in: steps[stepIndex], interval: voice.interval)
+            }
             // 이 성부에 음이 하나도 없으면(예: 조성을 못 잡아 화음이 전혀 안 붙은 녹음) 쉼표만
             // 가득한 빈 오선을 그리는 대신 행 자체를 뺀다.
             guard midiNotes.contains(where: { $0 != nil }) else { return nil }
 
             let notes = zip(midiNotes, quantized).map { midiNote, quantizedNote -> Payload.Note in
                 guard let midiNote else {
-                    // 성부마다 음 개수를 똑같이 유지하려고 빈 자리를 건너뛰지 않고 쉼표로 채운다.
+                    // 진짜 쉼표든, 그 성부에만 음이 없는 자리든 똑같이 쉼표로 채운다 — 성부마다
+                    // 음 개수가 같아야 마디선이 세로로 맞는다.
                     return Payload.Note(key: nil, sharp: false, duration: quantizedNote.vexFlowDuration)
                 }
                 let (key, sharp) = vexFlowKey(forMIDINote: midiNote)

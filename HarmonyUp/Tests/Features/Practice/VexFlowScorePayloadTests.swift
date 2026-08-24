@@ -163,4 +163,50 @@ final class VexFlowScorePayloadTests: XCTestCase {
         XCTAssertEqual((object["voices"] as? [Any])?.count, 0)
         XCTAssertEqual((object["measureBreaks"] as? [Any])?.count, 0)
     }
+    // MARK: - 간격 기준 표기 + 쉼표 (149절)
+
+    /// 스타카토로 끊어 부른 구간에는 쉼표가 들어가야 하고, **네 성부 모두 같은 자리에** 들어가야
+    /// 한다 — 한 성부만 음표 개수가 달라지면 render.js에서 마디선이 세로로 어긋난다.
+    func testStaccatoInsertsARestAtTheSamePositionInEveryVoice() {
+        let steps = [
+            step(midiNote: 60, onset: 0.0, duration: 0.20, harmony: harmony(bass: 48, third: 52, fifth: 55)), // 짧게 끊어 부름
+            step(midiNote: 62, onset: 1.0, duration: 0.50, harmony: harmony(bass: 50, third: 53, fifth: 57))
+        ]
+
+        let payload = VexFlowScorePayload.build(steps: steps)
+
+        XCTAssertEqual(payload.voices.count, 4)
+        for voice in payload.voices {
+            XCTAssertEqual(voice.notes.count, 3, "음표 2개 + 쉼표 1개")
+            XCTAssertNotNil(voice.notes[0].key)
+            XCTAssertNil(voice.notes[1].key, "\(voice.clef) 성부에 쉼표가 없다")
+            XCTAssertNotNil(voice.notes[2].key)
+        }
+    }
+
+    /// 이어 부른 멜로디에는 쉼표가 생기면 안 된다 — 틈이 없으면 간격이 곧 음표 길이다.
+    func testContiguousMelodyHasNoRests() {
+        let payload = VexFlowScorePayload.build(steps: fourStepMelody)
+
+        for voice in payload.voices {
+            XCTAssertFalse(voice.notes.contains { $0.key == nil }, "이어 부른 멜로디에 쉼표가 생겼다")
+        }
+    }
+
+    /// 음표 길이가 **발성 시간이 아니라 간격**을 따르는지 — 같은 간격으로 부르되 길이만 다르게
+    /// 하면(스타카토가 아닌 정도의 짧은 틈) 표기 길이는 모두 같아야 한다.
+    func testNoteDurationsFollowIntervalsNotHowLongEachNoteWasHeld() {
+        let steps = [
+            step(midiNote: 60, onset: 0.0, duration: 0.50, harmony: harmony(bass: 48, third: 52, fifth: 55)),
+            step(midiNote: 62, onset: 0.5, duration: 0.38, harmony: harmony(bass: 50, third: 53, fifth: 57)), // 조금 짧게 뗌
+            step(midiNote: 64, onset: 1.0, duration: 0.50, harmony: harmony(bass: 48, third: 52, fifth: 55))
+        ]
+
+        let payload = VexFlowScorePayload.build(steps: steps)
+        let melody = payload.voices[0]
+
+        XCTAssertEqual(melody.notes.count, 3, "짧은 틈(0.12초)은 쉼표가 되면 안 된다")
+        XCTAssertEqual(melody.notes[0].duration, melody.notes[1].duration, "간격이 같으면 표기 길이도 같아야 한다")
+    }
+
 }
