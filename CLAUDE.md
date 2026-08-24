@@ -6,6 +6,7 @@
 
 - 전체 제품 배경(문제의식, 경쟁 분석, 페르소나, 성공지표 등, 화음 스코프 포함 원래 구상): `docs/prd.md`
 - 진행 상황 체크리스트: `docs/PROGRESS.md`, 신호처리/설계 결정 히스토리: `docs/CONCEPTS.md`(특히 116절이 화음 제거 결정 배경)
+- **파일 구조: `docs/ARCHITECTURE.md`** — 2026-08-24에 junCook(ValleyRisk)의 MVVM 레이아웃으로 옮겼다(`HarmonyUp/Sources/{App,Core,Data,Domain,Features}`). 그 전 문서·주석에 나오는 `PitchEngine/`, `Views/`, `DesignSystem/` 경로는 전부 옛 자리다 — 타입 이름은 그대로이니 이름으로 찾을 것. 새 파일을 만들 때는 기능 우선 원칙을 따른다: 여러 기능이 공유하면 `Core`/`Domain`, 한 기능 전용이면 그 기능의 `Features/<기능>/Model`.
 
 세션 시작 시 위 문서들, 특히 `docs/CONCEPTS.md` 최신 절을 참고해서 지금 스코프를 정확히 파악할 것 — `docs/prd.md`는 화음 기능까지 포함한 원래 구상이라 지금 코드 상태와 다를 수 있다. 큰 방향을 바꿔야 할 것 같으면 먼저 알리고 진행할 것.
 
