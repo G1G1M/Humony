@@ -75,7 +75,7 @@ xcodebuild -project HarmonyUp.xcodeproj -scheme HarmonyUp \
   -destination 'platform=iOS Simulator,name=iPad Air 11-inch (M3)' test
 ```
 
-유닛테스트 403개. `.xcodeproj`는 커밋하지 않고 `project.yml`에서 생성합니다.
+유닛테스트 409개. `.xcodeproj`는 커밋하지 않고 `project.yml`에서 생성합니다.
 
 ## 문서
 
