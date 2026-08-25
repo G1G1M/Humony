@@ -22,10 +22,17 @@ extension PracticeView {
         // 세그먼트 피커 + 버튼 2개 + 결과 영역이 모두 글래스 위에 놓이는 묶음.
         Theme.glassGroup {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                Label("따라 부르기 채점", systemImage: "target")
-                    .font(Theme.Typography.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.top, Theme.Spacing.xs)
+                // 이 카드는 통째로 "성부"라는 개념 위에 서 있다(무엇을 고르는 피커인지,
+                // 무엇을 따라 부르는 것인지 전부 그 말에 기댄다) — 그런데 앱 어디에도 그
+                // 말뜻이 없었다(UI 크리틱 P1). 카드 머리에 ⓘ 하나로 갚는다.
+                HStack(spacing: Theme.Spacing.xs) {
+                    Label("따라 부르기 채점", systemImage: "target")
+                        .font(Theme.Typography.caption)
+                        .foregroundStyle(.secondary)
+                    GlossaryTip(term: .voice)
+                    Spacer()
+                }
+                .padding(.top, Theme.Spacing.xs)
 
                 voicePicker
                 targetPreview

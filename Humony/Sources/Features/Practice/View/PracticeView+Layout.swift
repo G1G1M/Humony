@@ -382,6 +382,13 @@ extension PracticeView {
                 .font(Theme.Typography.subheadline)
                 .foregroundStyle(labelColor)
 
+            // 146절에 "3도/5도"가 자리 이름(아랫/가운뎃/윗소리)으로 바뀌면서 라벨은 쉬워졌지만
+            // "그래서 무슨 소리인데?"는 여전히 답이 없었다 — 그 빈칸을 여기서 메운다. 멜로디는
+            // 방금 자기가 부른 것이라 설명이 필요 없어서 화음 성부에만 붙인다.
+            if case .harmony(let interval) = option.voice, let term = GlossaryTerm(interval: interval) {
+                GlossaryTip(term: term)
+            }
+
             Spacer()
 
             Button {
@@ -496,9 +503,12 @@ extension PracticeView {
                 // 경로를 그대로 타는 melodySession.detectedKey를 재사용(51절)해서 새 계산 없이 이미
                 // 있는 값을 보여주기만 한다.
                 if let key = melodySession.detectedKey {
-                    Text("감지된 조성: \(key.name)")
-                        .font(Theme.Typography.caption)
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: Theme.Spacing.xs) {
+                        Text("감지된 조성: \(key.name)")
+                            .font(Theme.Typography.caption)
+                            .foregroundStyle(.secondary)
+                        GlossaryTip(term: .key)
+                    }
                 }
 
                 // "조성 말고 각각의 음에 대한 정보"(순서대로 어떤 음이 잡혔는지) 요청 —
