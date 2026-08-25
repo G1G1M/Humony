@@ -59,6 +59,33 @@ enum VexFlowScorePayload {
         return step.harmony?.first { $0.interval == interval }?.midiNote
     }
 
+    /// 한 성부가 **이벤트 순서대로** 갖는 음. 쉼표 자리와, 그 성부에만 음이 없는 자리는 nil이다.
+    /// 모든 성부가 같은 길이의 배열을 갖는 것이 마디선이 세로로 맞는 전제다.
+    static func midiNotes(steps: [MelodyStep], events: [ScoreTimeline.Event], interval: ChordGenerator.Interval?) -> [Int?] {
+        events.map { event in
+            guard case .note(let stepIndex, _, _) = event else { return nil }  // 쉼표
+            return midiNote(in: steps[stepIndex], interval: interval)
+        }
+    }
+
+    /// **실제로 악보에 그려지는 성부**를 위에서 아래 순서로 — 배열 인덱스가 곧 `render.js`의 행
+    /// 인덱스다.
+    ///
+    /// 음이 하나도 없는 성부(조성을 못 잡아 화음이 전혀 안 붙은 녹음 등)는 쉼표만 가득한 빈
+    /// 오선을 그리는 대신 **행 자체가 빠진다** — 그래서 `voiceOrder`의 인덱스를 그대로 행
+    /// 인덱스로 쓰면 안 된다. 그 판정이 `build`와 여기 두 군데로 갈라지면 조용히 어긋나므로
+    /// (칠할 행을 계산하는 쪽이 다른 행을 가리키게 된다) `build`도 이 함수를 통해서만 성부를 정한다.
+    static func drawnVoices(steps: [MelodyStep], events: [ScoreTimeline.Event]) -> [(label: String, interval: ChordGenerator.Interval?)] {
+        guard !events.isEmpty else { return [] }
+        return voiceOrder.filter { voice in
+            midiNotes(steps: steps, events: events, interval: voice.interval).contains { $0 != nil }
+        }
+    }
+
+    static func drawnVoices(steps: [MelodyStep]) -> [(label: String, interval: ChordGenerator.Interval?)] {
+        drawnVoices(steps: steps, events: ScoreTimeline.events(from: steps))
+    }
+
     static func build(steps: [MelodyStep]) -> Payload {
         // 149절 — 음표 길이를 "부른 시간"이 아니라 **다음 음까지의 간격**으로 잡고, 남는 무음은
         // 쉼표로 뗀다(`ScoreTimeline`). 박을 간격에서 찾으면서(139절) 길이는 발성 시간을 쓰던
@@ -84,14 +111,8 @@ enum VexFlowScorePayload {
         )
         let measureBreaks = RhythmQuantizer.measureBreaks(notes: quantized)
 
-        let voices: [Payload.Voice] = voiceOrder.compactMap { voice in
-            let midiNotes: [Int?] = events.map { event in
-                guard case .note(let stepIndex, _, _) = event else { return nil }  // 쉼표
-                return midiNote(in: steps[stepIndex], interval: voice.interval)
-            }
-            // 이 성부에 음이 하나도 없으면(예: 조성을 못 잡아 화음이 전혀 안 붙은 녹음) 쉼표만
-            // 가득한 빈 오선을 그리는 대신 행 자체를 뺀다.
-            guard midiNotes.contains(where: { $0 != nil }) else { return nil }
+        let voices: [Payload.Voice] = drawnVoices(steps: steps, events: events).map { voice in
+            let midiNotes = Self.midiNotes(steps: steps, events: events, interval: voice.interval)
 
             let notes = zip(midiNotes, quantized).map { midiNote, quantizedNote -> Payload.Note in
                 guard let midiNote else {
