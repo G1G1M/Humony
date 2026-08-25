@@ -48,15 +48,38 @@ enum OnboardingPage: Int, CaseIterable, Identifiable {
         }
     }
 
-    var body: String {
+    /// 본문을 **문장 단위로** 갖는다 — 뷰가 문장마다 `Text`를 따로 그려서 줄바꿈이 문장
+    /// 경계를 넘지 않게 하기 위한 것이다.
+    ///
+    /// 한국어는 어절 단위로 줄이 넘어가서, 긴 문장 하나를 통째로 넘기면 "…녹음은 전부 이 /
+    /// 기기 안에서"처럼 **의미 덩어리 한가운데가 잘린다**(아이패드 실기 확인). 문구에 `\n`을
+    /// 직접 박는 방법도 있지만, 그건 지금 이 폭에서만 예쁘다 — Dynamic Type을 키우거나 좁은
+    /// 화면에서는 박아둔 줄이 또 접혀 오히려 더 망가진다. 문장을 따로 세우면 같은 결과를
+    /// 폭에 상관없이 얻는다.
+    ///
+    /// 한 문장이 그래도 두 줄이 될 때를 대비해, 떨어지면 어색한 짝(`이 기기`)만
+    /// 줄바꿈 없는 공백(`\u{00A0}`)으로 붙여둔다.
+    var bodyParagraphs: [String] {
         switch self {
         case .value:
-            return "한 소절만 부르면 어울리는 화음을 찾아내요. 그것도 다른 악기 소리가 아니라, 방금 부른 목소리 그대로요."
+            return [
+                "한 소절만 부르면 어울리는 화음을 찾아내요.",
+                "다른 악기 소리가 아니라, 방금 부른 목소리 그대로요.",
+            ]
         case .flow:
-            return "녹음 한 번이면 아래 세 가지가 이어서 일어나요."
+            return ["녹음 한 번이면 아래 세 가지가 이어서 일어나요."]
         case .microphone:
-            return "노래를 듣고 어떤 음인지 알아내려면 마이크가 필요해요. 녹음은 전부 이 기기 안에서 처리되고, 인터넷으로 어디에도 보내지 않아요."
+            return [
+                "노래를 듣고 어떤 음인지 알아내려면 마이크가 필요해요.",
+                "녹음은 전부 이\u{00A0}기기 안에서만 처리되고, 어디에도 보내지 않아요.",
+            ]
         }
+    }
+
+    /// 문장을 이어붙인 한 덩어리 — 금지어 검사(`allText`)처럼 "이 장의 본문 전체"가 필요한
+    /// 곳에서 쓴다. 화면에 그릴 때는 `bodyParagraphs`를 쓸 것.
+    var body: String {
+        bodyParagraphs.joined(separator: " ")
     }
 
     var steps: [Step] {
@@ -76,7 +99,7 @@ enum OnboardingPage: Int, CaseIterable, Identifiable {
     var footnote: String? {
         switch self {
         case .flow:
-            return "들려드리는 동안은 마이크가 잠시 쉬어요. 스피커에서 나온 소리가 마이크로 되돌아오면 내가 부른 걸로 잘못 알아듣거든요."
+            return "들려드리는 동안은 마이크가 잠시 쉬어요. 스피커에서 나온 소리가 마이크로 되돌아오면 내가\u{00A0}부른 걸로 잘못 알아듣거든요."
         case .value, .microphone:
             return nil
         }
