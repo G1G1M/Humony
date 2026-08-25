@@ -12,10 +12,14 @@ import SwiftUI
 /// 문구는 전부 `OnboardingPage`(순수 타입)에 있다 — 뷰 안의 문자열 리터럴은 테스트가 읽을 수
 /// 없어서, "이론 용어 금지" 계약을 테스트로 지킬 수 없게 된다.
 ///
-/// **표면은 전부 리퀴드 글래스로 통일한다.** 심볼 판, 3단계 카드, 단서, 페이지 인디케이터,
-/// 버튼 둘까지 같은 재질 체계(`Theme`의 glass 헬퍼)를 쓰고, 한 화면의 글래스 조각들은
-/// `Theme.glassGroup`(iOS 26의 `GlassEffectContainer`)으로 묶어 서로의 굴절에 반응하게 한다 —
-/// 조각마다 따로 두면 같은 재질인데도 미묘하게 다른 표면처럼 보인다.
+/// **앱이 그리는 표면은 리퀴드 글래스로 통일한다.** 심볼 판, 3단계 카드, 단서, 버튼(주/건너뛰기)이
+/// 같은 재질 체계(`Theme`의 glass 헬퍼)를 쓰고, 한 화면의 글래스 조각들은 `Theme.glassGroup`
+/// (iOS 26의 `GlassEffectContainer`)으로 묶어 서로의 굴절에 반응하게 한다 — 조각마다 따로 두면
+/// 같은 재질인데도 미묘하게 다른 표면처럼 보인다.
+///
+/// 다만 **페이지 인디케이터는 애플 기본 컴포넌트를 그대로 쓴다**(색만 앱 틴트로 잡는다). 한 번
+/// 직접 그려봤다가 되돌렸다 — 사용자가 어디서든 같은 모양으로 알아보는 표준 컨트롤을 손으로
+/// 다시 만들면, 그럴듯해 보여도 결국 "이 앱에만 있는 낯선 것"이 된다.
 struct OnboardingView: View {
     /// 3장을 다 지났거나 건너뛰었을 때. 어느 쪽이든 완료로 친다(`OnboardingGate.markCompleted`).
     let onFinish: () -> Void
@@ -25,13 +29,45 @@ struct OnboardingView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            skipBar
             pages
             footer
+        }
+        // 기본 페이지 인디케이터는 시스템 기본색(밝은 배경에서 거의 흰색)이라 눈에 안 들어온다.
+        // 컴포넌트는 애플 것을 그대로 쓰되 색만 앱 틴트로 바꾼다 — 이건 UIKit 전역 appearance라
+        // 온보딩이 떠 있는 동안에만 걸고 사라질 때 되돌려서, 나중에 다른 화면이 페이지 뷰를
+        // 쓰게 되더라도 여기서 칠한 색을 물려받지 않게 한다.
+        .onAppear {
+            UIPageControl.appearance().currentPageIndicatorTintColor = UIColor(Theme.tint)
+            UIPageControl.appearance().pageIndicatorTintColor = UIColor(Theme.tint.opacity(0.25))
+        }
+        .onDisappear {
+            UIPageControl.appearance().currentPageIndicatorTintColor = nil
+            UIPageControl.appearance().pageIndicatorTintColor = nil
         }
         .background(Color(uiColor: .systemGroupedBackground))
         // `fullScreenCover`는 루트(`RootTabView`)의 `.tint`를 물려받지 않는다 — 안 걸면 "다음"
         // 버튼이 앱 어디에도 없는 시스템 파란색으로 뜬다(아이패드 시뮬레이터에서 확인).
         .tint(Theme.tint)
+    }
+
+    // MARK: - 건너뛰기
+
+    /// 원래 자리인 우상단. 마지막 장에는 아래에 "나중에 할게요"가 따로 있어서 숨긴다 —
+    /// 같은 뜻의 출구가 한 화면에 둘이면 어느 쪽이 무엇인지 읽는 데 시간이 든다.
+    /// 자리는 항상 차지하므로(고정 높이) 숨겨도 아래 내용이 밀리지 않는다.
+    private var skipBar: some View {
+        HStack {
+            Spacer()
+            if selection != .microphone {
+                Button("건너뛰기") { onFinish() }
+                    .font(Theme.Typography.subheadline)
+                    .harmonyButtonStyle()
+                    .controlSize(.small)
+            }
+        }
+        .frame(height: 44)
+        .padding(.horizontal, Theme.Spacing.lg)
     }
 
     // MARK: - 3장
@@ -43,10 +79,9 @@ struct OnboardingView: View {
                     .tag(page)
             }
         }
-        // 시스템 기본 인디케이터를 끄고 아래 `pageIndicator`로 직접 그린다 — 기본 점은 밝은
-        // 배경에서 거의 흰색이라 보이지 않았고(실기 확인), 색을 바꾸려면 `UIPageControl`의
-        // 전역 appearance를 건드려야 해서 앱의 다른 화면까지 영향을 받는다.
-        .tabViewStyle(.page(indexDisplayMode: .never))
+        // 인디케이터는 애플 기본 컴포넌트를 그대로 쓴다(색만 위 onAppear에서 잡아준다).
+        .tabViewStyle(.page(indexDisplayMode: .always))
+        .indexViewStyle(.page(backgroundDisplayMode: .always))
     }
 
     /// 글자 크기를 키운 사용자(Dynamic Type)에게도 본문이 잘리지 않도록 각 장을 스크롤에 담는다 —
@@ -150,36 +185,36 @@ struct OnboardingView: View {
         .accessibilityElement(children: .combine)
     }
 
-    // MARK: - 하단(인디케이터 + 버튼)
+    // MARK: - 하단 버튼
 
-    /// **세 장의 버튼 자리를 같은 높이로 고정한다.** 예전엔 건너뛰기가 화면 맨 위에 따로 있고
-    /// 마지막 장에만 보조 버튼이 하나 더 있어서, 장을 넘길 때 주 버튼이 위아래로 튀었다.
-    /// 모든 장을 "주 버튼 + 보조 버튼" 2단으로 맞추면 위치가 저절로 고정되고, 빠져나가는 출구도
-    /// 화면 위아래로 흩어지지 않고 한자리에 모인다.
+    /// **주 버튼은 세 장 모두 같은 자리에 있어야 한다.** 마지막 장에만 있는 "나중에 할게요"를
+    /// 그냥 아래에 붙이면 그 높이만큼 주 버튼이 위로 밀려서, 장을 넘길 때 버튼이 위아래로 튄다.
+    /// 그래서 보조 버튼 자리를 **항상 같은 높이로 예약**하고 마지막 장에서만 채운다.
+    ///
+    /// 보조 버튼은 주 버튼과 같은 크기로 만들지 않는다 — 둘이 같은 무게로 놓이면 "지금 무엇을
+    /// 하면 되는지"가 흐려진다. 권한을 주는 쪽이 주된 길이고, 미루는 쪽은 언제나 열려 있는
+    /// 작은 문이다.
     private var footer: some View {
-        Theme.glassGroup {
-            VStack(spacing: Theme.Spacing.md) {
-                pageIndicator
-
-                VStack(spacing: Theme.Spacing.sm) {
-                    Button {
-                        primaryAction()
-                    } label: {
-                        Text(primaryTitle)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .harmonyButtonStyle(prominent: true)
-
-                    Button {
-                        onFinish()
-                    } label: {
-                        Text(secondaryTitle)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .harmonyButtonStyle()
-                }
-                .controlSize(.large)
+        VStack(spacing: Theme.Spacing.sm) {
+            Button {
+                primaryAction()
+            } label: {
+                Text(primaryTitle)
+                    .frame(maxWidth: .infinity)
             }
+            .harmonyButtonStyle(prominent: true)
+            .controlSize(.large)
+
+            ZStack {
+                if selection.requestsMicrophonePermission {
+                    Button("나중에 할게요") { onFinish() }
+                        .font(Theme.Typography.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            // 마지막 장에만 버튼이 들어가지만 자리는 늘 차지한다 — 그래야 위의 주 버튼이
+            // 세 장 모두 같은 높이에 놓인다.
+            .frame(height: 32)
         }
         .frame(maxWidth: 520)
         .padding(.horizontal, Theme.Spacing.lg)
@@ -190,42 +225,12 @@ struct OnboardingView: View {
         selection.requestsMicrophonePermission ? "마이크 허용하고 시작하기" : "다음"
     }
 
-    /// 마지막 장에서만 문구가 달라진다 — 앞 두 장의 "건너뛰기"는 소개를 안 보겠다는 뜻이고,
-    /// 마지막 장의 "나중에 할게요"는 권한을 지금 주지 않겠다는 뜻이라 하는 일이 다르다
-    /// (동작은 둘 다 온보딩 종료로 같지만, 무엇을 거절하는지가 다르므로 말도 달라야 한다).
-    private var secondaryTitle: String {
-        selection.requestsMicrophonePermission ? "나중에 할게요" : "건너뛰기"
-    }
-
     private func primaryAction() {
         if selection.requestsMicrophonePermission {
             requestMicrophonePermission()
         } else {
             advance()
         }
-    }
-
-    /// 직접 그리는 페이지 인디케이터.
-    ///
-    /// 시스템 기본은 밝은 배경에서 흰 점이라 사실상 안 보였다. 여기서는 앱 틴트를 쓰되 현재
-    /// 페이지만 채도를 살리고 나머지는 흐리게 둬서, 색만이 아니라 **모양(현재 페이지는 길쭉한
-    /// 알약)** 으로도 구분되게 한다 — 색 대비만으로 구분하면 색각 이상 사용자에게는 점 세 개가
-    /// 다 같아 보인다.
-    private var pageIndicator: some View {
-        HStack(spacing: Theme.Spacing.sm) {
-            ForEach(OnboardingPage.allCases) { page in
-                let isCurrent = page == selection
-                Capsule()
-                    .fill(isCurrent ? Theme.tint : Theme.tint.opacity(0.28))
-                    .frame(width: isCurrent ? 26 : 9, height: 9)
-            }
-        }
-        .padding(.horizontal, Theme.Spacing.md)
-        .padding(.vertical, Theme.Spacing.sm)
-        .harmonyGlassCapsule()
-        // 점 세 개가 각각 읽히면 아무 뜻도 안 된다 — 하나로 묶어 "몇 장 중 몇 장"으로 읽어준다.
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(OnboardingPage.allCases.count)장 중 \(selection.rawValue + 1)장")
     }
 
     private func advance() {
