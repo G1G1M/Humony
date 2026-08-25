@@ -14,7 +14,7 @@ import Combine
 /// `ToneSynthesizer`(순수 사인파) + `SynthesizedHarmonyTrackBuilder`로 멜로디+베이스+3도+5도를
 /// 전부 합성음으로 만들어 "화음 듣기" 버튼 하나로 재생한다("화음 선택/타이밍이 맞는지"부터
 /// 변수를 격리해 검증하는 게 목적, 목소리 버전은 그 다음 단계). 채점 관련 파일
-/// (`PracticeView+Scoring.swift`, `PitchScorer`, `PracticeSummary`, `PracticeAttempt`,
+/// (`PracticeView+Scoring.swift`, `PitchScorer`, `PracticeAttempt`,
 /// `HistoryView`)은 여전히 화면에는 안 뜨게 빼둔 채다 — 화음 재생이 다시 자리잡은 뒤 순서를
 /// 다시 논의할 대상.
 ///
@@ -217,7 +217,8 @@ struct PracticeView: View {
     // 136절 — `PitchSmoother`(프레임별 피치 흔들림 완화)는 실시간 프레임 채점 전용이었다.
     // 채점이 "다 부른 뒤 배치로 세그멘테이션"하는 방식이 되면서 스무딩할 프레임 스트림 자체가
     // 없어져 인스턴스를 걷어냈다 — 타입은 남겨둔다(`MelodySegmenter`가 같은 목적을 중앙값
-    // 필터로 이미 하고 있고, 실시간 미터를 다시 붙일 때를 위해 `PitchMeterView`와 함께 보존).
+    // 필터로 이미 하고 있고, 유닛테스트도 붙어 있다). 함께 보존해두던 `PitchMeterView`는
+    // 161절에 지웠다 — 실시간 미터를 되살릴 계획이 없고, 필요하면 git에서 되찾을 수 있다.
 
     var body: some View {
         Group {

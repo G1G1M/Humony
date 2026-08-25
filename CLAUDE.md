@@ -141,7 +141,8 @@ accessibility가 하나도 없다**(버튼 4개·3개). SF Symbol 크기 하드�
 
 ### ⑦ 정리 대상 (작음)
 
-- **고아 코드**: `PitchMeterView`, `PracticeSummary`는 새 채점 흐름에서 안 쓰인다. 지울지 결정
+- ~~**고아 코드**~~ (완료, 161절): `PitchMeterView`·`PracticeSummary`와 빈 `LoadingIndicators`
+  enum을 지웠다. 남은 `PitchSmoother`는 유닛테스트가 붙어 있어 그대로 둔다
 - **`onSeekToStep`이 여전히 no-op** — 악보를 탭해도 그 지점부터 재생되지 않는다
   (`RecordingPlayer`에 탐색 기능이 없다)
 - **무음 채점도 0%로 저장된다** — 아무 소리 없이 "그만 부르기"를 눌러도 기록에 남는다
