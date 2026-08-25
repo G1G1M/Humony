@@ -247,6 +247,8 @@ extension PracticeView {
 
         // 155절 — 악보와 대조한 결과(요약 한 줄에 쓴다). 악보 없이 부르면 nil이다.
         scoreComparison = analyzed.scoreComparison
+        // 158절 — 새 결과는 언제나 악보 비교 관문부터 본다(악보를 바꿔 재분석한 경우도 마찬가지).
+        resultStage = .reviewingScore
 
         // 녹음 원본은 재생/채점을 다시 붙일 때를 위해 계속 들고 있는다.
         recentVoiceBuffer = analyzed.voiceSamples
@@ -322,6 +324,7 @@ extension PracticeView {
         // 번거롭기만 하다(떼고 싶으면 카드의 "떼기"가 있다).
         scoreComparison = nil
         scoreImportMessage = nil
+        resultStage = .reviewingScore
         quickRecordPhase = .idle
         quickRecordBuffer = []
         recordingLevel = 0

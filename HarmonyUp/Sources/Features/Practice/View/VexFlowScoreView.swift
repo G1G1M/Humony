@@ -35,6 +35,11 @@ struct VexFlowScoreView: UIViewRepresentable {
     /// 명시적으로 버전을 올린 시점에만 참이 되므로, 재생 중(예전엔 재생헤드 타이머) 불필요한
     /// 재렌더를 구조적으로 막는다.
     let contentVersion: Int
+    /// 직접 넘긴 페이로드가 있으면 `steps` 대신 이걸 그린다 (158절).
+    ///
+    /// 악보 비교 화면은 "부른 대로 / 교정 후"를 두 줄로 그리는데, 그건 `MelodyStep` 배열
+    /// 하나로는 표현할 수 없다(두 벌의 음을 정렬해 자리를 맞춘 결과다).
+    var payloadJSON: String?
 
     /// 카드에 줄 고정 높이 — "너무 작다"는 실기기 피드백으로 키웠다(docs/CONCEPTS.md 58절).
     /// 136절에 4성부(오선 4줄)로 늘어나면서 460으로는 컴팩트 레이아웃에서 아래 두 성부가
@@ -76,7 +81,7 @@ struct VexFlowScoreView: UIViewRepresentable {
     func updateUIView(_ webView: WKWebView, context: Context) {
         // 버전이 실제로 안 바뀌었으면 굳이 페이로드를 다시 조립하지 않는다.
         if context.coordinator.lastRenderedVersion != contentVersion {
-            context.coordinator.pendingPayload = VexFlowScorePayload.json(steps: steps)
+            context.coordinator.pendingPayload = payloadJSON ?? VexFlowScorePayload.json(steps: steps)
         }
         context.coordinator.pendingVersion = contentVersion
         context.coordinator.pendingStepIndex = activeStepIndex

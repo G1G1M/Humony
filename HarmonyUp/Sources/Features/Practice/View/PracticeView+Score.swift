@@ -25,64 +25,6 @@ extension PracticeView {
             .compactMap { $0 }
     }
 
-    /// 결과 상태에서 조작부에 붙는 "악보와 대조" 카드.
-    @ViewBuilder
-    var scoreReferenceCard: some View {
-        Theme.glassGroup {
-            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                Label("악보와 대조", systemImage: "doc.text.magnifyingglass")
-                    .font(Theme.Typography.caption)
-                    .foregroundStyle(.secondary)
-
-                if let name = importedScoreName {
-                    Text(name)
-                        .font(Theme.Typography.body)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-
-                    if let comparison = scoreComparison {
-                        Text(ScoreComparisonSummary.text(for: comparison))
-                            .font(Theme.Typography.caption)
-                            .foregroundStyle(comparison.isApplied ? .secondary : Color.orange)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    HStack(spacing: Theme.Spacing.sm) {
-                        attachScoreMenu(label: "다른 악보")
-                        Button("떼기") { detachScore() }
-                            .harmonyButtonStyle(prominent: false)
-                    }
-                    .disabled(quickRecordPhase.isRecordingOrAnalyzing)
-                } else {
-                    Text("악보 사진을 찍어 붙이면 부른 음을 악보에 맞춰 다듬어요")
-                        .font(Theme.Typography.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    attachScoreMenu
-                }
-
-                if isReadingScoreImage {
-                    HStack(spacing: Theme.Spacing.xs) {
-                        ProgressView().controlSize(.small)
-                        Text("악보를 읽는 중이에요")
-                            .font(Theme.Typography.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                if let message = scoreImportMessage {
-                    Text(message)
-                        .font(Theme.Typography.caption)
-                        .foregroundStyle(Color.orange)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("악보와 대조")
-    }
-
     // MARK: - 동작
 
     func handleScoreImport(_ result: Result<URL, Error>) {
@@ -250,5 +192,108 @@ extension PracticeView {
                 scoreImportMessage = Self.importErrorMessage(error)
             }
         }
+    }
+
+    // MARK: - ② 악보 비교 관문 (158절)
+
+    /// 부른 뒤 처음 보게 되는 화면 — 악보를 붙여 대조하고, 확인한 뒤에 화음으로 넘어간다.
+    ///
+    /// 악보를 안 붙인 사람도 여기를 지난다. 그때는 "붙이기"와 "그대로 진행"만 있는 가벼운
+    /// 화면이다 — **악보 없는 흐름이 막히면 안 된다.**
+    @ViewBuilder
+    var scoreReviewSection: some View {
+        Theme.glassGroup {
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                Label("악보와 대조", systemImage: "doc.text.magnifyingglass")
+                    .font(Theme.Typography.caption)
+                    .foregroundStyle(.secondary)
+
+                if let name = importedScoreName {
+                    Text(name)
+                        .font(Theme.Typography.body)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+
+                    if let comparison = scoreComparison {
+                        Text(ScoreComparisonSummary.text(for: comparison))
+                            .font(Theme.Typography.caption)
+                            .foregroundStyle(comparison.isApplied ? .secondary : Color.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                } else {
+                    Text("악보를 붙이면 부른 음을 악보에 맞춰 다듬어요. 그냥 넘어가도 괜찮아요")
+                        .font(Theme.Typography.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if isReadingScoreImage {
+                    HStack(spacing: Theme.Spacing.xs) {
+                        ProgressView().controlSize(.small)
+                        Text("악보를 읽는 중이에요")
+                            .font(Theme.Typography.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if let message = scoreImportMessage {
+                    Text(message)
+                        .font(Theme.Typography.caption)
+                        .foregroundStyle(Color.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                HStack(spacing: Theme.Spacing.sm) {
+                    attachScoreMenu(label: importedScoreName == nil ? "악보 붙이기" : "다른 악보")
+                    if importedScoreName != nil {
+                        Button("떼기") { detachScore() }
+                            .harmonyButtonStyle(prominent: false)
+                            .disabled(quickRecordPhase.isRecordingOrAnalyzing || isReadingScoreImage)
+                    }
+                }
+
+                Button {
+                    withAnimation { resultStage = .harmony }
+                } label: {
+                    HStack(spacing: Theme.Spacing.xs) {
+                        Text(importedScoreName == nil ? "그대로 화음 만들기" : "이대로 화음 만들기")
+                        Image(systemName: "arrow.right")
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .harmonyButtonStyle(prominent: true)
+                .disabled(quickRecordPhase.isRecordingOrAnalyzing || isReadingScoreImage)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("악보와 대조")
+    }
+
+    /// ③ 화음 결과에서 ②로 되돌아가는 줄 — 악보를 바꿔 다시 보고 싶을 때.
+    var backToScoreReviewRow: some View {
+        Button {
+            withAnimation { resultStage = .reviewingScore }
+        } label: {
+            HStack(spacing: Theme.Spacing.xs) {
+                Image(systemName: "chevron.left")
+                Text(importedScoreName == nil ? "악보 붙이기" : "악보 다시 보기")
+            }
+            .font(Theme.Typography.caption)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .accessibilityHint("악보와 대조하는 화면으로 돌아가요")
+    }
+
+    /// 비교 단계에서 악보 자리에 그릴 "부른 대로 / 교정 후" 두 줄.
+    ///
+    /// 교정이 적용되지 않았으면(악보가 없거나 잘 안 맞아 포기했으면) 비교할 게 없으므로 nil —
+    /// 그때는 평소의 4성부 악보를 그대로 보여준다.
+    var scoreComparisonPayloadJSON: String? {
+        guard let comparison = scoreComparison, comparison.isApplied else { return nil }
+        let before = comparison.notesBeforeCorrection.map(\.midiNote)
+        let after = melodySteps.map(\.midiNote)
+        guard before != after else { return nil }   // 하나도 안 바뀌었으면 두 줄이 똑같다
+        return ScoreComparisonPayload.json(beforeMIDINotes: before, afterMIDINotes: after)
     }
 }

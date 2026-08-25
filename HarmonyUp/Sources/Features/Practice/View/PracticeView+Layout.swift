@@ -285,18 +285,23 @@ extension PracticeView {
                 // 만들어달라"는 요청 — 원본/화음 듣기/내 목소리로 화음/성부별 솔로/뮤트 토글을
                 // 전부 여기(악보와 분리된 조작부)로 옮겼다.
                 if !recentVoiceBuffer.isEmpty {
-                    // 155절 — 부른 뒤 악보를 붙여 채보를 대조·교정한다. 재생·채점보다 위에
-                    // 두는 이유: 악보를 붙이면 아래 두 카드가 쓰는 melodySteps가 통째로
-                    // 다시 계산되므로, 흐름상 먼저 정하는 게 자연스럽다.
-                    scoreReferenceCard
+                    // 158절 — 녹음 뒤를 두 단계로 끊는다: ② 악보 비교(관문) → ③ 화음 결과.
+                    // 화음은 이미 계산돼 있고, 여기서 정하는 건 무엇을 보여줄지뿐이다.
+                    switch resultStage {
+                    case .reviewingScore:
+                        scoreReviewSection
 
-                    playbackControls
+                    case .harmony:
+                        backToScoreReviewRow
 
-                    // 136절 — 채점을 다시 붙였다. 화음을 들어본 바로 아래에 이어서 두는 이유:
-                    // "먼저 들어보고 → 그 성부를 따라 부른다"는 흐름이 위아래로 자연스럽게 읽힌다.
-                    Divider()
-                        .padding(.vertical, Theme.Spacing.xs)
-                    scoringCard
+                        playbackControls
+
+                        // 136절 — 채점을 다시 붙였다. 화음을 들어본 바로 아래에 이어서 두는 이유:
+                        // "먼저 들어보고 → 그 성부를 따라 부른다"는 흐름이 위아래로 자연스럽게 읽힌다.
+                        Divider()
+                            .padding(.vertical, Theme.Spacing.xs)
+                        scoringCard
+                    }
                 }
             }
         }
@@ -505,6 +510,13 @@ extension PracticeView {
                         .foregroundStyle(.secondary)
                 }
 
+                // 158절 — 같은 자리에 두 줄이 그려질 때는 무엇이 무엇인지 알려줘야 한다.
+                if resultStage == .reviewingScore, scoreComparisonPayloadJSON != nil {
+                    Label("위: 부른 대로 · 아래: 악보에 맞춘 뒤", systemImage: "arrow.up.arrow.down")
+                        .font(Theme.Typography.caption)
+                        .foregroundStyle(Theme.tint)
+                }
+
                 if fillAvailable {
                     scoreViewWithLoadingOverlay
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -530,12 +542,25 @@ extension PracticeView {
     /// 분기가 똑같이 재사용한다.
     var scoreViewWithLoadingOverlay: some View {
         ZStack {
-            PlaybackHighlightingScoreView(
-                steps: melodySteps,
-                contentVersion: scoreContentVersion,
-                isRendering: $isScoreRendering,
-                currentPlaybackTime: currentPlaybackTime
-            )
+            // 158절 — 비교 단계에서는 같은 자리에 "부른 대로 / 교정 후" 두 줄을 그린다.
+            // 재생 하이라이트가 필요 없는 정적 악보라 PlaybackHighlightingScoreView를 거치지 않는다.
+            if resultStage == .reviewingScore, let comparisonJSON = scoreComparisonPayloadJSON {
+                VexFlowScoreView(
+                    steps: melodySteps,
+                    activeStepIndex: nil,
+                    onSeekToStep: { _ in },
+                    isRendering: $isScoreRendering,
+                    contentVersion: scoreContentVersion,
+                    payloadJSON: comparisonJSON
+                )
+            } else {
+                PlaybackHighlightingScoreView(
+                    steps: melodySteps,
+                    contentVersion: scoreContentVersion,
+                    isRendering: $isScoreRendering,
+                    currentPlaybackTime: currentPlaybackTime
+                )
+            }
             if isScoreRendering {
                 PulsingLoadingLabel(message: "악보를 만드는 중이에요")
             }

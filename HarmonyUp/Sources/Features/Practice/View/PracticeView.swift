@@ -193,6 +193,25 @@ struct PracticeView: View {
     /// 사진 해독 중 — 오선 검출부터 조표까지 도는 동안 화면에 알린다.
     @State var isReadingScoreImage = false
 
+    /// 158절 — 녹음이 끝난 뒤를 두 단계로 끊는다(사용자 결정).
+    ///
+    /// ```
+    /// ① 녹음 → ② 악보 비교(관문) → ③ 화음 결과
+    /// ```
+    ///
+    /// ②가 관문이라는 게 핵심이다 — 바로 화음으로 가지 않고 교정 결과를 눈으로 확인하고
+    /// 승인한 뒤에 넘어간다. 화음 자체는 이미 계산돼 있으므로(분석 한 번에 다 끝난다) 이
+    /// 단계 전환은 순수하게 무엇을 보여줄지의 문제다.
+    ///
+    /// 부수 효과로 UI 크리틱 P1("결과 상태에서 탭 타깃이 14~15개")이 해소된다 — 각 순간에
+    /// 보이는 조작이 3~4개로 떨어진다.
+    @State var resultStage: ResultStage = .reviewingScore
+
+    enum ResultStage: Equatable {
+        case reviewingScore
+        case harmony
+    }
+
     let audioCapture = AudioCapture()
     let melodySession = MelodySession()
     // 136절 — `PitchSmoother`(프레임별 피치 흔들림 완화)는 실시간 프레임 채점 전용이었다.
