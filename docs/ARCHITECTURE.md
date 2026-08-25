@@ -27,7 +27,8 @@ Humony/Sources/
 │  ├─ Source/       HumonyApp.swift, Info.plist, Humony-Bridging-Header.h
 │  └─ Resource/     Fonts/, VexFlowScore/
 ├─ Core/
-│  ├─ DesignSystem/ Theme, WaveformView, LoadingIndicators, PitchMeterView
+│  ├─ DesignSystem/ Theme, Glossary(용어 ⓘ), WaveformView, LoadingIndicators,
+│  │                PitchMeterView
 │  ├─ Local/        AudioCapture, RecordingPlayer, TonePlayer
 │  └─ Util/         NoteNameConverter
 ├─ Data/
@@ -42,6 +43,9 @@ Humony/Sources/
 │  └─ Scoring/      HarmonyPracticeScorer, PracticeSummary
 └─ Features/
    ├─ Main/View/        RootTabView
+   ├─ Onboarding/
+   │  ├─ Model/         OnboardingPage, OnboardingGate
+   │  └─ View/          OnboardingView
    ├─ Practice/
    │  ├─ Model/         VexFlowScorePayload
    │  └─ View/          PracticeView(+Layout/+Capture/+Scoring), QuickRecordView,
@@ -52,7 +56,7 @@ Humony/Sources/
 ```
 
 테스트(`Humony/Tests/`)도 같은 모양으로 미러링한다 — `Core/Util/`, `Domain/{Pitch,Melody,
-Harmony,Scoring}/`, `Features/{Practice,History}/`. 기존 `PitchEngineTests/` 한 폴더에 22개가
+Harmony,Scoring}/`, `Features/{Onboarding,Practice,History}/`. 기존 `PitchEngineTests/` 한 폴더에 22개가
 평평하게 쌓여 있던 것이 소스와 같은 갈래로 나뉜다.
 
 ## 판단이 갈렸던 자리

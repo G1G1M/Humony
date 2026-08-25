@@ -38,7 +38,7 @@ Humony/Sources/
 ├─ Core/       디자인 시스템, 기기 I/O 래퍼, 공용 변환
 ├─ Data/       SwiftData 모델 (세션·채점 시도)
 ├─ Domain/     Pitch · Melody · Harmony · Scoring
-└─ Features/   Practice · History (기능별 Model/View)
+└─ Features/   Onboarding · Practice · History (기능별 Model/View)
 ```
 
 기능 우선 배치입니다 — 여러 기능이 공유하는 것만 `Core`/`Domain`으로 올리고, 기능 전용 로직은
