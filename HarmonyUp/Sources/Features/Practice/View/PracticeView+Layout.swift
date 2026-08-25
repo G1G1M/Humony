@@ -558,7 +558,8 @@ extension PracticeView {
                     steps: melodySteps,
                     contentVersion: scoreContentVersion,
                     isRendering: $isScoreRendering,
-                    currentPlaybackTime: currentPlaybackTime
+                    currentPlaybackTime: currentPlaybackTime,
+                    stepColorsJSON: scoringColorsJSON
                 )
             }
             if isScoreRendering {

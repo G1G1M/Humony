@@ -40,6 +40,9 @@ struct VexFlowScoreView: UIViewRepresentable {
     /// 악보 비교 화면은 "부른 대로 / 교정 후"를 두 줄로 그리는데, 그건 `MelodyStep` 배열
     /// 하나로는 표현할 수 없다(두 벌의 음을 정렬해 자리를 맞춘 결과다).
     var payloadJSON: String?
+    /// 채점 결과를 악보 음표에 칠할 색 목록(`ScoringColorPayload.json`, 159절).
+    /// nil이면 아무것도 칠하지 않는다 — 이미 칠해진 색이 있으면 지운다.
+    var stepColorsJSON: String?
 
     /// 카드에 줄 고정 높이 — "너무 작다"는 실기기 피드백으로 키웠다(docs/CONCEPTS.md 58절).
     /// 136절에 4성부(오선 4줄)로 늘어나면서 460으로는 컴팩트 레이아웃에서 아래 두 성부가
@@ -85,6 +88,7 @@ struct VexFlowScoreView: UIViewRepresentable {
         }
         context.coordinator.pendingVersion = contentVersion
         context.coordinator.pendingStepIndex = activeStepIndex
+        context.coordinator.pendingStepColorsJSON = stepColorsJSON
         context.coordinator.onNoteTapped = onSeekToStep
         context.coordinator.isRenderingBinding = $isRendering
         context.coordinator.renderIfReady()
@@ -101,6 +105,7 @@ struct VexFlowScoreView: UIViewRepresentable {
         var pendingPayload: String?
         var pendingVersion: Int?
         var pendingStepIndex: Int?
+        var pendingStepColorsJSON: String?
         var onNoteTapped: ((Int) -> Void)?
         var isRenderingBinding: Binding<Bool>?
         private var isPageLoaded = false
@@ -110,6 +115,7 @@ struct VexFlowScoreView: UIViewRepresentable {
         // 값이 실제로 바뀌었을 때만 웹뷰에 다시 보낸다(evaluateJavaScript IPC 왕복 절약).
         private var lastSentStepIndex: Int?
         private var hasSentStepIndex = false
+        private var lastSentStepColorsJSON: String?
         // 렌더링을 새로 시작할 때마다 늘어나는 세대 토큰 — evaluateJavaScript 완료 콜백과
         // 아래 타임아웃 안전망이 서로 다른 렌더링 요청을 잘못 끄지 않도록 구분한다.
         private var renderGeneration = 0
@@ -167,6 +173,9 @@ struct VexFlowScoreView: UIViewRepresentable {
                 lastRenderedVersion = pendingVersion
                 pendingPayload = nil
                 hasSentStepIndex = false
+                // 새로 그린 악보에는 채점 색이 남아 있지 않다(render.js가 비운다) — 값이
+                // 안 바뀌었어도 다시 보내도록 "마지막으로 보낸 값"을 잊는다.
+                lastSentStepColorsJSON = nil
 
                 // evaluateJavaScript의 완료 콜백이 실제로 항상 불린다는 보장이 없다(76절) —
                 // 일정 시간 안에 콜백이 안 오면 강제로 로딩 표시를 꺼서 화면이 영구히 막히지 않게 한다.
@@ -180,6 +189,10 @@ struct VexFlowScoreView: UIViewRepresentable {
                 }
             }
 
+            // 하이라이트보다 먼저 보낸다 — setStepColors는 지금 강조 중인 음표를 다시 강조색으로
+            // 덮어주지만, 반대 순서면 그 보정을 거치지 않는다.
+            sendStepColorsIfNeeded(webView)
+
             guard !hasSentStepIndex || pendingStepIndex != lastSentStepIndex else { return }
             hasSentStepIndex = true
             lastSentStepIndex = pendingStepIndex
@@ -187,6 +200,24 @@ struct VexFlowScoreView: UIViewRepresentable {
             webView.evaluateJavaScript("setActiveStep(\(stepArgument));") { _, error in
                 #if DEBUG
                 if let error { print("[VexFlowScoreView] setActiveStep 호출 실패: \(error.localizedDescription)") }
+                #endif
+            }
+        }
+
+        /// 채점 색을 웹뷰에 보낸다(159절).
+        ///
+        /// **renderScore 바로 뒤에 부르는 것이 순서상 맞다** — `evaluateJavaScript`는 호출한
+        /// 순서대로 웹 콘텐츠 프로세스에 전달되므로, 위에서 renderScore를 걸었으면 이 호출은 그
+        /// 다음에 실행된다. 완료 콜백 안에서 부르지 않는 이유는 그 콜백이 항상 온다는 보장이
+        /// 없어서다(76절). 만에 하나 순서가 어긋나도 실패 모드는 "색이 안 칠해짐"이지 "엉뚱한
+        /// 음표가 칠해짐"이 아니다 — renderScore가 이전 색 목록을 먼저 비우기 때문이다.
+        private func sendStepColorsIfNeeded(_ webView: WKWebView) {
+            let json = pendingStepColorsJSON ?? ScoringColorPayload.emptyJSON
+            guard json != lastSentStepColorsJSON else { return }
+            lastSentStepColorsJSON = json
+            webView.evaluateJavaScript("setStepColors(\(json));") { _, error in
+                #if DEBUG
+                if let error { print("[VexFlowScoreView] setStepColors 호출 실패: \(error.localizedDescription)") }
                 #endif
             }
         }

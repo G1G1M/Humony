@@ -27,6 +27,15 @@
 var BASE_NOTE_COLOR = '#1a1a1a';
 var ACTIVE_NOTE_COLOR = '#FF9500';
 
+// 채점 색(159절) — 재생 하이라이트와 이 색은 성격이 다르다. 하이라이트는 "지금 소리 나는
+// 음"이라 한 번에 하나만, 지나가면 원래대로 돌아온다. 채점 색은 **그 음표의 원래 색 자체**를
+// 바꾼 것이라 재생이 지나가도 남아 있어야 한다. 그래서 되돌릴 색을 BASE_NOTE_COLOR로 고정하지
+// 않고 음표마다 이 속성에 기억시킨다 — setActiveStep이 이전 음을 검정으로 되돌리면서 채점
+// 색을 지워버리던 문제(158절에 탭 피드백을 opacity로 뺀 것과 같은 계열)를 이렇게 푼다.
+var BASE_COLOR_ATTRIBUTE = 'data-base-color';
+// Swift가 마지막으로 보낸 채점 색 목록 — [{voice: 행 인덱스, step: 스텝 인덱스, color: '#rrggbb'}].
+var scoringColors = [];
+
 var noteState = {
   svg: null,            // renderer가 그린 실제 <svg> 엘리먼트
   scale: 1,
@@ -34,6 +43,10 @@ var noteState = {
   bottomY: 0,
   stepX: [],             // 스텝 인덱스 -> x좌표(원래 크기 단위, scale 곱하기 전) — rowIndex 0 기준
   stepElements: [],      // 스텝 인덱스 -> 그 순간 소리 나는 음표들의 SVG 엘리먼트 배열(쉼표 제외)
+  // [행 인덱스][스텝 인덱스] -> 음표 하나의 SVG 엘리먼트. stepElements는 같은 스텝의 네 성부를
+  // 한 배열에 섞어 담아서(재생 하이라이트는 전 성부를 한꺼번에 칠하니 그걸로 충분했다) **어느
+  // 원소가 어느 성부인지 알 수 없다** — 채점은 한 성부만 칠해야 하므로 행으로 갈라 따로 든다.
+  voiceStepElements: [],
   activeIndex: null
 };
 
@@ -97,10 +110,22 @@ function recolor(el, color) {
   });
 }
 
-// index가 가리키는 스텝의 음표(들)만 강조색으로 칠하고, 이전에 칠했던 스텝은 검정으로 되돌린다.
+// 이 음표의 "원래 색" — 채점 색이 칠해져 있으면 그 색, 아니면 기본 검정.
+function baseColorOf(el) {
+  return (el && el.getAttribute(BASE_COLOR_ATTRIBUTE)) || BASE_NOTE_COLOR;
+}
+
+// 지금 칠하는 동시에, 재생 하이라이트가 지나간 뒤 되돌아올 색으로도 기억시킨다.
+function setBaseColor(el, color) {
+  if (!el) return;
+  el.setAttribute(BASE_COLOR_ATTRIBUTE, color);
+  recolor(el, color);
+}
+
+// index가 가리키는 스텝의 음표(들)만 강조색으로 칠하고, 이전에 칠했던 스텝은 원래 색으로 되돌린다.
 function setActiveStep(index) {
   if (noteState.activeIndex !== null && noteState.stepElements[noteState.activeIndex]) {
-    noteState.stepElements[noteState.activeIndex].forEach(function (el) { recolor(el, BASE_NOTE_COLOR); });
+    noteState.stepElements[noteState.activeIndex].forEach(function (el) { recolor(el, baseColorOf(el)); });
   }
   noteState.activeIndex = (index === null || index === undefined) ? null : index;
   if (noteState.activeIndex === null) {
@@ -117,6 +142,35 @@ function setActiveStep(index) {
   var elements = noteState.stepElements[noteState.activeIndex];
   if (!elements) return;
   elements.forEach(function (el) { recolor(el, ACTIVE_NOTE_COLOR); });
+}
+
+// 채점 결과를 악보 음표에 칠한다(159절). entries는 Swift의 `ScoringColorPayload`가 만든
+// [{voice, step, color}] 배열이고, 인덱스 계산(채점 순서 -> 악보 스텝, 어느 성부 행인지)은
+// 전부 그쪽 순수 함수에서 끝내고 온다 — 여기서는 받은 자리에 칠하기만 한다.
+function setStepColors(entries) {
+  scoringColors = entries || [];
+  applyStepColors();
+}
+
+function applyStepColors() {
+  // 칠하기 전에 전부 기본색으로 되돌린다. 목록에 있는 것만 칠하면, 성부를 바꿔 다시 채점했을
+  // 때 지난번 성부에 남은 색이 그대로 남아 두 성부가 동시에 채점된 것처럼 보인다.
+  noteState.voiceStepElements.forEach(function (row) {
+    if (!row) return;
+    row.forEach(function (el) { setBaseColor(el, BASE_NOTE_COLOR); });
+  });
+
+  scoringColors.forEach(function (entry) {
+    var row = noteState.voiceStepElements[entry.voice];
+    var el = row && row[entry.step];
+    if (el) setBaseColor(el, entry.color);
+  });
+
+  // 재생 중이었다면 그 음표는 방금 기본색으로 되돌려졌다 — 강조색을 다시 덮어준다.
+  // (되돌아갈 색은 위에서 이미 새 채점 색으로 기억시켜뒀다.)
+  if (noteState.activeIndex !== null && noteState.stepElements[noteState.activeIndex]) {
+    noteState.stepElements[noteState.activeIndex].forEach(function (el) { recolor(el, ACTIVE_NOTE_COLOR); });
+  }
 }
 
 // 탭한 스텝의 음표를 즉시 살짝 눌렀다 돌아오는 느낌으로 깜빡여서, "눌렸다"는 걸 바로 알려준다.
@@ -177,8 +231,11 @@ function addTapRegions() {
 function renderScore(data) {
   var container = document.getElementById('score');
   container.innerHTML = '';
-  noteState = { svg: null, scale: 1, topY: 0, bottomY: 0, stepX: [], stepElements: [], activeIndex: null };
+  noteState = { svg: null, scale: 1, topY: 0, bottomY: 0, stepX: [], stepElements: [], voiceStepElements: [], activeIndex: null };
   lastScrollTargetX = null;
+  // 새로 그린 악보는 이전 채점 결과와 아무 관계가 없다(다른 녹음일 수도 있다) — 여기서 비우고,
+  // 필요하면 Swift가 이 렌더 직후에 다시 보낸다(VexFlowScoreView.renderIfReady).
+  scoringColors = [];
 
   var VF = Vex.Flow;
   var voices = (data.voices || []).filter(function (v) { return v.notes.length > 0; });
@@ -348,6 +405,8 @@ function renderScore(data) {
             if (el) {
               if (!noteState.stepElements[globalStepIndex]) noteState.stepElements[globalStepIndex] = [];
               noteState.stepElements[globalStepIndex].push(el);
+              if (!noteState.voiceStepElements[rowIndex]) noteState.voiceStepElements[rowIndex] = [];
+              noteState.voiceStepElements[rowIndex][globalStepIndex] = el;
             }
           }
           globalStepIndex++;
@@ -370,6 +429,7 @@ function renderScore(data) {
 
 window.renderScore = renderScore;
 window.setActiveStep = setActiveStep;
+window.setStepColors = setStepColors;
 
 // score.html이 body 끝에서 이 스크립트를 로드하므로 #scoreWrapper는 이미 DOM에 있다 —
 // scoreWrapper 자체는 renderScore가 다시 그려도 재생성되지 않는 고정 컨테이너라 한 번만 걸면 된다.

@@ -183,34 +183,52 @@ extension PracticeView {
 
             Divider()
 
-            ForEach(Array(result.steps.enumerated()), id: \.offset) { _, step in
-                scoringStepRow(step)
-            }
+            scoringColorGuide(voice: voice)
         }
     }
 
-    private func scoringStepRow(_ step: HarmonyPracticeScorer.StepResult) -> some View {
-        let targetName = Self.noteName(forMIDINote: step.targetMIDINote)
-        return HStack(spacing: Theme.Spacing.xs) {
-            Text(targetName)
-                .frame(minWidth: 34, alignment: .leading)
-            if let sung = step.sungMIDINote, let cents = step.centsOffset {
-                Text("→ \(Self.noteName(forMIDINote: sung))")
-                    .foregroundStyle(.secondary)
-                Text(String(format: "%+.0f¢", cents))
-                    .foregroundStyle(step.isOnPitch ? Theme.pitchGood : Theme.warning)
-                Spacer()
-                Image(systemName: step.isOnPitch ? "checkmark.circle.fill" : "xmark.circle")
-                    .foregroundStyle(step.isOnPitch ? Theme.pitchGood : .secondary)
-            } else {
-                Text("→ 안 부름")
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Image(systemName: "minus.circle")
-                    .foregroundStyle(.secondary)
-            }
+    /// 채점 결과를 **악보 위에 색으로** 옮기면서(159절) 그 색을 읽는 법을 옆에 둔다.
+    ///
+    /// 예전엔 여기에 음마다 한 줄씩(`목표음 → 부른음 ±cent`) 모노스페이스 텍스트가 쌓였다 —
+    /// 12음이면 12줄이고, 바로 위에 악보가 있는데도 "세 번째 줄이 틀렸다"를 읽고 눈으로 악보에서
+    /// 그 음을 다시 찾아야 했다. 지금은 틀린 음표 자체가 칠해지므로 그 왕복이 없다. 대신 색이
+    /// 무슨 뜻인지는 화면에 있어야 한다(`PRODUCT.md` 원칙5 — 화면만 보고 따라갈 수 있어야).
+    @ViewBuilder
+    private func scoringColorGuide(voice: ChordGenerator.Interval) -> some View {
+        Label("악보의 \(voice.koreanLabel) 줄에 색으로 표시했어요", systemImage: "paintpalette")
+            .font(Theme.Typography.caption)
+            .foregroundStyle(Theme.tint)
+
+        // 여기 색은 시스템 시맨틱 색이고 악보 쪽은 같은 색의 hex 값이다(`ScoringColorPayload`) —
+        // 악보는 WKWebView 안 SVG라 값이 필요하고, 이쪽은 앱 UI라 시맨틱 색을 쓰는 게 맞다.
+        HStack(spacing: Theme.Spacing.sm) {
+            scoringLegendItem(color: Theme.pitchGood, label: "정확")
+            scoringLegendItem(color: Theme.pitchBad, label: "벗어남")
+            scoringLegendItem(color: .secondary, label: "안 부름")
         }
-        .font(.system(.caption, design: .monospaced))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("악보 색 안내: 초록은 정확, 빨강은 벗어남, 회색은 안 부른 음이에요")
+    }
+
+    private func scoringLegendItem(color: Color, label: String) -> some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(color)
+                .frame(width: 8, height: 8)
+            Text(label)
+                .font(Theme.Typography.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// 채점 결과를 악보에 칠할 색(159절) — 결과를 보고 있는 동안만 칠한다.
+    /// 다시 부르기를 누르거나 새로 녹음하면 `scoringPhase`가 바뀌면서 nil이 되고, 그때
+    /// `render.js`가 칠해둔 색을 지운다.
+    var scoringColorsJSON: String? {
+        guard scoringPhase == .result,
+              let result = scoringResult,
+              let voice = scoringResultVoice else { return nil }
+        return ScoringColorPayload.json(steps: melodySteps, interval: voice, result: result)
     }
 
     // MARK: - 표시용 문구 (순수 함수 — 뷰 상태와 무관해서 테스트하기 쉽다)
@@ -228,10 +246,6 @@ extension PracticeView {
         if missed > 0 { parts.append("안 부른 음 \(missed)개") }
         if extra > 0 { parts.append("목표에 없는 음 \(extra)개") }
         return parts.joined(separator: " · ")
-    }
-
-    static func noteName(forMIDINote midiNote: Int) -> String {
-        NoteNameConverter.convert(frequency: NoteNameConverter.frequency(forMIDINote: midiNote))?.noteName ?? "?"
     }
 
     // MARK: - 목표 시퀀스

@@ -18,6 +18,8 @@ struct PlaybackHighlightingScoreView: View {
     @Binding var isRendering: Bool
     /// 지금 재생 위치(초). 재생 중이 아니면 nil을 돌려준다.
     let currentPlaybackTime: () -> TimeInterval?
+    /// 채점 결과를 악보에 칠할 색(159절). 재생 하이라이트와 같은 악보 위에 함께 얹힌다.
+    var stepColorsJSON: String?
 
     @State private var events: [ScoreTimeline.Event] = []
     @State private var activeIndex: Int?
@@ -32,7 +34,8 @@ struct PlaybackHighlightingScoreView: View {
             activeStepIndex: activeIndex,
             onSeekToStep: { _ in },
             isRendering: $isRendering,
-            contentVersion: contentVersion
+            contentVersion: contentVersion,
+            stepColorsJSON: stepColorsJSON
         )
         .onAppear { rebuildTimeline() }
         .onChange(of: contentVersion) { rebuildTimeline() }
