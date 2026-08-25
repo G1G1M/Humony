@@ -62,10 +62,24 @@ struct OnboardingView: View {
                             Text(page.title)
                                 .font(Theme.Typography.largeTitleBold)
                                 .multilineTextAlignment(.center)
-                            Text(page.body)
-                                .font(Theme.Typography.body)
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center)
+
+                            // 본문은 문장마다 따로 그린다 — 한 덩어리로 두면 줄바꿈이 문장
+                            // 한가운데를 잘라 "…녹음은 전부 이 / 기기 안에서"처럼 읽다가
+                            // 한 번 멈추게 된다(`OnboardingPage.bodyParagraphs` 주석 참고).
+                            VStack(spacing: Theme.Spacing.xs) {
+                                ForEach(page.bodyParagraphs, id: \.self) { paragraph in
+                                    Text(paragraph)
+                                        .font(Theme.Typography.body)
+                                        .foregroundStyle(.secondary)
+                                        .multilineTextAlignment(.center)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                            // 본문만 제목보다 좁게 잡는다 — 글자가 작아서 같은 폭을 주면 한 줄이
+                            // 너무 길어지고(아이패드에서 특히), 줄이 어중간한 자리에서 떨어진다.
+                            .frame(maxWidth: 420)
+                            // 한글은 행간이 붙으면 답답해 보인다.
+                            .lineSpacing(4)
                         }
 
                         if !page.steps.isEmpty {
@@ -84,6 +98,7 @@ struct OnboardingView: View {
                                 .font(Theme.Typography.caption)
                                 .foregroundStyle(.secondary)
                                 .multilineTextAlignment(.leading)
+                                .lineSpacing(3)
                                 .padding(.horizontal, Theme.Spacing.md)
                                 .padding(.vertical, Theme.Spacing.sm)
                                 // 단서도 같은 재질로 — 배경 없이 두면 이 한 조각만 종이처럼 뜬다.

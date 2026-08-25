@@ -71,7 +71,8 @@ enum OnboardingPage: Int, CaseIterable, Identifiable {
         case .microphone:
             return [
                 "노래를 듣고 어떤 음인지 알아내려면 마이크가 필요해요.",
-                "녹음은 전부 이\u{00A0}기기 안에서만 처리되고, 어디에도 보내지 않아요.",
+                "녹음은 전부 이\u{00A0}기기 안에서만 처리돼요.",
+                "어디에도 보내지 않아요.",
             ]
         }
     }

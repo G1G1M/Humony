@@ -32,6 +32,44 @@ final class OnboardingPageTests: XCTestCase {
         XCTAssertFalse(OnboardingPage.flow.requestsMicrophonePermission)
     }
 
+    func testBodyIsKeptAsSentencesForCleanLineBreaks() {
+        // 본문을 문장 단위로 갖는 건 취향이 아니라 줄바꿈 계약이다 — 뷰가 문장마다 Text를
+        // 따로 그려야 "…녹음은 전부 이 / 기기 안에서"처럼 문장 한가운데가 잘리지 않는다.
+        for page in OnboardingPage.allCases {
+            XCTAssertFalse(page.bodyParagraphs.isEmpty, "\(page)에 본문 문장이 없다")
+            for paragraph in page.bodyParagraphs {
+                XCTAssertFalse(paragraph.isEmpty, "\(page)에 빈 문장이 있다")
+            }
+        }
+    }
+
+    func testBodyJoinsItsParagraphs() {
+        // `body`(금지어 검사 등에서 쓰는 한 덩어리)와 실제로 그려지는 문장들이 갈라지면,
+        // 테스트가 통과하는데 화면에는 다른 문구가 뜨는 상태가 된다.
+        for page in OnboardingPage.allCases {
+            for paragraph in page.bodyParagraphs {
+                XCTAssertTrue(page.body.contains(paragraph), "\(page)의 body가 문장을 빠뜨렸다")
+            }
+        }
+    }
+
+    /// 문구에 `\n`을 직접 박으면 지금 이 폭에서만 예쁘다 — Dynamic Type을 키우거나 좁은
+    /// 화면에서는 박아둔 줄이 또 접혀 오히려 더 망가진다. 줄을 나누고 싶으면 문장을
+    /// `bodyParagraphs`에 하나 더 넣을 것.
+    func testCopyHasNoHardCodedLineBreaks() {
+        for page in OnboardingPage.allCases {
+            var strings = [page.title] + page.bodyParagraphs
+            strings += page.steps.flatMap { [$0.label, $0.detail] }
+            if let footnote = page.footnote { strings.append(footnote) }
+            for text in strings {
+                XCTAssertFalse(
+                    text.contains("\n"),
+                    "\(page) 문구에 줄바꿈이 박혀 있다 — 문장을 나누는 방식으로 바꿀 것"
+                )
+            }
+        }
+    }
+
     func testEveryPageHasTitleAndBody() {
         for page in OnboardingPage.allCases {
             XCTAssertFalse(page.title.isEmpty, "\(page)에 제목이 없다")
