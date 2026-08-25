@@ -67,29 +67,29 @@ enum OnboardingPage: Int, CaseIterable, Identifiable {
                 "다른 악기 소리가 아니라, 방금 부른 목소리 그대로요.",
             ]
         case .flow:
-            return ["녹음 한 번이면 아래 세 가지가 이어서 일어나요."]
+            // 제목과 아래 세 단계가 이미 같은 말을 한다 — 한 번 더 적으면 읽을 것만 늘어난다.
+            return []
         case .microphone:
             return [
-                "노래를 듣고 어떤 음인지 알아내려면 마이크가 필요해요.",
-                "녹음은 전부 이\u{00A0}기기 안에서만 처리돼요.",
-                "어디에도 보내지 않아요.",
+                "노래를 들으려면 마이크가 필요해요.",
+                "녹음은 이\u{00A0}기기 안에서만 처리돼요.",
             ]
         }
     }
 
     /// 문장을 이어붙인 한 덩어리 — 금지어 검사(`allText`)처럼 "이 장의 본문 전체"가 필요한
     /// 곳에서 쓴다. 화면에 그릴 때는 `bodyParagraphs`를 쓸 것.
-    var body: String {
-        bodyParagraphs.joined(separator: " ")
+    var body: String? {
+        bodyParagraphs.isEmpty ? nil : bodyParagraphs.joined(separator: " ")
     }
 
     var steps: [Step] {
         switch self {
         case .flow:
             return [
-                Step(symbolName: "mic.fill", label: "부르기", detail: "좋아하는 노래를 한 소절 불러요"),
-                Step(symbolName: "waveform.path", label: "화음 듣기", detail: "만들어진 화음을 내 목소리로 들어봐요"),
-                Step(symbolName: "checkmark.seal", label: "따라 부르기", detail: "골라 들은 소리를 따라 부르면 얼마나 맞았는지 알려드려요"),
+                Step(symbolName: "mic.fill", label: "부르기", detail: "좋아하는 노래를 한 소절"),
+                Step(symbolName: "waveform.path", label: "화음 듣기", detail: "내 목소리로"),
+                Step(symbolName: "checkmark.seal", label: "따라 부르기", detail: "얼마나 맞았는지 알려드려요"),
             ]
         case .value, .microphone:
             return []
@@ -104,11 +104,7 @@ enum OnboardingPage: Int, CaseIterable, Identifiable {
     var footnoteLines: [String] {
         switch self {
         case .flow:
-            return [
-                "들려드리는 동안은 마이크가 잠시 쉬어요.",
-                "스피커에서 나온 소리가 마이크로 되돌아오면",
-                "내가\u{00A0}부른 걸로 잘못 알아듣거든요.",
-            ]
+            return ["들려드리는 동안은 마이크가 잠시 쉬어요."]
         case .value, .microphone:
             return []
         }
@@ -128,7 +124,8 @@ enum OnboardingPage: Int, CaseIterable, Identifiable {
 
     /// 금지어 검사용 — 이 장에서 사용자 눈에 닿는 모든 문자열을 한 덩어리로 잇는다.
     var allText: String {
-        var parts = [title, body]
+        var parts = [title]
+        if let body { parts.append(body) }
         parts += steps.flatMap { [$0.label, $0.detail] }
         if let footnote { parts.append(footnote) }
         return parts.joined(separator: "\n")

@@ -36,7 +36,6 @@ final class OnboardingPageTests: XCTestCase {
         // 본문을 문장 단위로 갖는 건 취향이 아니라 줄바꿈 계약이다 — 뷰가 문장마다 Text를
         // 따로 그려야 "…녹음은 전부 이 / 기기 안에서"처럼 문장 한가운데가 잘리지 않는다.
         for page in OnboardingPage.allCases {
-            XCTAssertFalse(page.bodyParagraphs.isEmpty, "\(page)에 본문 문장이 없다")
             for paragraph in page.bodyParagraphs {
                 XCTAssertFalse(paragraph.isEmpty, "\(page)에 빈 문장이 있다")
             }
@@ -47,8 +46,12 @@ final class OnboardingPageTests: XCTestCase {
         // `body`(금지어 검사 등에서 쓰는 한 덩어리)와 실제로 그려지는 문장들이 갈라지면,
         // 테스트가 통과하는데 화면에는 다른 문구가 뜨는 상태가 된다.
         for page in OnboardingPage.allCases {
+            if page.bodyParagraphs.isEmpty {
+                XCTAssertNil(page.body, "\(page)에 문장이 없는데 본문이 남아 있다")
+                continue
+            }
             for paragraph in page.bodyParagraphs {
-                XCTAssertTrue(page.body.contains(paragraph), "\(page)의 body가 문장을 빠뜨렸다")
+                XCTAssertTrue(page.body?.contains(paragraph) == true, "\(page)의 body가 문장을 빠뜨렸다")
             }
         }
     }
@@ -58,7 +61,7 @@ final class OnboardingPageTests: XCTestCase {
     /// `bodyParagraphs`에 하나 더 넣을 것.
     func testCopyHasNoHardCodedLineBreaks() {
         for page in OnboardingPage.allCases {
-            var strings = [page.title] + page.bodyParagraphs
+            var strings = [page.title] + page.bodyParagraphs + page.footnoteLines
             strings += page.steps.flatMap { [$0.label, $0.detail] }
             if let footnote = page.footnote { strings.append(footnote) }
             for text in strings {
@@ -70,11 +73,15 @@ final class OnboardingPageTests: XCTestCase {
         }
     }
 
-    func testEveryPageHasTitleAndBody() {
+    /// 본문은 **없어도 된다** — 2장은 제목과 세 단계가 이미 같은 말을 해서 본문을 지웠다.
+    /// 다만 있다면 빈 문자열이어서는 안 된다(빈 자리만 차지한다).
+    func testEveryPageHasTitleAndSymbol() {
         for page in OnboardingPage.allCases {
             XCTAssertFalse(page.title.isEmpty, "\(page)에 제목이 없다")
-            XCTAssertFalse(page.body.isEmpty, "\(page)에 본문이 없다")
             XCTAssertFalse(page.symbolName.isEmpty, "\(page)에 심볼이 없다")
+            if let body = page.body {
+                XCTAssertFalse(body.isEmpty, "\(page)의 본문이 빈 문자열이다")
+            }
         }
     }
 

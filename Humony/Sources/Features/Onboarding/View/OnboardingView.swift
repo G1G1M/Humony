@@ -105,88 +105,84 @@ struct OnboardingView: View {
         .indexViewStyle(.page(backgroundDisplayMode: .always))
     }
 
-    /// 글자 크기를 키운 사용자(Dynamic Type)에게도 본문이 잘리지 않도록 각 장을 스크롤에 담는다 —
-    /// 아이폰 세로에서 3단계 + 단서까지 있는 2장은 기본 크기에서도 여유가 많지 않다.
+    /// 한 장의 내용. **세로로 스크롤하지 않는다** — 온보딩은 훑어보는 화면이지 읽어 내려가는
+    /// 화면이 아니고, 스크롤이 되면 "아래에 뭔가 더 있나" 하고 손이 한 번 더 가게 된다.
+    /// 좌우로 넘기는 것(TabView)만 남긴다.
+    ///
+    /// 대신 내용이 화면을 넘칠 수 없도록 두 가지를 지킨다: 문구를 짧게 유지하는 것(이건
+    /// `OnboardingPage` 쪽 규칙이다)과, 글자 크기를 키운 사용자(Dynamic Type)를 위해 텍스트가
+    /// 조금 줄어들 여지(`minimumScaleFactor`)를 두는 것.
     private func pageContent(_ page: OnboardingPage) -> some View {
-        GeometryReader { geometry in
-            ScrollView {
-                Theme.glassGroup {
-                    VStack(spacing: Theme.Spacing.lg) {
-                        symbolPlate(page)
+        Theme.glassGroup {
+            VStack(spacing: Theme.Spacing.lg) {
+                symbolPlate(page)
 
-                        VStack(spacing: Theme.Spacing.sm) {
-                            Text(page.title)
-                                .font(Theme.Typography.largeTitleBold)
-                                .multilineTextAlignment(.center)
+                VStack(spacing: Theme.Spacing.sm) {
+                    Text(page.title)
+                        .font(Theme.Typography.largeTitleBold)
+                        .multilineTextAlignment(.center)
 
-                            // 본문은 문장마다 따로 그린다 — 한 덩어리로 두면 줄바꿈이 문장
-                            // 한가운데를 잘라 "…녹음은 전부 이 / 기기 안에서"처럼 읽다가
-                            // 한 번 멈추게 된다(`OnboardingPage.bodyParagraphs` 주석 참고).
-                            VStack(spacing: Theme.Spacing.xs) {
-                                ForEach(page.bodyParagraphs, id: \.self) { paragraph in
-                                    Text(paragraph)
-                                        .font(Theme.Typography.body)
-                                        .foregroundStyle(.secondary)
-                                        .multilineTextAlignment(.center)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-                            }
-                            // 본문만 제목보다 좁게 잡는다 — 글자가 작아서 같은 폭을 주면 한 줄이
-                            // 너무 길어지고(아이패드에서 특히), 줄이 어중간한 자리에서 떨어진다.
-                            .frame(maxWidth: 420)
-                            // 한글은 행간이 붙으면 답답해 보인다.
-                            .lineSpacing(4)
-                        }
-
-                        if !page.steps.isEmpty {
-                            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                                ForEach(page.steps) { step in
-                                    stepRow(step)
-                                }
-                            }
-                            .padding(Theme.Spacing.md)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .harmonyGlassCard()
-                        }
-
-                        if !page.footnoteLines.isEmpty {
-                            // `Label` 한 덩어리로는 줄을 세울 수 없어서 아이콘과 글을 직접 붙인다.
-                            // 아이콘은 첫 줄에 맞춰 위로 정렬한다 — 가운데 정렬하면 줄이 늘어날수록
-                            // 아이콘이 글 한복판으로 내려와 무엇을 가리키는지 흐려진다.
-                            HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.sm) {
-                                Image(systemName: "info.circle")
-                                    .font(Theme.Typography.caption)
+                    if !page.bodyParagraphs.isEmpty {
+                        // 본문은 문장마다 따로 그린다 — 한 덩어리로 두면 줄바꿈이 문장
+                        // 한가운데를 잘라 "…녹음은 전부 이 / 기기 안에서"처럼 읽다가
+                        // 한 번 멈추게 된다(`OnboardingPage.bodyParagraphs` 주석 참고).
+                        VStack(spacing: Theme.Spacing.xs) {
+                            ForEach(page.bodyParagraphs, id: \.self) { paragraph in
+                                Text(paragraph)
+                                    .font(Theme.Typography.body)
                                     .foregroundStyle(.secondary)
-                                    .accessibilityHidden(true)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    ForEach(page.footnoteLines, id: \.self) { line in
-                                        Text(line)
-                                            .font(Theme.Typography.caption)
-                                            .foregroundStyle(.secondary)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                    }
-                                }
+                                    .multilineTextAlignment(.center)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
-                            // 줄을 나눠 그려도 VoiceOver에는 한 문장으로 읽혀야 한다.
-                            .accessibilityElement(children: .ignore)
-                            .accessibilityLabel(page.footnote ?? "")
-                            .padding(.horizontal, Theme.Spacing.md)
-                            .padding(.vertical, Theme.Spacing.sm)
-                            // 단서도 같은 재질로 — 배경 없이 두면 이 한 조각만 종이처럼 뜬다.
-                            .harmonyGlassCard()
                         }
+                        // 본문만 제목보다 좁게 잡는다 — 글자가 작아서 같은 폭을 주면 한 줄이
+                        // 너무 길어지고(아이패드에서 특히), 줄이 어중간한 자리에서 떨어진다.
+                        .frame(maxWidth: 420)
+                        // 한글은 행간이 붙으면 답답해 보인다.
+                        .lineSpacing(4)
                     }
                 }
-                .padding(.horizontal, Theme.Spacing.lg)
-                .padding(.bottom, Theme.Spacing.lg)
-                .frame(maxWidth: 520)
-                .frame(maxWidth: .infinity)
-                // 아이패드처럼 세로가 남는 화면에서 내용이 위로 몰리고 아래가 텅 비지 않게,
-                // 스크롤 내용의 최소 높이를 화면 높이로 잡아 세로 가운데에 놓는다. 글자 크기를
-                // 키워 내용이 화면보다 길어지면 minHeight를 넘겨 평소처럼 스크롤된다.
-                .frame(minHeight: geometry.size.height, alignment: .center)
+
+                if !page.steps.isEmpty {
+                    VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                        ForEach(page.steps) { step in
+                            stepRow(step)
+                        }
+                    }
+                    .padding(Theme.Spacing.md)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .harmonyGlassCard()
+                }
+
+                if !page.footnoteLines.isEmpty {
+                    // `Label` 한 덩어리로는 줄을 세울 수 없어서 아이콘과 글을 직접 붙인다.
+                    // 아이콘은 첫 줄에 맞춰 정렬한다 — 가운데 정렬하면 줄이 늘어날수록
+                    // 아이콘이 글 한복판으로 내려와 무엇을 가리키는지 흐려진다.
+                    HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.sm) {
+                        Image(systemName: "info.circle")
+                            .font(Theme.Typography.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(page.footnoteLines, id: \.self) { line in
+                                Text(line)
+                                    .font(Theme.Typography.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                    // 줄을 나눠 그려도 VoiceOver에는 한 문장으로 읽혀야 한다.
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(page.footnote ?? "")
+                }
             }
+            // 글자 크기를 아주 키운 사용자에게도 한 화면에 들어가도록, 넘칠 때만 조금 줄어든다.
+            .minimumScaleFactor(0.8)
         }
+        .padding(.horizontal, Theme.Spacing.lg)
+        .frame(maxWidth: 520)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     /// 장을 대표하는 심볼 — 맨몸으로 두지 않고 둥근 글래스 판 위에 올린다. 화면에서 가장 먼저
