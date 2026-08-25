@@ -56,17 +56,38 @@ struct OnboardingView: View {
     /// 원래 자리인 우상단. 마지막 장에는 아래에 "나중에 할게요"가 따로 있어서 숨긴다 —
     /// 같은 뜻의 출구가 한 화면에 둘이면 어느 쪽이 무엇인지 읽는 데 시간이 든다.
     /// 자리는 항상 차지하므로(고정 높이) 숨겨도 아래 내용이 밀리지 않는다.
+    ///
+    /// 탭 타깃은 44×44 아래로 내려가지 않게 잡는다(HIG 최소 규격, 앱의 다른 아이콘 버튼들과
+    /// 같은 관용구다). 화면 가장자리에 홀로 있는 작은 버튼이라 여기가 작으면 특히 잘 빗나간다.
     private var skipBar: some View {
         HStack {
             Spacer()
             if selection != .microphone {
-                Button("건너뛰기") { onFinish() }
-                    .font(Theme.Typography.subheadline)
-                    .harmonyButtonStyle()
-                    .controlSize(.small)
+                // `harmonyButtonStyle()`(iOS 26의 `.glass`)을 쓰지 않고 캡슐을 직접 그린다 —
+                // 그 스타일은 `controlSize`로만 높이가 정해져서, 라벨이든 버튼이든 `.frame`을
+                // 걸어도 캡슐은 28pt에 머물렀다(실측). `.large`로 올리면 44를 넘지만 이번엔
+                // 주 버튼과 같은 덩치가 되어 보조 버튼의 무게가 사라진다. 재질은 같은 헬퍼
+                // (`harmonyGlassCapsule`)를 쓰므로 다른 표면들과 그대로 한 벌이다.
+                Button {
+                    onFinish()
+                } label: {
+                    Text("건너뛰기")
+                        .font(Theme.Typography.subheadline)
+                        // `.plain`은 라벨 색을 건드리지 않아 글자가 검게 남는다 — 누를 수 있는
+                        // 것으로 보이도록 틴트를 직접 준다(버튼 스타일이 해주던 일이다).
+                        .foregroundStyle(Theme.tint)
+                        .padding(.horizontal, Theme.Spacing.md)
+                        // 높이는 HIG 최소 탭 타깃(44)에 정확히 맞추고, 폭은 글자에 맡겨
+                        // 보조 버튼다운 크기를 지킨다.
+                        .frame(minWidth: 44, minHeight: 44)
+                        .harmonyGlassCapsule()
+                }
+                .buttonStyle(.plain)
             }
         }
-        .frame(height: 44)
+        // 버튼(최소 44)에 위아래 숨 쉴 자리를 더한 높이 — 이 바는 버튼이 숨는 마지막 장에도
+        // 같은 높이를 유지해야 아래 내용이 밀리지 않는다.
+        .frame(height: 60)
         .padding(.horizontal, Theme.Spacing.lg)
     }
 
