@@ -149,16 +149,31 @@ struct OnboardingView: View {
                             .harmonyGlassCard()
                         }
 
-                        if let footnote = page.footnote {
-                            Label(footnote, systemImage: "info.circle")
-                                .font(Theme.Typography.caption)
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.leading)
-                                .lineSpacing(3)
-                                .padding(.horizontal, Theme.Spacing.md)
-                                .padding(.vertical, Theme.Spacing.sm)
-                                // 단서도 같은 재질로 — 배경 없이 두면 이 한 조각만 종이처럼 뜬다.
-                                .harmonyGlassCard()
+                        if !page.footnoteLines.isEmpty {
+                            // `Label` 한 덩어리로는 줄을 세울 수 없어서 아이콘과 글을 직접 붙인다.
+                            // 아이콘은 첫 줄에 맞춰 위로 정렬한다 — 가운데 정렬하면 줄이 늘어날수록
+                            // 아이콘이 글 한복판으로 내려와 무엇을 가리키는지 흐려진다.
+                            HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.sm) {
+                                Image(systemName: "info.circle")
+                                    .font(Theme.Typography.caption)
+                                    .foregroundStyle(.secondary)
+                                    .accessibilityHidden(true)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    ForEach(page.footnoteLines, id: \.self) { line in
+                                        Text(line)
+                                            .font(Theme.Typography.caption)
+                                            .foregroundStyle(.secondary)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                }
+                            }
+                            // 줄을 나눠 그려도 VoiceOver에는 한 문장으로 읽혀야 한다.
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel(page.footnote ?? "")
+                            .padding(.horizontal, Theme.Spacing.md)
+                            .padding(.vertical, Theme.Spacing.sm)
+                            // 단서도 같은 재질로 — 배경 없이 두면 이 한 조각만 종이처럼 뜬다.
+                            .harmonyGlassCard()
                         }
                     }
                 }

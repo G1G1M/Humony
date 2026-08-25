@@ -97,13 +97,27 @@ enum OnboardingPage: Int, CaseIterable, Identifiable {
     }
 
     /// 본문 아래에 작게 붙는 단서. 지금은 2장의 콜앤리스폰스 제약 하나뿐이다.
-    var footnote: String? {
+    /// 본문(`bodyParagraphs`)과 같은 이유로 줄 단위로 갖는다 — 한 덩어리로 두면 줄바꿈이
+    /// 의미 덩어리 한가운데를 잘라 읽다가 한 번 멈추게 된다. 단서는 본문보다 글자가 작아
+    /// (caption) 한 줄에 더 많이 들어가는 만큼, 한 문장이 그대로 두 줄이 되기도 쉽다 —
+    /// 그래서 긴 문장은 **읽을 때 숨을 쉬는 자리**에서 한 번 더 끊어 세운다.
+    var footnoteLines: [String] {
         switch self {
         case .flow:
-            return "들려드리는 동안은 마이크가 잠시 쉬어요. 스피커에서 나온 소리가 마이크로 되돌아오면 내가\u{00A0}부른 걸로 잘못 알아듣거든요."
+            return [
+                "들려드리는 동안은 마이크가 잠시 쉬어요.",
+                "스피커에서 나온 소리가 마이크로 되돌아오면",
+                "내가\u{00A0}부른 걸로 잘못 알아듣거든요.",
+            ]
         case .value, .microphone:
-            return nil
+            return []
         }
+    }
+
+    /// 줄들을 이어붙인 한 덩어리 — 금지어 검사(`allText`)처럼 "화면에 뜨는 말 전체"를 봐야
+    /// 하는 곳에서 쓴다. 화면에 그려지는 건 `footnoteLines` 쪽이다.
+    var footnote: String? {
+        footnoteLines.isEmpty ? nil : footnoteLines.joined(separator: " ")
     }
 
     /// 이 장이 시스템 권한 팝업을 띄우는 장인지. 마지막 장이어야 pre-prompt가 의미를 갖는다

@@ -113,6 +113,25 @@ final class OnboardingPageTests: XCTestCase {
         XCTAssertTrue(OnboardingPage.flow.footnote?.contains("마이크") == true)
     }
 
+    /// 단서도 본문과 같은 줄바꿈 계약을 따른다 — 화면에 그려지는 건 줄 배열 쪽이고,
+    /// `footnote`(한 덩어리)는 금지어 검사와 VoiceOver용이다. 둘이 갈라지면 테스트는
+    /// 통과하는데 화면에는 다른 문구가 뜬다.
+    func testFootnoteJoinsItsLines() {
+        for page in OnboardingPage.allCases {
+            if page.footnoteLines.isEmpty {
+                XCTAssertNil(page.footnote, "\(page)에 줄이 없는데 단서가 남아 있다")
+            } else {
+                for line in page.footnoteLines {
+                    XCTAssertFalse(line.isEmpty, "\(page) 단서에 빈 줄이 있다")
+                    XCTAssertTrue(
+                        page.footnote?.contains(line) == true,
+                        "\(page)의 footnote가 줄을 빠뜨렸다"
+                    )
+                }
+            }
+        }
+    }
+
     /// 서버가 없다는 건 이 앱의 실제 사실이고(전 과정 온디바이스), 권한을 묻는 자리에서
     /// 가장 설득력 있는 근거다. 문구가 사라지면 pre-prompt의 알맹이가 빠진다.
     func testMicrophonePageExplainsOnDeviceProcessing() {
