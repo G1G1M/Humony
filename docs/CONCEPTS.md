@@ -1,6 +1,6 @@
 # 학습 노트 — 기술 & 개념 정리
 
-이 문서는 하모니업(Harmony Up)을 만들면서 사용한 기술과 개념을, 나중에 다시 봐도 이해할 수 있게 풀어서 정리한 것이다. 단계가 끝날 때마다 이어서 추가한다. iOS 개발 경험은 있지만 DSP(디지털 신호 처리)는 이번에 처음 배운다는 전제로 쓴다.
+이 문서는 휴모니(Humony)을 만들면서 사용한 기술과 개념을, 나중에 다시 봐도 이해할 수 있게 풀어서 정리한 것이다. 단계가 끝날 때마다 이어서 추가한다. iOS 개발 경험은 있지만 DSP(디지털 신호 처리)는 이번에 처음 배운다는 전제로 쓴다.
 
 ---
 
@@ -12,18 +12,18 @@
 
 **우리 프로젝트 구조**:
 ```
-HarmonyUp/
-  project.yml              # 타깃 정의(HarmonyUp 앱, HarmonyUpTests)
-  HarmonyUp/Sources/        # 앱 타깃 소스
+Humony/
+  project.yml              # 타깃 정의(Humony 앱, HumonyTests)
+  Humony/Sources/        # 앱 타깃 소스
     PitchEngine/            # 신호처리 순수 로직 (UI와 분리)
-  HarmonyUp/Tests/           # 유닛 테스트
+  Humony/Tests/           # 유닛 테스트
 ```
 
 ---
 
 ## 2. SwiftUI 앱 기본 구조
 
-- `@main struct HarmonyUpApp: App`: 앱의 진입점. `App` 프로토콜을 채택한 타입에 `@main`을 붙이면 이게 실행 시작점이 된다 (예전 `AppDelegate`의 `UIApplicationMain` 역할을 대체).
+- `@main struct HumonyApp: App`: 앱의 진입점. `App` 프로토콜을 채택한 타입에 `@main`을 붙이면 이게 실행 시작점이 된다 (예전 `AppDelegate`의 `UIApplicationMain` 역할을 대체).
 - `var body: some Scene`: 앱이 어떤 화면 구성(Scene)을 가질지 정의. `WindowGroup`은 iOS에서 사실상 "창 하나"를 뜻한다.
 - 이 프로젝트에서는 UI가 범위 밖이라 `ContentView`는 텍스트 하나만 띄우는 자리표시자로 둔다.
 
@@ -342,7 +342,7 @@ VAD를 통과했다고 다 "진짜 노래하는 음"은 아니다 — "음"이�
 
 ### SwiftData 최소 사용법
 
-`@Model` 매크로를 붙인 클래스(`PracticeAttempt`)가 곧 저장 가능한 데이터 모델이다. `HarmonyUpApp`에 `.modelContainer(for: PracticeAttempt.self)`를 붙이면 앱 전체에서 이 모델을 저장/조회할 수 있는 컨테이너가 만들어진다. `ContentView`에서는 `@Environment(\.modelContext)`로 "저장할 때 쓰는 손잡이"를, `@Query(sort: \.date, order: .reverse)`로 "최신순으로 자동 정렬된 전체 기록"을 가져온다 — `@Query`는 SwiftUI의 `@State`처럼 값이 바뀌면(새 기록이 저장되면) 화면을 자동으로 다시 그려준다.
+`@Model` 매크로를 붙인 클래스(`PracticeAttempt`)가 곧 저장 가능한 데이터 모델이다. `HumonyApp`에 `.modelContainer(for: PracticeAttempt.self)`를 붙이면 앱 전체에서 이 모델을 저장/조회할 수 있는 컨테이너가 만들어진다. `ContentView`에서는 `@Environment(\.modelContext)`로 "저장할 때 쓰는 손잡이"를, `@Query(sort: \.date, order: .reverse)`로 "최신순으로 자동 정렬된 전체 기록"을 가져온다 — `@Query`는 SwiftUI의 `@State`처럼 값이 바뀌면(새 기록이 저장되면) 화면을 자동으로 다시 그려준다.
 
 ### 조성 판별(KeyDetector)과 닮은 패턴 — "자주 벗어난 화음 유형" 찾기
 
@@ -708,7 +708,7 @@ iOS Human Interface Guidelines는 "하나의 틴트 컬러가 인터랙션 요�
 ### 화면 파일을 쪼갠 방식
 
 `ContentView.swift` 하나(955줄)에 있던 걸 역할별로 나눴다:
-- `HarmonyUpApp.swift`가 이제 `ContentView()` 대신 `RootTabView()`를 띄운다.
+- `HumonyApp.swift`가 이제 `ContentView()` 대신 `RootTabView()`를 띄운다.
 - `RootTabView.swift` — `TabView`로 "연습"/"기록" 탭 2개를 구성한다. iOS HIG는 "탭바는 액션이 아니라 섹션에만 쓴다"고 명시하는데, 연습(캡처~채점)과 기록(과거 열람)은 서로 다른 사용 맥락의 진짜 섹션이라 이 조건에 맞는다.
 - `ContentView.swift`는 `PracticeView.swift`로 이름을 바꿨다(역할이 "유일한 화면"에서 "연습 탭 화면"으로 좁혀졌으므로). **State/로직은 전부 그대로 옮겼고, `body`만 다시 짰다** — 리스크를 낮추기 위해 한 번에 로직까지 재배치하지 않았다.
 - `HistoryView.swift` — 기존 "5. 세션 기록" 섹션을 통째로 옮겨서 독립된 화면으로 만들었다. `@Query`도 여기로 옮겨서, 연습 화면은 더 이상 기록 데이터를 몰라도 된다.
@@ -732,7 +732,7 @@ iOS 기본 시스템 폰트는 San Francisco(SF)인데, 한글은 SF가 아니�
 
 ### Pretendard를 받아온 방법
 
-[Pretendard](https://github.com/orioncactus/pretendard)는 SIL Open Font License(OFL) 1.1로 배포되는 오픈소스 폰트라 앱에 자유롭게 포함할 수 있다. GitHub 릴리즈에는 굵기별 정적 파일과 가변 폰트(variable font)가 다 들어있는 47MB짜리 zip이 있는데, 여기서 실제로 쓸 4개 굵기(Regular/Medium/SemiBold/Bold)의 `.otf`만 뽑아서 `HarmonyUp/Sources/Resources/Fonts/`에 넣었다(전체 6MB) — 가변 폰트는 SwiftUI에서 굵기 축(weight axis)을 다루려면 별도 처리가 필요해서, 지금 필요한 굵기만 정적 파일로 받는 게 더 간단했다. 라이선스 조건(OFL은 재배포 시 라이선스 텍스트 동봉을 요구)에 맞춰 `LICENSE.txt`도 같이 넣었다.
+[Pretendard](https://github.com/orioncactus/pretendard)는 SIL Open Font License(OFL) 1.1로 배포되는 오픈소스 폰트라 앱에 자유롭게 포함할 수 있다. GitHub 릴리즈에는 굵기별 정적 파일과 가변 폰트(variable font)가 다 들어있는 47MB짜리 zip이 있는데, 여기서 실제로 쓸 4개 굵기(Regular/Medium/SemiBold/Bold)의 `.otf`만 뽑아서 `Humony/Sources/Resources/Fonts/`에 넣었다(전체 6MB) — 가변 폰트는 SwiftUI에서 굵기 축(weight axis)을 다루려면 별도 처리가 필요해서, 지금 필요한 굵기만 정적 파일로 받는 게 더 간단했다. 라이선스 조건(OFL은 재배포 시 라이선스 텍스트 동봉을 요구)에 맞춰 `LICENSE.txt`도 같이 넣었다.
 
 ### 폰트를 실제로 코드에서 쓰기까지 — 세 가지가 다 맞아야 한다
 
@@ -1113,9 +1113,9 @@ RMS 목표치(0.25)와 이동평균 필터의 탭 개수 공식 둘 다 "이 정
 ### Swift에서 C++ 라이브러리를 부르는 법 — "얇은 C 브리지"
 
 WORLD는 C++로 구현돼 있지만, 공개 API 헤더들이 전부 `WORLD_BEGIN_C_DECLS`/`WORLD_END_C_DECLS`(내부적으로 `extern "C"`)로 감싸여 있어서 **C 링키지**로 노출된다 — Swift가 Objective-C++ 래퍼 클래스 없이도 C 함수처럼 직접 부를 수 있다는 뜻이다. 그래서:
-- `HarmonyUp/ThirdParty/World/`에 필요한 소스(`dio`/`stonemask`/`cheaptrick`/`d4c`/`synthesis`/`common`/`matlabfunctions`/`fft`)만 가져왔다(WORLD 전체가 아니라 이 앱에 필요한 것만 — 압축/코덱, 실시간 스트리밍용 API는 뺐다).
-- `HarmonyUpWorldBridge.h`/`.cpp` — 위 5단계(Dio→StoneMask→CheapTrick→D4C→F0 스케일→Synthesis)를 한데 묶어서, `HarmonyUpWorldPitchShift(input, length, sampleRate, pitchRatio, output)`라는 함수 하나로 노출하는 얇은 래퍼. Swift 쪽에서 여러 단계를 조율할 필요 없이 이 함수 하나만 부르면 된다.
-- `HarmonyUp-Bridging-Header.h`(새 파일, `project.yml`의 `SWIFT_OBJC_BRIDGING_HEADER`로 지정)가 이 헤더를 Swift 컴파일 대상에 노출시킨다. `PitchShifter.swift`는 `[Float]` ↔ `[Double]` 변환만 하고 나머지는 그대로 이 C 함수에 위임한다 — 공개 API(`PitchShifter.shift(samples:pitchRatio:sampleRate:expectedFrequency:)`)는 그대로라 `PracticeView.swift` 등 호출부는 한 글자도 안 바뀌었다.
+- `Humony/ThirdParty/World/`에 필요한 소스(`dio`/`stonemask`/`cheaptrick`/`d4c`/`synthesis`/`common`/`matlabfunctions`/`fft`)만 가져왔다(WORLD 전체가 아니라 이 앱에 필요한 것만 — 압축/코덱, 실시간 스트리밍용 API는 뺐다).
+- `HumonyWorldBridge.h`/`.cpp` — 위 5단계(Dio→StoneMask→CheapTrick→D4C→F0 스케일→Synthesis)를 한데 묶어서, `HumonyWorldPitchShift(input, length, sampleRate, pitchRatio, output)`라는 함수 하나로 노출하는 얇은 래퍼. Swift 쪽에서 여러 단계를 조율할 필요 없이 이 함수 하나만 부르면 된다.
+- `Humony-Bridging-Header.h`(새 파일, `project.yml`의 `SWIFT_OBJC_BRIDGING_HEADER`로 지정)가 이 헤더를 Swift 컴파일 대상에 노출시킨다. `PitchShifter.swift`는 `[Float]` ↔ `[Double]` 변환만 하고 나머지는 그대로 이 C 함수에 위임한다 — 공개 API(`PitchShifter.shift(samples:pitchRatio:sampleRate:expectedFrequency:)`)는 그대로라 `PracticeView.swift` 등 호출부는 한 글자도 안 바뀌었다.
 - `project.yml`에 `HEADER_SEARCH_PATHS`(WORLD 헤더의 `#include "world/xxx.h"`가 찾아지도록)와 `CLANG_CXX_LANGUAGE_STANDARD: gnu++17`을 추가했다.
 
 ### Harvest보다 Dio+StoneMask — 속도 때문에 바꾼 결정
@@ -1405,7 +1405,7 @@ WORLD로 만든 베이스/3도/5도는 결국 **같은 한 목소리**를 피치
 
 ### 아키텍처 — WKWebView 브릿지
 
-`VexFlowScoreView`(신규, `UIViewRepresentable`)가 `WKWebView`로 로컬 HTML(`HarmonyUp/Sources/Resources/VexFlowScore/score.html`)을 로드한다 — CDN 참조 없이 벤더링한 `vexflow.js`만 쓰는 완전 오프라인 구조. Pretendard 폰트와 같은 방식으로 `HarmonyUp/Sources` 트리 안에 리소스를 두면 XcodeGen이 자동으로 번들에 잡아줘서 `project.yml` 변경이 필요 없었다.
+`VexFlowScoreView`(신규, `UIViewRepresentable`)가 `WKWebView`로 로컬 HTML(`Humony/Sources/Resources/VexFlowScore/score.html`)을 로드한다 — CDN 참조 없이 벤더링한 `vexflow.js`만 쓰는 완전 오프라인 구조. Pretendard 폰트와 같은 방식으로 `Humony/Sources` 트리 안에 리소스를 두면 XcodeGen이 자동으로 번들에 잡아줘서 `project.yml` 변경이 필요 없었다.
 
 `melodySteps`+`mutedVoices`가 바뀔 때마다(`updateUIView`) Swift가 JSON을 만들어 `webView.evaluateJavaScript("renderScore(...)")`로 넘긴다 — JSON은 문자열로 직렬화한 뒤 그대로 JS 표현식 자리에 꽂아 넣는다(유효한 JSON은 그 자체로 유효한 JS 객체 리터럴 문법이라 별도 `JSON.parse` 호출이 필요 없음). JS에서 Swift로 돌아올 데이터가 없어서 `WKScriptMessageHandler`(양방향 메시지 핸들러)는 안 썼다 — 페이지 로드가 끝나기 전에 렌더 요청이 먼저 올 수도 있어서, `WKNavigationDelegate`로 로드 완료를 감지해두고 그 전엔 페이로드를 큐에 쌓아뒀다가(`Coordinator.pendingPayload`) 로드 완료 시점에 흘려보낸다.
 
@@ -1474,7 +1474,7 @@ WKWebView/JS 렌더링은 유닛테스트 대상이 아니다(그래프 연결/J
 
 ### 수정 1 — `RhythmQuantizer`: 상대적 리듬 분류
 
-새 순수 함수(`HarmonyUp/Sources/PitchEngine/RhythmQuantizer.swift`). 이 앱은 여전히 템포/박자를 검출하지 않으므로 "몇 분음표인지" 절대적으로는 알 수 없지만, **상대적 길이 비교**는 가능하다: 전체 음 길이의 **중앙값**을 "1박(4분음표)" 기준으로 삼고, 그보다 짧으면 8분음표, 길면 점4분음표/2분음표로 분류한다(평균 대신 중앙값을 쓴 이유: 유난히 길게 끈 음 하나에 평균은 쉽게 휘둘리지만 중앙값은 "이 녹음에서 가장 흔한 길이"를 더 안정적으로 대표하기 때문). 마디 나누기도 같은 파일에서 담당 — 누적 박이 4박을 넘을 때마다 마디를 끊는다. 유닛테스트 8개(빈 입력, 균일 길이→전부 4분음표, 중앙값 대비 짧은/긴 음 분류, 순서 보존, 정확히 4박에서 마디 끊김, 마디 중간에 끝나도 남은 음 보존, 빈 입력의 마디 구성) 전부 첫 시도에 통과.
+새 순수 함수(`Humony/Sources/PitchEngine/RhythmQuantizer.swift`). 이 앱은 여전히 템포/박자를 검출하지 않으므로 "몇 분음표인지" 절대적으로는 알 수 없지만, **상대적 길이 비교**는 가능하다: 전체 음 길이의 **중앙값**을 "1박(4분음표)" 기준으로 삼고, 그보다 짧으면 8분음표, 길면 점4분음표/2분음표로 분류한다(평균 대신 중앙값을 쓴 이유: 유난히 길게 끈 음 하나에 평균은 쉽게 휘둘리지만 중앙값은 "이 녹음에서 가장 흔한 길이"를 더 안정적으로 대표하기 때문). 마디 나누기도 같은 파일에서 담당 — 누적 박이 4박을 넘을 때마다 마디를 끊는다. 유닛테스트 8개(빈 입력, 균일 길이→전부 4분음표, 중앙값 대비 짧은/긴 음 분류, 순서 보존, 정확히 4박에서 마디 끊김, 마디 중간에 끝나도 남은 음 보존, 빈 입력의 마디 구성) 전부 첫 시도에 통과.
 
 ### 수정 2 — 쉼표로 성부 간 인덱스 정렬 보장
 
@@ -1551,7 +1551,7 @@ WKWebView/JS 렌더링은 유닛테스트 대상이 아니다(그래프 연결/J
 
 ### 수정
 
-`project.yml`의 `HarmonyUp` 타깃 `info.properties`에 `UISupportedInterfaceOrientations`(세로/거꾸로 세로/가로 좌/가로 우 4개) 추가 — 아이폰/아이패드 구분 없이 단일 키로 지정하면 두 idiom 모두에 동일하게 적용된다(`~ipad`/`~iphone` 접미사 키를 따로 안 둘 경우의 기본 동작).
+`project.yml`의 `Humony` 타깃 `info.properties`에 `UISupportedInterfaceOrientations`(세로/거꾸로 세로/가로 좌/가로 우 4개) 추가 — 아이폰/아이패드 구분 없이 단일 키로 지정하면 두 idiom 모두에 동일하게 적용된다(`~ipad`/`~iphone` 접미사 키를 따로 안 둘 경우의 기본 동작).
 
 ### 검증
 
@@ -1597,7 +1597,7 @@ WKWebView/JS 렌더링은 유닛테스트 대상이 아니다(그래프 연결/J
 
 ## 65. 중앙값 필터 + 아이패드 2단계 레이아웃 + 마이크 헤일로
 
-백그라운드 fork("HarmonyUp iPad 스플릿 레이아웃 재편 + 마이크 녹음 애니메이션 + 단음 피치 정밀도 강화")가 완료한 작업. 검토 후 코드 품질/테스트가 충분히 신뢰할 만해서 그대로 반영.
+백그라운드 fork("Humony iPad 스플릿 레이아웃 재편 + 마이크 녹음 애니메이션 + 단음 피치 정밀도 강화")가 완료한 작업. 검토 후 코드 품질/테스트가 충분히 신뢰할 만해서 그대로 반영.
 
 ### 중앙값 필터 — `MelodySegmenter.medianFiltered(midiNotes:radius:)`
 
@@ -1849,9 +1849,9 @@ VexFlow는 `note.setStyle({fillStyle, strokeStyle})`로 그릴 때 색을 각 pa
 
 ### 탭 재생 — 이 프로젝트 첫 JS→Swift 역방향 브릿지
 
-지금까지 `VexFlowScoreView`는 Swift가 `window.renderScore(data)`를 부르는 단방향 브릿지만 있었다. 탭 이벤트를 돌려받으려면 `WKScriptMessageHandler`가 필요해서, `Coordinator`가 이를 채택하고 `makeUIView`에서 `WKWebViewConfiguration().userContentController.add(coordinator, name: "harmonyUpNoteTap")`로 등록했다. `userContentController`가 코디네이터를 강하게 붙잡는데 코디네이터도 컨트롤러를 강하게 잡으면 순환 참조가 되므로, 컨트롤러 쪽은 `weak`로만 들고 `deinit`에서 `removeScriptMessageHandler(forName:)`으로 정리한다.
+지금까지 `VexFlowScoreView`는 Swift가 `window.renderScore(data)`를 부르는 단방향 브릿지만 있었다. 탭 이벤트를 돌려받으려면 `WKScriptMessageHandler`가 필요해서, `Coordinator`가 이를 채택하고 `makeUIView`에서 `WKWebViewConfiguration().userContentController.add(coordinator, name: "humonyNoteTap")`로 등록했다. `userContentController`가 코디네이터를 강하게 붙잡는데 코디네이터도 컨트롤러를 강하게 잡으면 순환 참조가 되므로, 컨트롤러 쪽은 `weak`로만 들고 `deinit`에서 `removeScriptMessageHandler(forName:)`으로 정리한다.
 
-`render.js`는 음표 자체가 아니라 "그 박자 전체 구간"(이웃 스텝과의 중간 지점까지)을 탭 영역(`<rect>`, `pointer-events: all`, 투명)으로 잡는다 — 애플 뮤직 가사 탭이 글자 하나가 아니라 줄 전체를 탭 영역으로 잡는 것과 같은 이유로, 작은 음표head를 정확히 맞추기 어려운 터치 UX 문제를 피한다. 클릭 시 `window.webkit.messageHandlers.harmonyUpNoteTap.postMessage(index)`를 부른다.
+`render.js`는 음표 자체가 아니라 "그 박자 전체 구간"(이웃 스텝과의 중간 지점까지)을 탭 영역(`<rect>`, `pointer-events: all`, 투명)으로 잡는다 — 애플 뮤직 가사 탭이 글자 하나가 아니라 줄 전체를 탭 영역으로 잡는 것과 같은 이유로, 작은 음표head를 정확히 맞추기 어려운 터치 UX 문제를 피한다. 클릭 시 `window.webkit.messageHandlers.humonyNoteTap.postMessage(index)`를 부른다.
 
 ### 탭한 지점부터 재생 — 기존 재생헤드 매핑을 그대로 재사용
 
@@ -1926,7 +1926,7 @@ WORLD는 신호를 분석할 때 이미 F0(Dio+StoneMask)와 스펙트럼 포락
 
 ### 워핑 구현 — 주파수 축 선형보간
 
-`HarmonyUpWorldBridge.cpp`에서 CheapTrick 결과를 Synthesis에 넘기기 전에, `formantRatio != 1.0`이면 각 프레임마다 출력 빈 `k`의 값을 원본의 `k / formantRatio` 위치에서 선형보간해 새 배열(`warpedStorage`)에 채운다. `formantRatio > 1`(포먼트를 위로)이면 낮은 주파수 내용이 더 높은 출력 빈으로 당겨지고, `< 1`(아래로)이면 반대다. 경계(음수 인덱스/스펙트럼 끝 초과)는 양 끝 값으로 클램프한다. `formantRatio == 1.0`(또는 유효하지 않으면)이면 워핑 자체를 건너뛰고 원본 `spectrogram` 포인터를 그대로 쓴다 — 기존 호출 경로(포먼트 개념이 없던 시절)와 완전히 같은 코드 경로를 타서 회귀 위험이 없다. 벤더링된 WORLD 소스(`ThirdParty/World/*.cpp`)는 건드리지 않고 브릿지 레이어에서만 새 배열을 만든다.
+`HumonyWorldBridge.cpp`에서 CheapTrick 결과를 Synthesis에 넘기기 전에, `formantRatio != 1.0`이면 각 프레임마다 출력 빈 `k`의 값을 원본의 `k / formantRatio` 위치에서 선형보간해 새 배열(`warpedStorage`)에 채운다. `formantRatio > 1`(포먼트를 위로)이면 낮은 주파수 내용이 더 높은 출력 빈으로 당겨지고, `< 1`(아래로)이면 반대다. 경계(음수 인덱스/스펙트럼 끝 초과)는 양 끝 값으로 클램프한다. `formantRatio == 1.0`(또는 유효하지 않으면)이면 워핑 자체를 건너뛰고 원본 `spectrogram` 포인터를 그대로 쓴다 — 기존 호출 경로(포먼트 개념이 없던 시절)와 완전히 같은 코드 경로를 타서 회귀 위험이 없다. 벤더링된 WORLD 소스(`ThirdParty/World/*.cpp`)는 건드리지 않고 브릿지 레이어에서만 새 배열을 만든다.
 
 ### Swift 쪽 연결
 
@@ -2452,7 +2452,7 @@ WORLD는 피치시프트뿐 아니라 F0/스펙트럼 포락선(포먼트)/비�
 
 ### 검증
 
-`xcodegen generate`로 새 파일 등록 후 시뮬레이터 빌드+유닛테스트 120개 통과 확인(**아이패드 시뮬레이터로 테스트, `feedback_harmonyup_ipad_only_builds` 메모리 지침 최초 적용**). 순수 UI 변경이라 신규 유닛테스트는 없음. **실기기 확인 필요.**
+`xcodegen generate`로 새 파일 등록 후 시뮬레이터 빌드+유닛테스트 120개 통과 확인(**아이패드 시뮬레이터로 테스트, `feedback_humony_ipad_only_builds` 메모리 지침 최초 적용**). 순수 UI 변경이라 신규 유닛테스트는 없음. **실기기 확인 필요.**
 
 ## 98. "이어지는 음"이 화음에서 끊김(원인 특정+수정) + 화음 싱크 다음 실험(더블링 끔)
 
@@ -2649,7 +2649,7 @@ v2 전용 동작(경과음 구간 코드 유지, 근음 진행 선호)을 검증
 
 ### 수정: `HarmonyTrackBuilder`로 분리
 
-신규 `HarmonyUp/Sources/PitchEngine/HarmonyTrackBuilder.swift` — `harmonizedTrack`의 로직(106절 상태, 스텝별 독립 처리)을 그대로 옮기되, `self.melodySteps`/`self.recentVoiceBuffer`/`self.harmonySegmentFadeDuration`/`isVoiceDoublingEnabled` 같은 암묵적 의존을 전부 명시적 파라미터로 바꿨다. `PracticeView+VoiceHarmony.harmonizedTrack`은 이제 이 함수를 호출하는 얇은 래퍼다 — 동작은 전혀 안 바뀌었다(기존 119개 테스트가 그대로 통과하는 것으로 확인).
+신규 `Humony/Sources/PitchEngine/HarmonyTrackBuilder.swift` — `harmonizedTrack`의 로직(106절 상태, 스텝별 독립 처리)을 그대로 옮기되, `self.melodySteps`/`self.recentVoiceBuffer`/`self.harmonySegmentFadeDuration`/`isVoiceDoublingEnabled` 같은 암묵적 의존을 전부 명시적 파라미터로 바꿨다. `PracticeView+VoiceHarmony.harmonizedTrack`은 이제 이 함수를 호출하는 얇은 래퍼다 — 동작은 전혀 안 바뀌었다(기존 119개 테스트가 그대로 통과하는 것으로 확인).
 
 `HarmonyTrackBuilderTests.swift` 신규 — 이번에 실제로 겪은 버그 클래스를 회귀 테스트로 박아뒀다:
 - **길이 보존 불변식**: 스텝 1/2/5/20개 각각에서 `build(...).count == recentVoiceBuffer.count`. 105절 버그가 정확히 이 불변식을 깼었다 — 이 테스트 하나만 있었어도 그 버그는 실기기 확인 전에 잡혔을 것이다.
@@ -2832,7 +2832,7 @@ WSOLA/PSOLA는 지운 적이 없으니 복원이라기보다는 "다시 이름 �
 
 ### 전환 방법 (실기기 A/B 테스트용)
 
-`HarmonyUp/Sources/PitchEngine/PitchShifter.swift`의 `activePitchShiftAlgorithm` 값을 바꾸고 다시 빌드+설치하면 된다. 지금은 `.wsola`로 맞춰서 실기기(Ian's iPhone)에 설치해둔 상태 — 사용자가 들어보고 다음(`.psola` 또는 다시 `.world`)으로 바꿔달라고 하면 그때 전환.
+`Humony/Sources/PitchEngine/PitchShifter.swift`의 `activePitchShiftAlgorithm` 값을 바꾸고 다시 빌드+설치하면 된다. 지금은 `.wsola`로 맞춰서 실기기(Ian's iPhone)에 설치해둔 상태 — 사용자가 들어보고 다음(`.psola` 또는 다시 `.world`)으로 바꿔달라고 하면 그때 전환.
 
 ### 검증
 
@@ -2855,7 +2855,7 @@ WSOLA/PSOLA는 지운 적이 없으니 복원이라기보다는 "다시 이름 �
 - `VoiceDoubler.swift`(보컬 더블링), `VoiceClipPlayer.swift`(다중 트랙/단일 버퍼 재생 엔진)
 - `PracticeView+VoiceHarmony.swift`("내 목소리로 화음" 카드+재생 로직 전체)
 - `VoiceToggleChip.swift`(`PlaybackVoice` enum + 성부 뮤트 토글 UI)
-- `HarmonyUp/ThirdParty/World/`(WORLD 보코더 벤더링 소스 전체) + `HarmonyUpWorldBridge.h/.cpp` + `HarmonyUp-Bridging-Header.h`
+- `Humony/ThirdParty/World/`(WORLD 보코더 벤더링 소스 전체) + `HumonyWorldBridge.h/.cpp` + `Humony-Bridging-Header.h`
 - 위 파일들의 테스트(`PitchShifterWSOLATests`/`PitchShifterPSOLATests`/`PitchShifterWorldTests`/`HarmonyTrackBuilderTests`/`SynthesizedHarmonyTrackBuilderTests`/`ToneSynthesizerTests`/`VoiceDoublerTests`)
 - `project.yml`에서 `ThirdParty/World` 소스 경로, `SWIFT_OBJC_BRIDGING_HEADER`, `HEADER_SEARCH_PATHS`, `CLANG_CXX_LANGUAGE_STANDARD`(C++ 빌드용) 제거
 
@@ -3045,11 +3045,11 @@ UI에 "내 목소리로 화음" 버튼을 기존 "화음 듣기"(합성음) 옆�
 
 ### 1단계: 벤더링 + 빌드 설정만(Swift에서 아직 안 씀)
 
-git 히스토리(`96987e2^`, 화음 API 제거 직전 최종 상태)에서 WORLD 벤더 소스 전체(`HarmonyUp/ThirdParty/World/` — cheaptrick/d4c/dio/fft/harvest/matlabfunctions/stonemask/synthesis + 헤더, modified-BSD 라이선스 파일 포함)와 C 링키지 브릿지(`HarmonyUpWorldBridge.h/.cpp`, `HarmonyUpWorldPitchShift` 함수 하나만 노출), 브리징 헤더(`HarmonyUp-Bridging-Header.h`)를 그대로 복원. `project.yml`에 소스 경로+`SWIFT_OBJC_BRIDGING_HEADER`+`HEADER_SEARCH_PATHS`+`CLANG_CXX_LANGUAGE_STANDARD: gnu++17` 추가. **의도적으로 여기서 멈춤** — Swift 쪽 사용 코드는 아직 하나도 안 만들고, "C++ 라이브러리가 지금 프로젝트 구조에 문제없이 컴파일·링크되는지"만 먼저 확인한다.
+git 히스토리(`96987e2^`, 화음 API 제거 직전 최종 상태)에서 WORLD 벤더 소스 전체(`Humony/ThirdParty/World/` — cheaptrick/d4c/dio/fft/harvest/matlabfunctions/stonemask/synthesis + 헤더, modified-BSD 라이선스 파일 포함)와 C 링키지 브릿지(`HumonyWorldBridge.h/.cpp`, `HumonyWorldPitchShift` 함수 하나만 노출), 브리징 헤더(`Humony-Bridging-Header.h`)를 그대로 복원. `project.yml`에 소스 경로+`SWIFT_OBJC_BRIDGING_HEADER`+`HEADER_SEARCH_PATHS`+`CLANG_CXX_LANGUAGE_STANDARD: gnu++17` 추가. **의도적으로 여기서 멈춤** — Swift 쪽 사용 코드는 아직 하나도 안 만들고, "C++ 라이브러리가 지금 프로젝트 구조에 문제없이 컴파일·링크되는지"만 먼저 확인한다.
 
 ### 검증
 
-`xcodebuild build`(아이패드 시뮬레이터)로 빌드만 확인 — 성공. 유닛테스트는 이 단계에서 변경 없음(아직 아무것도 안 씀). **다음 단계**: `HarmonyUpWorldPitchShift`를 부르는 최소 Swift 래퍼(가칭 `PitchShifterWorld`)를 추가해서, 합성 사인파로 피치가 실제로 원하는 만큼 옮겨지는지부터 유닛테스트로 검증(93~115절과 같은 "합성 신호로 먼저 확인" 방식) — `VoiceHarmonyTrackBuilder`에 연결하는 건 그다음.
+`xcodebuild build`(아이패드 시뮬레이터)로 빌드만 확인 — 성공. 유닛테스트는 이 단계에서 변경 없음(아직 아무것도 안 씀). **다음 단계**: `HumonyWorldPitchShift`를 부르는 최소 Swift 래퍼(가칭 `PitchShifterWorld`)를 추가해서, 합성 사인파로 피치가 실제로 원하는 만큼 옮겨지는지부터 유닛테스트로 검증(93~115절과 같은 "합성 신호로 먼저 확인" 방식) — `VoiceHarmonyTrackBuilder`에 연결하는 건 그다음.
 
 ## 125. WORLD 복원 2단계 — Swift 래퍼 + 합성 신호로 피치 정확도 검증
 
@@ -3095,7 +3095,7 @@ Explore+Plan 에이전트로 코드를 직접 대조해 두 가지를 확인했�
 
 ### 다음 세션 — 더 근본적인 개선 후보
 
-여러 웹 화음 서비스(Tembrica 등)를 조사했지만 코드/라이브러리를 직접 가져다 쓸 수 있는 곳은 없었다(API 없음/유료/신경망 기반이라 온디바이스 부적합). 대신 **WORLD를 지금과 다르게 쓰는 방법**이 다음 후보로 남았다 — 지금은 화음 음 하나하나를 독립적으로 WORLD에 넣고 다시 합성해서(세그먼트별 개별 분석-재합성) 크로스페이드로 이어붙여도 "이어붙인 티"가 남는다. WORLD의 원래 설계는 목소리 전체를 **한 번만** 분석해 F0(피치) 곡선을 얻은 뒤, 그 곡선을 구간별로 원하는 화음 음정으로 바꿔서 **한 번만** 재합성하는 방식이다 — 이러면 자연스러운 숨결/떨림이 곡 전체에 걸쳐 끊기지 않을 가능성이 높다. 이걸 하려면 `HarmonyUpWorldBridge.cpp`(지금은 고정 비율 하나만 받음)를 구간별로 바뀌는 피치 곡선을 받도록 C++ 레벨에서 확장해야 한다 — 오늘 한 파라미터 조정보다 훨씬 큰 작업이라 다음 세션에서 별도로 다루기로 함.
+여러 웹 화음 서비스(Tembrica 등)를 조사했지만 코드/라이브러리를 직접 가져다 쓸 수 있는 곳은 없었다(API 없음/유료/신경망 기반이라 온디바이스 부적합). 대신 **WORLD를 지금과 다르게 쓰는 방법**이 다음 후보로 남았다 — 지금은 화음 음 하나하나를 독립적으로 WORLD에 넣고 다시 합성해서(세그먼트별 개별 분석-재합성) 크로스페이드로 이어붙여도 "이어붙인 티"가 남는다. WORLD의 원래 설계는 목소리 전체를 **한 번만** 분석해 F0(피치) 곡선을 얻은 뒤, 그 곡선을 구간별로 원하는 화음 음정으로 바꿔서 **한 번만** 재합성하는 방식이다 — 이러면 자연스러운 숨결/떨림이 곡 전체에 걸쳐 끊기지 않을 가능성이 높다. 이걸 하려면 `HumonyWorldBridge.cpp`(지금은 고정 비율 하나만 받음)를 구간별로 바뀌는 피치 곡선을 받도록 C++ 레벨에서 확장해야 한다 — 오늘 한 파라미터 조정보다 훨씬 큰 작업이라 다음 세션에서 별도로 다루기로 함.
 
 ## 129. "전체 한 번 분석 + F0곡선 재합성" 구조 개선 1단계 — C++ 브릿지를 analyze/synthesize로 분리
 
@@ -3105,16 +3105,16 @@ Explore+Plan 에이전트로 코드를 직접 대조해 두 가지를 확인했�
 
 ### 구조
 
-`HarmonyUpWorldBridge.cpp`의 기존 `HarmonyUpWorldPitchShift`는 "F0 추정(Dio+StoneMask) → 스펙트럼 포락선 추정(CheapTrick) → 비주기성 추정(D4C) → F0를 pitchRatio배로 스케일 → 재합성(Synthesis)"을 한 함수 안에서 매번 처음부터 끝까지 돌렸다. 이걸 불투명 포인터(`HarmonyUpWorldAnalysis*`, CoreFoundation의 `CFTypeRef` 같은 패턴 — 헤더에는 전방선언만 있고 실제 struct 정의는 `.cpp` 파일 안에만 있어서 Swift/C 쪽에서는 완전히 불투명하게 다룸) 기반 API로 쪼갰다:
+`HumonyWorldBridge.cpp`의 기존 `HumonyWorldPitchShift`는 "F0 추정(Dio+StoneMask) → 스펙트럼 포락선 추정(CheapTrick) → 비주기성 추정(D4C) → F0를 pitchRatio배로 스케일 → 재합성(Synthesis)"을 한 함수 안에서 매번 처음부터 끝까지 돌렸다. 이걸 불투명 포인터(`HumonyWorldAnalysis*`, CoreFoundation의 `CFTypeRef` 같은 패턴 — 헤더에는 전방선언만 있고 실제 struct 정의는 `.cpp` 파일 안에만 있어서 Swift/C 쪽에서는 완전히 불투명하게 다룸) 기반 API로 쪼갰다:
 
-- `HarmonyUpWorldAnalyze(input, length, sampleRate)` — 분석 3단계(F0/포락선/비주기성)를 한 번 돌려서 결과를 handle에 저장.
-- `HarmonyUpWorldF0Length` / `HarmonyUpWorldFramePeriodMs` / `HarmonyUpWorldInputLength` / `HarmonyUpWorldGetF0` — handle에서 프레임 개수, 프레임 간격(ms), 원본 오디오 길이, 원본 F0 곡선을 꺼내는 getter들. Swift가 프레임 인덱스 → 실제 시각(`i * framePeriodMs / 1000`)을 계산해서 어느 멜로디 스텝에 속하는지 판단하는 데 쓴다.
-- `HarmonyUpWorldSynthesizeWithF0(analysis, modifiedF0, formantRatio, output)` — 저장된 포락선/비주기성은 그대로 재사용하고 F0만 `modifiedF0`(길이 = f0Length)로 바꿔치기해서 재합성. **분석은 다시 하지 않는다** — 화음 성부(베이스/3도/5도)마다 이 함수만 반복 호출하면 됨.
-- `HarmonyUpWorldFreeAnalysis` — handle 해제.
+- `HumonyWorldAnalyze(input, length, sampleRate)` — 분석 3단계(F0/포락선/비주기성)를 한 번 돌려서 결과를 handle에 저장.
+- `HumonyWorldF0Length` / `HumonyWorldFramePeriodMs` / `HumonyWorldInputLength` / `HumonyWorldGetF0` — handle에서 프레임 개수, 프레임 간격(ms), 원본 오디오 길이, 원본 F0 곡선을 꺼내는 getter들. Swift가 프레임 인덱스 → 실제 시각(`i * framePeriodMs / 1000`)을 계산해서 어느 멜로디 스텝에 속하는지 판단하는 데 쓴다.
+- `HumonyWorldSynthesizeWithF0(analysis, modifiedF0, formantRatio, output)` — 저장된 포락선/비주기성은 그대로 재사용하고 F0만 `modifiedF0`(길이 = f0Length)로 바꿔치기해서 재합성. **분석은 다시 하지 않는다** — 화음 성부(베이스/3도/5도)마다 이 함수만 반복 호출하면 됨.
+- `HumonyWorldFreeAnalysis` — handle 해제.
 
-기존 `HarmonyUpWorldPitchShift`(고정 비율 하나)는 지우지 않고 이 새 API의 얇은 래퍼로 재구현했다 — 내부적으로 `Analyze` 한 번 + F0 전체를 pitchRatio배로 균일 스케일한 곡선으로 `SynthesizeWithF0` 한 번을 호출할 뿐이라, 동작이 바이트 단위로 완전히 똑같다(아래 검증 참고). 기존 호출부(`PitchShifterWorld.swift`, 지금은 아직 `VoiceHarmonyTrackBuilder`가 이걸 씀)는 코드 변경 없이 그대로 동작.
+기존 `HumonyWorldPitchShift`(고정 비율 하나)는 지우지 않고 이 새 API의 얇은 래퍼로 재구현했다 — 내부적으로 `Analyze` 한 번 + F0 전체를 pitchRatio배로 균일 스케일한 곡선으로 `SynthesizeWithF0` 한 번을 호출할 뿐이라, 동작이 바이트 단위로 완전히 똑같다(아래 검증 참고). 기존 호출부(`PitchShifterWorld.swift`, 지금은 아직 `VoiceHarmonyTrackBuilder`가 이걸 씀)는 코드 변경 없이 그대로 동작.
 
-Swift 쪽엔 `PitchShifterWorldAnalysis`(신규, PitchEngine) 클래스를 추가해 이 handle을 RAII로 감쌌다 — `init?(samples:sampleRate:)`로 분석하고 `deinit`에서 자동으로 `HarmonyUpWorldFreeAnalysis`를 부르므로, 호출부가 수동으로 메모리를 해제할 필요가 없다(Swift ARC가 C 리소스 수명까지 관리하는 흔한 패턴). `synthesize(f0:formantRatio:)`가 얇은 브릿지 호출.
+Swift 쪽엔 `PitchShifterWorldAnalysis`(신규, PitchEngine) 클래스를 추가해 이 handle을 RAII로 감쌌다 — `init?(samples:sampleRate:)`로 분석하고 `deinit`에서 자동으로 `HumonyWorldFreeAnalysis`를 부르므로, 호출부가 수동으로 메모리를 해제할 필요가 없다(Swift ARC가 C 리소스 수명까지 관리하는 흔한 패턴). `synthesize(f0:formantRatio:)`가 얇은 브릿지 호출.
 
 ### 검증
 
@@ -3167,7 +3167,7 @@ WORLD의 `D4C`(비주기성=숨소리/노이즈 성분 추정) 단계엔 `thresh
 
 ### 구현
 
-`HarmonyUpWorldBridge.h/.cpp`의 `HarmonyUpWorldAnalyze`에 `d4cThreshold` 파라미터 추가(D4COption을 기본값으로 초기화한 뒤 이 값으로 덮어씀). 기존 `HarmonyUpWorldPitchShift`(129절 이후 이 API의 래퍼)는 `world::kThreshold`(0.85)를 명시적으로 넘겨서 예전과 바이트 단위로 동일하게 동작 — 새 파라미터 추가가 기존 호출부를 하나도 안 깸. Swift `PitchShifterWorldAnalysis.init`에도 `d4cThreshold: Double = 0.85` 기본값 매개변수 추가(기본값을 안 바꾸면 기존 호출부는 무변경). `VoiceHarmonyTrackBuilder`에 `harmonyD4CThreshold = 0.0`(지름길을 완전히 끔 — 가설을 가장 뚜렷하게 시험하기 위해 중간값 대신 극단값으로 먼저 시도, 효과가 있는 방향인지부터 확인 후 필요하면 되돌아올 계획) 상수를 추가해 화음 성부 분석에만 적용(멜로디는 원본 그대로라 영향 없음).
+`HumonyWorldBridge.h/.cpp`의 `HumonyWorldAnalyze`에 `d4cThreshold` 파라미터 추가(D4COption을 기본값으로 초기화한 뒤 이 값으로 덮어씀). 기존 `HumonyWorldPitchShift`(129절 이후 이 API의 래퍼)는 `world::kThreshold`(0.85)를 명시적으로 넘겨서 예전과 바이트 단위로 동일하게 동작 — 새 파라미터 추가가 기존 호출부를 하나도 안 깸. Swift `PitchShifterWorldAnalysis.init`에도 `d4cThreshold: Double = 0.85` 기본값 매개변수 추가(기본값을 안 바꾸면 기존 호출부는 무변경). `VoiceHarmonyTrackBuilder`에 `harmonyD4CThreshold = 0.0`(지름길을 완전히 끔 — 가설을 가장 뚜렷하게 시험하기 위해 중간값 대신 극단값으로 먼저 시도, 효과가 있는 방향인지부터 확인 후 필요하면 되돌아올 계획) 상수를 추가해 화음 성부 분석에만 적용(멜로디는 원본 그대로라 영향 없음).
 
 ### 검증
 
@@ -3355,7 +3355,7 @@ threshold=0.5 확정 후 사용자가 새 피드백을 줌: "화음이 조금 �
 
 `PracticeSession`(녹음 한 번) 아래에 `PracticeAttempt`(성부별 시도)가 달린다. 같은 녹음에서 3도를 채점하고 이어서 5도를 채점하면 한 세션 아래에 시도 두 개가 쌓여서 "8월 24일 · C장조 · 음 12개 / 3도 82% · 5도 71%"로 묶여 보인다. 세션은 **첫 채점이 끝날 때** 만들어진다 — 녹음만 하고 채점을 안 한 것을 기록으로 남길 이유가 없다.
 
-기존 저장소와는 스키마가 안 맞으므로(SwiftData 자동 마이그레이션은 필드 추가 정도는 넘기지만 모델 구조가 바뀌면 실패한다) 저장소를 비우고 새로 만드는 폴백을 `HarmonyUpApp`에 뒀다. `.modelContainer(for:)`는 생성이 실패하면 **앱을 그대로 크래시시킨다** — 컨테이너를 직접 만들어야 이 폴백을 넣을 수 있다. 채점은 116절부터 화면에서 안 보였으니 실기기에 남은 기록이 사실상 없고, 사용자와 "기존 기록은 버린다"로 확정한 상태였다.
+기존 저장소와는 스키마가 안 맞으므로(SwiftData 자동 마이그레이션은 필드 추가 정도는 넘기지만 모델 구조가 바뀌면 실패한다) 저장소를 비우고 새로 만드는 폴백을 `HumonyApp`에 뒀다. `.modelContainer(for:)`는 생성이 실패하면 **앱을 그대로 크래시시킨다** — 컨테이너를 직접 만들어야 이 폴백을 넣을 수 있다. 채점은 116절부터 화면에서 안 보였으니 실기기에 남은 기록이 사실상 없고, 사용자와 "기존 기록은 버린다"로 확정한 상태였다.
 
 ### 오디오를 저장하지 않고 악보를 되살리는 방법
 

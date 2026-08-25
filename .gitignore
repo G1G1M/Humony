@@ -7,7 +7,7 @@ xcuserdata/
 *.xccheckout
 
 # XcodeGen이 project.yml에서 재생성하는 산출물 — 소스 오브 트루스는 project.yml
-HarmonyUp.xcodeproj/
+Humony.xcodeproj/
 
 # macOS
 .DS_Store

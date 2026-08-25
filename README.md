@@ -1,4 +1,4 @@
-# 하모니업 (Harmony Up)
+# 휴모니 (Humony)
 
 **멜로디를 부르면 화음을 만들어주고, 그 화음을 따라 부르며 연습하는 iOS 앱.**
 
@@ -33,7 +33,7 @@
 ## 구조
 
 ```
-HarmonyUp/Sources/
+Humony/Sources/
 ├─ App/        진입점, 번들 리소스(폰트·VexFlow)
 ├─ Core/       디자인 시스템, 기기 I/O 래퍼, 공용 변환
 ├─ Data/       SwiftData 모델 (세션·채점 시도)
@@ -71,7 +71,7 @@ HarmonyUp/Sources/
 ```bash
 xcodegen generate
 
-xcodebuild -project HarmonyUp.xcodeproj -scheme HarmonyUp \
+xcodebuild -project Humony.xcodeproj -scheme Humony \
   -destination 'platform=iOS Simulator,name=iPad Air 11-inch (M3)' test
 ```
 

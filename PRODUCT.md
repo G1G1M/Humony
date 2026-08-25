@@ -34,7 +34,7 @@ ios
 
 ## Brand Commitments
 
-앱 이름 "하모니업(Harmony Up)" — 원래 PRD에서 "가칭"으로 명시된 임시 이름, 확정 아님. 로고/브랜드 자산 없음.
+앱 이름 "휴모니(Humony)" — 원래 PRD에서 "가칭"으로 명시된 임시 이름, 확정 아님. 로고/브랜드 자산 없음.
 
 ## Evidence on Hand
 

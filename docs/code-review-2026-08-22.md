@@ -69,7 +69,7 @@ Task {
 1. `build`에 분석 핸들을 주입받는 오버로드를 두고 호출부에서 한 번만 만들어 공유
 2. 전체를 메인 스레드에서 떼어낸다
 
-브릿지의 `HarmonyUpWorldSynthesizeWithF0`는 `analysis`를 const로만 읽고 작업버퍼가 전부
+브릿지의 `HumonyWorldSynthesizeWithF0`는 `analysis`를 const로만 읽고 작업버퍼가 전부
 로컬이라, 공유 핸들로 성부별 `synthesize`를 병렬(TaskGroup) 실행하는 것도 안전하다.
 
 ```swift

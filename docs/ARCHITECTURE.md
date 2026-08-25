@@ -19,12 +19,12 @@ ValleyRisk/
 그 기능의 `Model/`에 둔다(junCook에서 `RiskIndexCalculator`, `DashboardSummaryMapper`가
 `Features/Dashboard/Model/`에 있는 것이 그 예다).
 
-## HarmonyUp 대응표
+## Humony 대응표
 
 ```
-HarmonyUp/Sources/
+Humony/Sources/
 ├─ App/
-│  ├─ Source/       HarmonyUpApp.swift, Info.plist, HarmonyUp-Bridging-Header.h
+│  ├─ Source/       HumonyApp.swift, Info.plist, Humony-Bridging-Header.h
 │  └─ Resource/     Fonts/, VexFlowScore/
 ├─ Core/
 │  ├─ DesignSystem/ Theme, WaveformView, LoadingIndicators, PitchMeterView
@@ -51,13 +51,13 @@ HarmonyUp/Sources/
       └─ View/          HistoryView, SessionDetailView
 ```
 
-테스트(`HarmonyUp/Tests/`)도 같은 모양으로 미러링한다 — `Core/Util/`, `Domain/{Pitch,Melody,
+테스트(`Humony/Tests/`)도 같은 모양으로 미러링한다 — `Core/Util/`, `Domain/{Pitch,Melody,
 Harmony,Scoring}/`, `Features/{Practice,History}/`. 기존 `PitchEngineTests/` 한 폴더에 22개가
 평평하게 쌓여 있던 것이 소스와 같은 갈래로 나뉜다.
 
 ## 판단이 갈렸던 자리
 
-**`Core/Remote`와 `Data/API`는 만들지 않는다.** junCook은 외부 API를 여럿 쓰지만 HarmonyUp은
+**`Core/Remote`와 `Data/API`는 만들지 않는다.** junCook은 외부 API를 여럿 쓰지만 Humony은
 "서버/백엔드 없음, 전 과정 온디바이스"가 원칙이라(CLAUDE.md) 네트워크 계층 자체가 없다. 빈
 폴더를 규약이라는 이유로 만들어 두지 않는다.
 
@@ -98,7 +98,7 @@ junCook의 `Core/Local/LocationProvider`와 같은 자리다.
 scripts/apply-mvvm-structure.sh          # 드라이런 — 무엇이 어디로 갈지만 출력
 scripts/apply-mvvm-structure.sh --apply  # 실제 이동 + project.yml 경로 갱신
 xcodegen generate
-xcodebuild -project HarmonyUp.xcodeproj -scheme HarmonyUp \
+xcodebuild -project Humony.xcodeproj -scheme Humony \
   -destination 'platform=iOS Simulator,name=iPad Air 11-inch (M3)' test
 ```
 

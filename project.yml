@@ -1,26 +1,31 @@
-name: HarmonyUp
+name: Humony
 options:
   bundleIdPrefix: com.kimjiwon
   deploymentTarget:
     iOS: "17.0"
 
 targets:
-  HarmonyUp:
+  Humony:
     type: application
     platform: iOS
     sources:
-      - path: HarmonyUp/Sources
+      - path: Humony/Sources
       # WORLD(고품질 음성 분석/합성 라이브러리, modified-BSD 라이선스) — 123절 화음 재설계
       # 2단계에서 목소리 피치시프트를 다시 시도하며 복원(124절, 1단계: 빌드만 먼저 확인).
-      # HarmonyUpWorldBridge.h/.cpp가 Swift에서 부를 수 있는 C 링키지 진입점이다.
-      - path: HarmonyUp/ThirdParty/World
+      # HumonyWorldBridge.h/.cpp가 Swift에서 부를 수 있는 C 링키지 진입점이다.
+      - path: Humony/ThirdParty/World
     settings:
       base:
+        # **번들 ID의 옛 이름은 일부러 남긴 흉터다(159절 다음, 이름 변경).** 앱 이름을
+        # 하모니업 -> 휴모니로 바꾸면서 폴더·모듈·레포는 전부 옮겼지만 이것만은 그대로 뒀다 —
+        # 번들 ID를 바꾸면 iOS가 완전히 다른 앱으로 보고 새로 설치하므로, 실기기에 쌓인
+        # SwiftData 연습 기록(PracticeSession/PracticeAttempt)에 더는 닿을 수 없게 된다.
+        # 기록을 버려도 좋다고 판단할 때가 오면 그때 바꾼다.
         PRODUCT_BUNDLE_IDENTIFIER: com.kimjiwon.HarmonyUp
         DEVELOPMENT_TEAM: C5P7V9S6NT
         CODE_SIGN_STYLE: Automatic
-        SWIFT_OBJC_BRIDGING_HEADER: HarmonyUp/Sources/App/Source/HarmonyUp-Bridging-Header.h
-        HEADER_SEARCH_PATHS: HarmonyUp/ThirdParty/World
+        SWIFT_OBJC_BRIDGING_HEADER: Humony/Sources/App/Source/Humony-Bridging-Header.h
+        HEADER_SEARCH_PATHS: Humony/ThirdParty/World
         CLANG_CXX_LANGUAGE_STANDARD: "gnu++17"
       configs:
         # 기본 Debug 빌드(-Onone)는 YIN/MelodySegmenter처럼 윈도우마다 도는 신호처리
@@ -30,8 +35,11 @@ targets:
           SWIFT_OPTIMIZATION_LEVEL: "-O"
           GCC_OPTIMIZATION_LEVEL: "s"
     info:
-      path: HarmonyUp/Sources/App/Source/Info.plist
+      path: Humony/Sources/App/Source/Info.plist
       properties:
+        # 홈 화면에 뜨는 이름. 이걸 안 두면 CFBundleName($(PRODUCT_NAME) = 타겟 이름)이
+        # 그대로 쓰여 "Humony"로 보인다 — 화면에서 읽히는 이름은 한글로 둔다.
+        CFBundleDisplayName: 휴모니
         UILaunchScreen: {}
         NSMicrophoneUsageDescription: "멜로디를 녹음해서 화음을 분석하기 위해 마이크가 필요합니다."
         # 156절 — 종이 악보를 그 자리에서 찍어 "정답지"로 쓰기 위해 카메라를 쓴다.
@@ -45,7 +53,7 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         # 커스텀 폰트(Pretendard)를 쓰려면 iOS에 번들 폰트 파일을 등록해야 한다 —
-        # HarmonyUp/Sources/Resources/Fonts에 넣은 4개 굵기 파일명과 정확히 일치해야 함.
+        # Humony/Sources/Resources/Fonts에 넣은 4개 굵기 파일명과 정확히 일치해야 함.
         UIAppFonts:
           - Pretendard-Regular.otf
           - Pretendard-Medium.otf
@@ -53,26 +61,27 @@ targets:
           - Pretendard-Bold.otf
     dependencies: []
 
-  HarmonyUpTests:
+  HumonyTests:
     type: bundle.unit-test
     platform: iOS
     sources:
-      - path: HarmonyUp/Tests
+      - path: Humony/Tests
     dependencies:
-      - target: HarmonyUp
+      - target: Humony
     settings:
       base:
+        # 위와 같은 이유로 유지(테스트 번들이라 기록과는 무관하지만, 앱 번들 ID와 짝을 맞춘다).
         PRODUCT_BUNDLE_IDENTIFIER: com.kimjiwon.HarmonyUpTests
         GENERATE_INFOPLIST_FILE: YES
 
 schemes:
-  HarmonyUp:
+  Humony:
     build:
       targets:
-        HarmonyUp: all
-        HarmonyUpTests: [test]
+        Humony: all
+        HumonyTests: [test]
     test:
       targets:
-        - HarmonyUpTests
+        - HumonyTests
     run:
       config: Debug

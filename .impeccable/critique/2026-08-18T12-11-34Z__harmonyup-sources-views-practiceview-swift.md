@@ -1,5 +1,5 @@
 ---
-target: HarmonyUp/Sources/Views/PracticeView.swift (연습 탭)
+target: Humony/Sources/Views/PracticeView.swift (연습 탭)
 total_score: 24
 max_score: 40
 na_heuristics: 
@@ -8,7 +8,7 @@ p1_count: 3
 timestamp: 2026-08-18T12-11-34Z
 slug: harmonyup-sources-views-practiceview-swift
 ---
-# HarmonyUp "연습" 탭(PracticeView) 디자인 크리틱
+# Humony "연습" 탭(PracticeView) 디자인 크리틱
 
 Method: dual-agent (A: design review, general-purpose subagent · B: iOS HIG checklist detector role, general-purpose subagent). Native SwiftUI app — web detect.mjs/browser injection not applicable; Assessment B substituted a literal iOS HIG checklist pass over source. Screenshots: iPad simulator, light+dark, idle state only (post-recording states require live mic input, not reproducible in simulator).
 

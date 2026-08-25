@@ -27,14 +27,14 @@
 ## 제안 프로젝트 구조
 
 ```
-HarmonyUp/
+Humony/
   Sources/
     PitchEngine/
       YINPitchDetector.swift      # YIN 알고리즘 핵심 로직 (순수 함수)
       AudioCapture.swift          # AVAudioEngine 마이크 캡처 래퍼
       VoiceActivityDetector.swift # 간단한 에너지 기반 VAD
       NoteNameConverter.swift     # Hz -> 노트명 변환
-    HarmonyUpApp.swift             # 최소 SwiftUI 앱 진입점 — 감지된 Hz/노트명을 화면에 텍스트로 출력
+    HumonyApp.swift             # 최소 SwiftUI 앱 진입점 — 감지된 Hz/노트명을 화면에 텍스트로 출력
   Tests/
     PitchEngineTests/
       YINPitchDetectorTests.swift # 알려진 사인파 입력에 대한 정확도 테스트

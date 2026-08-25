@@ -1,5 +1,5 @@
 #!/bin/bash
-# HarmonyUp 파일 구조를 junCook(ValleyRisk) MVVM 레이아웃으로 옮긴다.
+# Humony 파일 구조를 junCook(ValleyRisk) MVVM 레이아웃으로 옮긴다.
 #
 # 배경: 2026-08-24, "Junction2026-team15-junCook의 파일구조(MVVM)를 우리 앱에도 적용" 요청.
 # 대응 규약은 docs/ARCHITECTURE.md에 정리해뒀다.
@@ -10,8 +10,8 @@
 #
 # 목록은 작성 시점 기준이라, 그 뒤에 생긴 파일은 여기 없다 — 실행 전에 아래 명령으로
 # 빠진 게 없는지 대조할 것(139절 TempoEstimator가 실제로 이렇게 누락됐다):
-#   comm -23 <(find HarmonyUp/Sources HarmonyUp/Tests -type f \( -name '*.swift' -o -name '*.h' \
-#     -o -name '*.plist' \) | sort) <(scripts/apply-mvvm-structure.sh | grep -oE '^  HarmonyUp/[^ ]+' \
+#   comm -23 <(find Humony/Sources Humony/Tests -type f \( -name '*.swift' -o -name '*.h' \
+#     -o -name '*.plist' \) | sort) <(scripts/apply-mvvm-structure.sh | grep -oE '^  Humony/[^ ]+' \
 #     | sed 's/^  //' | sort) | grep -v ThirdParty
 #
 # 이 스크립트는 여러 번 돌려도 안전하다(이미 옮겨진 파일은 건너뛴다). 다만 **작업 중인
@@ -24,108 +24,108 @@ cd "$(dirname "$0")/.." || exit 1
 APPLY=0
 [[ "${1:-}" == "--apply" ]] && APPLY=1
 
-S=HarmonyUp/Sources
-T=HarmonyUp/Tests
+S=Humony/Sources
+T=Humony/Tests
 
 # "원본경로 목적지디렉터리" 목록. 목적지는 디렉터리이고, 파일명은 그대로 유지한다.
 MOVES=$(cat <<'LIST'
 # ── App: 진입점과 번들 리소스 (junCook: App/Source, App/Resource)
-HarmonyUp/Sources/HarmonyUpApp.swift                              HarmonyUp/Sources/App/Source
-HarmonyUp/Sources/HarmonyUp-Bridging-Header.h                     HarmonyUp/Sources/App/Source
-HarmonyUp/Sources/Info.plist                                      HarmonyUp/Sources/App/Source
-HarmonyUp/Sources/Resources/Fonts                                 HarmonyUp/Sources/App/Resource
-HarmonyUp/Sources/Resources/VexFlowScore                          HarmonyUp/Sources/App/Resource
+Humony/Sources/HumonyApp.swift                              Humony/Sources/App/Source
+Humony/Sources/Humony-Bridging-Header.h                     Humony/Sources/App/Source
+Humony/Sources/Info.plist                                      Humony/Sources/App/Source
+Humony/Sources/Resources/Fonts                                 Humony/Sources/App/Resource
+Humony/Sources/Resources/VexFlowScore                          Humony/Sources/App/Resource
 
 # ── Core/DesignSystem: 재사용 UI 토큰과 공용 컴포넌트 (junCook: AppColor, AppFont)
-HarmonyUp/Sources/DesignSystem/Theme.swift                        HarmonyUp/Sources/Core/DesignSystem
-HarmonyUp/Sources/DesignSystem/WaveformView.swift                 HarmonyUp/Sources/Core/DesignSystem
-HarmonyUp/Sources/Views/LoadingIndicators.swift                   HarmonyUp/Sources/Core/DesignSystem
-HarmonyUp/Sources/PitchMeterView.swift                            HarmonyUp/Sources/Core/DesignSystem
+Humony/Sources/DesignSystem/Theme.swift                        Humony/Sources/Core/DesignSystem
+Humony/Sources/DesignSystem/WaveformView.swift                 Humony/Sources/Core/DesignSystem
+Humony/Sources/Views/LoadingIndicators.swift                   Humony/Sources/Core/DesignSystem
+Humony/Sources/PitchMeterView.swift                            Humony/Sources/Core/DesignSystem
 
 # ── Core/Local: 기기 I/O 래퍼 (junCook: LocationProvider)
-HarmonyUp/Sources/PitchEngine/AudioCapture.swift                  HarmonyUp/Sources/Core/Local
-HarmonyUp/Sources/PitchEngine/RecordingPlayer.swift               HarmonyUp/Sources/Core/Local
-HarmonyUp/Sources/PitchEngine/TonePlayer.swift                    HarmonyUp/Sources/Core/Local
+Humony/Sources/PitchEngine/AudioCapture.swift                  Humony/Sources/Core/Local
+Humony/Sources/PitchEngine/RecordingPlayer.swift               Humony/Sources/Core/Local
+Humony/Sources/PitchEngine/TonePlayer.swift                    Humony/Sources/Core/Local
 
 # ── Core/Util: 전 계층이 쓰는 변환 (Int.mod 확장도 이 파일에 있다)
-HarmonyUp/Sources/PitchEngine/NoteNameConverter.swift             HarmonyUp/Sources/Core/Util
+Humony/Sources/PitchEngine/NoteNameConverter.swift             Humony/Sources/Core/Util
 
 # ── Data/DB: 영속 모델 (junCook: AppStorageKey)
-HarmonyUp/Sources/PracticeAttempt.swift                           HarmonyUp/Sources/Data/DB
-HarmonyUp/Sources/PracticeSession.swift                           HarmonyUp/Sources/Data/DB
+Humony/Sources/PracticeAttempt.swift                           Humony/Sources/Data/DB
+Humony/Sources/PracticeSession.swift                           Humony/Sources/Data/DB
 
 # ── Domain/Pitch: 음높이 검출과 판정
-HarmonyUp/Sources/PitchEngine/YINPitchDetector.swift              HarmonyUp/Sources/Domain/Pitch
-HarmonyUp/Sources/PitchEngine/PitchSmoother.swift                 HarmonyUp/Sources/Domain/Pitch
-HarmonyUp/Sources/PitchEngine/VoiceActivityDetector.swift         HarmonyUp/Sources/Domain/Pitch
-HarmonyUp/Sources/PitchEngine/PitchScorer.swift                   HarmonyUp/Sources/Domain/Pitch
+Humony/Sources/PitchEngine/YINPitchDetector.swift              Humony/Sources/Domain/Pitch
+Humony/Sources/PitchEngine/PitchSmoother.swift                 Humony/Sources/Domain/Pitch
+Humony/Sources/PitchEngine/VoiceActivityDetector.swift         Humony/Sources/Domain/Pitch
+Humony/Sources/PitchEngine/PitchScorer.swift                   Humony/Sources/Domain/Pitch
 
 # ── Domain/Melody: 채보(녹음 → 음표 시퀀스)
-HarmonyUp/Sources/PitchEngine/MelodySegmenter.swift               HarmonyUp/Sources/Domain/Melody
-HarmonyUp/Sources/PitchEngine/MelodySession.swift                 HarmonyUp/Sources/Domain/Melody
-HarmonyUp/Sources/PitchEngine/RecordingAnalyzer.swift             HarmonyUp/Sources/Domain/Melody
-HarmonyUp/Sources/PitchEngine/RhythmQuantizer.swift               HarmonyUp/Sources/Domain/Melody
-HarmonyUp/Sources/PitchEngine/TempoEstimator.swift                HarmonyUp/Sources/Domain/Melody
-HarmonyUp/Sources/PitchEngine/KeyDetector.swift                  HarmonyUp/Sources/Domain/Melody
-HarmonyUp/Sources/Views/MelodyStep.swift                          HarmonyUp/Sources/Domain/Melody
+Humony/Sources/PitchEngine/MelodySegmenter.swift               Humony/Sources/Domain/Melody
+Humony/Sources/PitchEngine/MelodySession.swift                 Humony/Sources/Domain/Melody
+Humony/Sources/PitchEngine/RecordingAnalyzer.swift             Humony/Sources/Domain/Melody
+Humony/Sources/PitchEngine/RhythmQuantizer.swift               Humony/Sources/Domain/Melody
+Humony/Sources/PitchEngine/TempoEstimator.swift                Humony/Sources/Domain/Melody
+Humony/Sources/PitchEngine/KeyDetector.swift                  Humony/Sources/Domain/Melody
+Humony/Sources/Views/MelodyStep.swift                          Humony/Sources/Domain/Melody
 
 # ── Domain/Harmony: 화음 생성과 오디오 합성
-HarmonyUp/Sources/PitchEngine/ChordGenerator.swift                HarmonyUp/Sources/Domain/Harmony
-HarmonyUp/Sources/PitchEngine/VoiceHarmonyTrackBuilder.swift      HarmonyUp/Sources/Domain/Harmony
-HarmonyUp/Sources/PitchEngine/SynthesizedHarmonyTrackBuilder.swift HarmonyUp/Sources/Domain/Harmony
-HarmonyUp/Sources/PitchEngine/ToneSynthesizer.swift               HarmonyUp/Sources/Domain/Harmony
-HarmonyUp/Sources/PitchEngine/PitchShifter.swift                  HarmonyUp/Sources/Domain/Harmony
-HarmonyUp/Sources/PitchEngine/PitchShifterWorld.swift             HarmonyUp/Sources/Domain/Harmony
-HarmonyUp/Sources/PitchEngine/PitchShifterWorldAnalysis.swift     HarmonyUp/Sources/Domain/Harmony
-HarmonyUp/Sources/PitchEngine/AudioGain.swift                     HarmonyUp/Sources/Domain/Harmony
+Humony/Sources/PitchEngine/ChordGenerator.swift                Humony/Sources/Domain/Harmony
+Humony/Sources/PitchEngine/VoiceHarmonyTrackBuilder.swift      Humony/Sources/Domain/Harmony
+Humony/Sources/PitchEngine/SynthesizedHarmonyTrackBuilder.swift Humony/Sources/Domain/Harmony
+Humony/Sources/PitchEngine/ToneSynthesizer.swift               Humony/Sources/Domain/Harmony
+Humony/Sources/PitchEngine/PitchShifter.swift                  Humony/Sources/Domain/Harmony
+Humony/Sources/PitchEngine/PitchShifterWorld.swift             Humony/Sources/Domain/Harmony
+Humony/Sources/PitchEngine/PitchShifterWorldAnalysis.swift     Humony/Sources/Domain/Harmony
+Humony/Sources/PitchEngine/AudioGain.swift                     Humony/Sources/Domain/Harmony
 
 # ── Domain/Scoring: 채점 엔진
-HarmonyUp/Sources/PitchEngine/HarmonyPracticeScorer.swift         HarmonyUp/Sources/Domain/Scoring
-HarmonyUp/Sources/PitchEngine/PracticeSummary.swift               HarmonyUp/Sources/Domain/Scoring
+Humony/Sources/PitchEngine/HarmonyPracticeScorer.swift         Humony/Sources/Domain/Scoring
+Humony/Sources/PitchEngine/PracticeSummary.swift               Humony/Sources/Domain/Scoring
 
 # ── Features/Main
-HarmonyUp/Sources/Views/RootTabView.swift                         HarmonyUp/Sources/Features/Main/View
+Humony/Sources/Views/RootTabView.swift                         Humony/Sources/Features/Main/View
 
 # ── Features/Practice (junCook: Features/Dashboard의 Model+View 구성과 같은 모양)
-HarmonyUp/Sources/Views/VexFlowScorePayload.swift                 HarmonyUp/Sources/Features/Practice/Model
-HarmonyUp/Sources/Views/PracticeView.swift                        HarmonyUp/Sources/Features/Practice/View
-HarmonyUp/Sources/Views/PracticeView+Layout.swift                 HarmonyUp/Sources/Features/Practice/View
-HarmonyUp/Sources/Views/PracticeView+Capture.swift                HarmonyUp/Sources/Features/Practice/View
-HarmonyUp/Sources/Views/PracticeView+Scoring.swift                HarmonyUp/Sources/Features/Practice/View
-HarmonyUp/Sources/Views/QuickRecordView.swift                     HarmonyUp/Sources/Features/Practice/View
-HarmonyUp/Sources/Views/VexFlowScoreView.swift                    HarmonyUp/Sources/Features/Practice/View
-HarmonyUp/Sources/Views/SheetMusicFullScreenView.swift            HarmonyUp/Sources/Features/Practice/View
+Humony/Sources/Views/VexFlowScorePayload.swift                 Humony/Sources/Features/Practice/Model
+Humony/Sources/Views/PracticeView.swift                        Humony/Sources/Features/Practice/View
+Humony/Sources/Views/PracticeView+Layout.swift                 Humony/Sources/Features/Practice/View
+Humony/Sources/Views/PracticeView+Capture.swift                Humony/Sources/Features/Practice/View
+Humony/Sources/Views/PracticeView+Scoring.swift                Humony/Sources/Features/Practice/View
+Humony/Sources/Views/QuickRecordView.swift                     Humony/Sources/Features/Practice/View
+Humony/Sources/Views/VexFlowScoreView.swift                    Humony/Sources/Features/Practice/View
+Humony/Sources/Views/SheetMusicFullScreenView.swift            Humony/Sources/Features/Practice/View
 
 # ── Features/History
-HarmonyUp/Sources/PitchEngine/PracticeStatistics.swift            HarmonyUp/Sources/Features/History/Model
-HarmonyUp/Sources/Views/HistoryView.swift                         HarmonyUp/Sources/Features/History/View
-HarmonyUp/Sources/Views/SessionDetailView.swift                   HarmonyUp/Sources/Features/History/View
+Humony/Sources/PitchEngine/PracticeStatistics.swift            Humony/Sources/Features/History/Model
+Humony/Sources/Views/HistoryView.swift                         Humony/Sources/Features/History/View
+Humony/Sources/Views/SessionDetailView.swift                   Humony/Sources/Features/History/View
 
 # ── 테스트: 소스 구조를 그대로 반영
-HarmonyUp/Tests/PitchEngineTests/NoteNameConverterTests.swift            HarmonyUp/Tests/Core/Util
-HarmonyUp/Tests/PitchEngineTests/YINPitchDetectorTests.swift             HarmonyUp/Tests/Domain/Pitch
-HarmonyUp/Tests/PitchEngineTests/PitchSmootherTests.swift                HarmonyUp/Tests/Domain/Pitch
-HarmonyUp/Tests/PitchEngineTests/VoiceActivityDetectorTests.swift        HarmonyUp/Tests/Domain/Pitch
-HarmonyUp/Tests/PitchEngineTests/PitchScorerTests.swift                  HarmonyUp/Tests/Domain/Pitch
-HarmonyUp/Tests/PitchEngineTests/MelodySegmenterTests.swift              HarmonyUp/Tests/Domain/Melody
-HarmonyUp/Tests/PitchEngineTests/MelodySessionTests.swift                HarmonyUp/Tests/Domain/Melody
-HarmonyUp/Tests/PitchEngineTests/RecordingAnalyzerTests.swift            HarmonyUp/Tests/Domain/Melody
-HarmonyUp/Tests/PitchEngineTests/RhythmQuantizerTests.swift              HarmonyUp/Tests/Domain/Melody
-HarmonyUp/Tests/PitchEngineTests/TempoEstimatorTests.swift               HarmonyUp/Tests/Domain/Melody
-HarmonyUp/Tests/PitchEngineTests/KeyDetectorTests.swift                  HarmonyUp/Tests/Domain/Melody
-HarmonyUp/Tests/PitchEngineTests/ChordGeneratorTests.swift               HarmonyUp/Tests/Domain/Harmony
-HarmonyUp/Tests/PitchEngineTests/VoiceHarmonyTrackBuilderTests.swift     HarmonyUp/Tests/Domain/Harmony
-HarmonyUp/Tests/PitchEngineTests/SynthesizedHarmonyTrackBuilderTests.swift HarmonyUp/Tests/Domain/Harmony
-HarmonyUp/Tests/PitchEngineTests/ToneSynthesizerTests.swift              HarmonyUp/Tests/Domain/Harmony
-HarmonyUp/Tests/PitchEngineTests/PitchShifterTests.swift                 HarmonyUp/Tests/Domain/Harmony
-HarmonyUp/Tests/PitchEngineTests/PitchShifterWorldTests.swift            HarmonyUp/Tests/Domain/Harmony
-HarmonyUp/Tests/PitchEngineTests/PitchShifterWorldAnalysisTests.swift    HarmonyUp/Tests/Domain/Harmony
-HarmonyUp/Tests/PitchEngineTests/AudioGainTests.swift                    HarmonyUp/Tests/Domain/Harmony
-HarmonyUp/Tests/PitchEngineTests/HarmonyPracticeScorerTests.swift        HarmonyUp/Tests/Domain/Scoring
-HarmonyUp/Tests/PitchEngineTests/PracticeSummaryTests.swift              HarmonyUp/Tests/Domain/Scoring
-HarmonyUp/Tests/PitchEngineTests/VexFlowScorePayloadTests.swift          HarmonyUp/Tests/Features/Practice
-HarmonyUp/Tests/PitchEngineTests/PracticeStatisticsTests.swift           HarmonyUp/Tests/Features/History
-HarmonyUp/Tests/PitchEngineTests/PracticeSessionTests.swift             HarmonyUp/Tests/Features/History
+Humony/Tests/PitchEngineTests/NoteNameConverterTests.swift            Humony/Tests/Core/Util
+Humony/Tests/PitchEngineTests/YINPitchDetectorTests.swift             Humony/Tests/Domain/Pitch
+Humony/Tests/PitchEngineTests/PitchSmootherTests.swift                Humony/Tests/Domain/Pitch
+Humony/Tests/PitchEngineTests/VoiceActivityDetectorTests.swift        Humony/Tests/Domain/Pitch
+Humony/Tests/PitchEngineTests/PitchScorerTests.swift                  Humony/Tests/Domain/Pitch
+Humony/Tests/PitchEngineTests/MelodySegmenterTests.swift              Humony/Tests/Domain/Melody
+Humony/Tests/PitchEngineTests/MelodySessionTests.swift                Humony/Tests/Domain/Melody
+Humony/Tests/PitchEngineTests/RecordingAnalyzerTests.swift            Humony/Tests/Domain/Melody
+Humony/Tests/PitchEngineTests/RhythmQuantizerTests.swift              Humony/Tests/Domain/Melody
+Humony/Tests/PitchEngineTests/TempoEstimatorTests.swift               Humony/Tests/Domain/Melody
+Humony/Tests/PitchEngineTests/KeyDetectorTests.swift                  Humony/Tests/Domain/Melody
+Humony/Tests/PitchEngineTests/ChordGeneratorTests.swift               Humony/Tests/Domain/Harmony
+Humony/Tests/PitchEngineTests/VoiceHarmonyTrackBuilderTests.swift     Humony/Tests/Domain/Harmony
+Humony/Tests/PitchEngineTests/SynthesizedHarmonyTrackBuilderTests.swift Humony/Tests/Domain/Harmony
+Humony/Tests/PitchEngineTests/ToneSynthesizerTests.swift              Humony/Tests/Domain/Harmony
+Humony/Tests/PitchEngineTests/PitchShifterTests.swift                 Humony/Tests/Domain/Harmony
+Humony/Tests/PitchEngineTests/PitchShifterWorldTests.swift            Humony/Tests/Domain/Harmony
+Humony/Tests/PitchEngineTests/PitchShifterWorldAnalysisTests.swift    Humony/Tests/Domain/Harmony
+Humony/Tests/PitchEngineTests/AudioGainTests.swift                    Humony/Tests/Domain/Harmony
+Humony/Tests/PitchEngineTests/HarmonyPracticeScorerTests.swift        Humony/Tests/Domain/Scoring
+Humony/Tests/PitchEngineTests/PracticeSummaryTests.swift              Humony/Tests/Domain/Scoring
+Humony/Tests/PitchEngineTests/VexFlowScorePayloadTests.swift          Humony/Tests/Features/Practice
+Humony/Tests/PitchEngineTests/PracticeStatisticsTests.swift           Humony/Tests/Features/History
+Humony/Tests/PitchEngineTests/PracticeSessionTests.swift             Humony/Tests/Features/History
 LIST
 )
 
@@ -173,8 +173,8 @@ fi
 if (( APPLY )); then
     # project.yml이 절대 경로로 가리키는 두 파일의 위치가 바뀐다.
     sed -i '' \
-        -e 's#SWIFT_OBJC_BRIDGING_HEADER: HarmonyUp/Sources/HarmonyUp-Bridging-Header.h#SWIFT_OBJC_BRIDGING_HEADER: HarmonyUp/Sources/App/Source/HarmonyUp-Bridging-Header.h#' \
-        -e 's#path: HarmonyUp/Sources/Info.plist#path: HarmonyUp/Sources/App/Source/Info.plist#' \
+        -e 's#SWIFT_OBJC_BRIDGING_HEADER: Humony/Sources/Humony-Bridging-Header.h#SWIFT_OBJC_BRIDGING_HEADER: Humony/Sources/App/Source/Humony-Bridging-Header.h#' \
+        -e 's#path: Humony/Sources/Info.plist#path: Humony/Sources/App/Source/Info.plist#' \
         project.yml
     # 빈 껍데기 디렉터리 정리
     find "$S" "$T" -type d -empty -delete
